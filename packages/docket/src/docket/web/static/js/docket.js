@@ -1,7 +1,7 @@
-/* Docket's own script: the keys, the theme and keys switches, focus around the panel, copying a locator, playing a
-   recording from a line, and the reload into the sign-in page when a session ends. Loaded as a file under the page
-   CSP: no inline script, no eval. The keys are the ones docket/web/pages.py lists; the page works without this
-   script, by its links and forms alone. The day pages are the React app's (packages/docket/web). */
+/* Docket's own script: the keys, the theme and keys switches, focus around the panel, copying a locator, and the
+   reload into the sign-in page when a session ends. Loaded as a file under the page CSP: no inline script, no eval.
+   The keys are the ones docket/web/pages.py lists; the page works without this script, by its links and forms alone.
+   The day pages, Search and the Recording page are the React app's (packages/docket/web). */
 (() => {
   "use strict";
 
@@ -24,12 +24,6 @@
     box.classList.add("on");
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => box.classList.remove("on"), 1600);
-  }
-
-  function announce() {
-    const results = document.querySelector("[data-announce]");
-    const region = document.getElementById("announce");
-    if (results && region && results.dataset.announce) region.textContent = results.dataset.announce;
   }
 
   function cycleTheme() {
@@ -124,9 +118,6 @@
     }
     if (typing || !keysOn() || document.querySelector("dialog[open]")) return;
     switch (event.key) {
-      case "/":
-        document.getElementById("query")?.focus();
-        break;
       case "j":
         move(1);
         break;
@@ -136,17 +127,6 @@
       case "o":
         if (document.activeElement?.matches("a.hit-link")) document.activeElement.click();
         break;
-      case "v":
-      case "[":
-      case "]":
-        press(event.key);
-        break;
-      case "c": {
-        const own = document.activeElement?.closest?.("[data-locator]");
-        const panel = document.querySelector("#panel [data-locator]");
-        copy((own || panel)?.dataset.locator);
-        break;
-      }
       case "?":
         openKeys();
         break;
@@ -163,41 +143,15 @@
       const heading = target.querySelector("#panel-title");
       if (heading) {
         heading.focus({ preventScroll: true });
-        target.querySelector(".line.cited")?.scrollIntoView({ block: "center" });
       } else if (lastHit) {
         const back = hits().find((a) => a.dataset.locator === lastHit);
         back?.focus();
       }
-    } else {
-      announce();
     }
-  });
-
-  // On the Recording page a line's time plays the audio from there. Without this script the same link opens the page
-  // at the line, and the player starts there by itself (#t=).
-  function play(link) {
-    const player = document.getElementById("player");
-    const line = link.closest(".segment[data-start]");
-    if (!player || !line) return false;
-    player.currentTime = Number(line.dataset.start);
-    player.play().catch(() => toast("The audio didn't start"));
-    for (const other of document.querySelectorAll(".segment.playing")) other.classList.remove("playing");
-    line.classList.add("playing");
-    history.replaceState(null, "", link.href);
-    return true;
-  }
-
-  document.addEventListener("click", (event) => {
-    const link = event.target.closest(".segment a.time");
-    if (!link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-    if (play(link)) event.preventDefault();
   });
 
   // A session that ended: htmx doesn't swap the 401 in, and the reload shows the whole sign-in page.
   document.addEventListener("htmx:response:error", (event) => {
     if (event.detail?.ctx?.response?.status === 401) location.reload();
   });
-
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", announce);
-  else announce();
 })();

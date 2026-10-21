@@ -221,8 +221,9 @@ def test_openapi_json_is_what_the_routes_say() -> None:
     assert list(document["paths"]) == [
         "/api/web/ledger", "/api/web/ledger/changed", "/api/web/ledger/open", "/api/web/ledger/panel",
         "/api/web/ledger/save", "/api/web/ledger/text", "/api/web/ledger/who", "/api/web/ledger/write",
-        "/api/web/meetings", "/api/web/meetings/panel", "/api/web/queue", "/api/web/queue/panel", "/api/web/shell",
-        "/api/web/today", "/api/web/today/panel",
+        "/api/web/meetings", "/api/web/meetings/panel", "/api/web/queue", "/api/web/queue/panel",
+        "/api/web/recording", "/api/web/search", "/api/web/search/panel", "/api/web/shell", "/api/web/today",
+        "/api/web/today/panel",
     ]  # fmt: skip
     assert set(document["components"]["schemas"]["Shell"]["required"]) == set(webapi.Shell.model_fields)
 

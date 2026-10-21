@@ -1,6 +1,7 @@
 """The navigation and the keys: every page of the design, by use, with the phase it arrives in, and the keys each
 built page answers to. The shell, the keys dialog and the footer read these, and `docket.js` handles the same keys.
-A page in the React app lists its keys in its own registry (DR-0711), so the day pages have none here.
+A page in the React app lists its keys in its own registry (DR-0711), so the day pages, Search and the Recording page
+have none here.
 
 Only built pages are links, first in their group; the others are slots that say when they come (DR-0546).
 """
@@ -112,18 +113,8 @@ PAGES: tuple[Page, ...] = tuple(page for group in NAV for page in group.pages)
 Keys = tuple[tuple[tuple[str, ...], str], ...]
 
 # (keys, what they do), in the order the dialog lists them. Each key is one `KeyboardEvent.key` value.
-KEYS: Keys = (
-    (("/",), "to the query box"),
-    (("j", "k"), "next, previous hit"),
-    (("Enter", "o"), "open the hit beside the results"),
-    (("v",), "verify the summary, and back"),
-    (("[", "]"), "less, more raw around the hit"),
-    (("c",), "copy the hit's locator"),
-    (("Escape",), "close the panel, or leave the box"),
-    (("?",), "these keys"),
-)
 SYNC_KEYS: Keys = ((("?",), "these keys"),)
-# The Staging page's list and panel answer Search's keys for moving and opening; no key writes.
+# The Staging page's list and panel answer keys for moving and opening; no key writes.
 STAGING_KEYS: Keys = (
     (("j", "k"), "next, previous record"),
     (("Enter", "o"), "open the record beside the list"),
@@ -142,26 +133,20 @@ CURATE_KEYS: Keys = (
 # The keys each page answers, which its dialog lists, and the few its footer names, as (keys, a word).
 # The Settings page has nothing to move through; no key writes.
 SETTINGS_KEYS: Keys = ((("?",), "these keys"),)
-# The Recording page's lines are plain links, which Tab reaches; no key of its own yet.
-RECORDING_KEYS: Keys = ((("?",), "these keys"),)
 # The Briefs page's briefs and lines are plain links too.
 BRIEFS_KEYS: Keys = ((("?",), "these keys"),)
 
 PAGE_KEYS: dict[str, Keys] = {
-    "search": KEYS,
     "sync": SYNC_KEYS,
     "staging": STAGING_KEYS,
     "curate": CURATE_KEYS,
     "settings": SETTINGS_KEYS,
-    "recording": RECORDING_KEYS,
     "briefs": BRIEFS_KEYS,
 }
 HINTS: dict[str, Keys] = {
-    "search": ((("/",), "search"), (("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
     "sync": ((("?",), "keys"),),
     "staging": ((("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
     "curate": ((("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
     "settings": ((("?",), "keys"),),
-    "recording": ((("?",), "keys"),),
     "briefs": ((("?",), "keys"),),
 }

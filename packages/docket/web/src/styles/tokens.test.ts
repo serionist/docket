@@ -36,6 +36,7 @@ const checks: [string, string, number][] = [
   ...["discuss", "claude", "me", "chase", ...KINDS].map((v): [string, string, number] => [v, `${v}-wash`, TEXT]),
   ["on-green", "green", TEXT],
   ["ink", "red-wash", TEXT],
+  ["ink", "mark", TEXT],
   ["red", "red-wash", TEXT],
   ["sheet", "ink", TEXT],
   ...["control", "green"].flatMap((edge) => GROUNDS.map((ground): [string, string, number] => [edge, ground, EDGE])),

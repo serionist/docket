@@ -1,6 +1,36 @@
 {
   "components": {
     "schemas": {
+      "AnchorLink": {
+        "description": "An anchor at a doc line's end, with where it opens; none for one that names no record.",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "AnchorLink",
+        "type": "object"
+      },
       "Attendee": {
         "properties": {
           "href": {
@@ -17,6 +47,47 @@
           "href"
         ],
         "title": "Attendee",
+        "type": "object"
+      },
+      "Audio": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "speech": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speech"
+          },
+          "why": {
+            "enum": [
+              "forgotten",
+              "not-fetched",
+              "staged",
+              "held",
+              "withheld",
+              "recut",
+              "cut-by-characters",
+              "not-downloaded",
+              "no-key",
+              "stored"
+            ],
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "why",
+          "message"
+        ],
+        "title": "Audio",
         "type": "object"
       },
       "Body": {
@@ -307,6 +378,25 @@
         "title": "Chip",
         "type": "object"
       },
+      "Chosen": {
+        "description": "A filter or a boost the search holds, with the same search without it.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "url"
+        ],
+        "title": "Chosen",
+        "type": "object"
+      },
       "Day": {
         "properties": {
           "ahead": {
@@ -387,6 +477,29 @@
         "title": "DayMeetingLine",
         "type": "object"
       },
+      "DocChoice": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "on": {
+            "title": "On",
+            "type": "boolean"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "on"
+        ],
+        "title": "DocChoice",
+        "type": "object"
+      },
       "Due": {
         "properties": {
           "text": {
@@ -412,6 +525,70 @@
           }
         },
         "title": "Due",
+        "type": "object"
+      },
+      "Facet": {
+        "properties": {
+          "favours": {
+            "title": "Favours",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FacetItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "favours",
+          "items"
+        ],
+        "title": "Facet",
+        "type": "object"
+      },
+      "FacetItem": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "on": {
+            "title": "On",
+            "type": "boolean"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "count",
+          "on",
+          "url"
+        ],
+        "title": "FacetItem",
         "type": "object"
       },
       "Filters": {
@@ -598,6 +775,351 @@
           "op"
         ],
         "title": "HistoryLine",
+        "type": "object"
+      },
+      "HitGroup": {
+        "properties": {
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/HitLine"
+            },
+            "title": "Hits",
+            "type": "array"
+          },
+          "icon": {
+            "enum": [
+              "recording",
+              "thread",
+              "record",
+              "doc"
+            ],
+            "title": "Icon",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SummaryLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "when": {
+            "title": "When",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "icon",
+          "title",
+          "source",
+          "when",
+          "summary",
+          "hits"
+        ],
+        "title": "HitGroup",
+        "type": "object"
+      },
+      "HitLine": {
+        "properties": {
+          "also": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Also",
+            "type": "array"
+          },
+          "entities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Entities",
+            "type": "array"
+          },
+          "found": {
+            "title": "Found",
+            "type": "string"
+          },
+          "icon": {
+            "enum": [
+              "recording",
+              "thread",
+              "record",
+              "doc"
+            ],
+            "title": "Icon",
+            "type": "string"
+          },
+          "locator": {
+            "title": "Locator",
+            "type": "string"
+          },
+          "recording": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recording"
+          },
+          "snippet": {
+            "items": {
+              "$ref": "#/components/schemas/Piece"
+            },
+            "title": "Snippet",
+            "type": "array"
+          },
+          "stretch": {
+            "title": "Stretch",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "when": {
+            "title": "When",
+            "type": "string"
+          },
+          "who": {
+            "title": "Who",
+            "type": "string"
+          }
+        },
+        "required": [
+          "locator",
+          "icon",
+          "stretch",
+          "when",
+          "who",
+          "snippet",
+          "entities",
+          "found",
+          "also",
+          "url"
+        ],
+        "title": "HitLine",
+        "type": "object"
+      },
+      "HitPanel": {
+        "properties": {
+          "around": {
+            "default": 0,
+            "title": "Around",
+            "type": "integer"
+          },
+          "around_text": {
+            "default": "",
+            "title": "Around Text",
+            "type": "string"
+          },
+          "citing": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Citing",
+            "type": "array"
+          },
+          "close": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close"
+          },
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          },
+          "legacy": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Legacy",
+            "type": "array"
+          },
+          "less": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Less"
+          },
+          "locator": {
+            "title": "Locator",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "raw",
+              "verify",
+              "error"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "more": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "More"
+          },
+          "no_summary": {
+            "default": "",
+            "title": "No Summary",
+            "type": "string"
+          },
+          "pairs": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/VerifiedLine"
+            },
+            "title": "Pairs",
+            "type": "array"
+          },
+          "problems": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "recording": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recording"
+          },
+          "resolved": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved"
+          },
+          "spans": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SpanView"
+            },
+            "title": "Spans",
+            "type": "array"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SummaryDoc"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "unit": {
+            "default": "",
+            "title": "Unit",
+            "type": "string"
+          },
+          "verify": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verify"
+          },
+          "verify_label": {
+            "default": "",
+            "title": "Verify Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "locator"
+        ],
+        "title": "HitPanel",
+        "type": "object"
+      },
+      "HitRead": {
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "panel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HitPanel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "waiting": {
+            "title": "Waiting",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canonical",
+          "panel",
+          "waiting"
+        ],
+        "title": "HitRead",
         "type": "object"
       },
       "ItemPanel": {
@@ -1566,6 +2088,49 @@
         "title": "Opened",
         "type": "object"
       },
+      "OtherTranscript": {
+        "properties": {
+          "rid": {
+            "title": "Rid",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rid",
+          "url"
+        ],
+        "title": "OtherTranscript",
+        "type": "object"
+      },
+      "PairRow": {
+        "description": "One stretch of time: the recorder's lines in it, and Whisper's whose middle falls in them.",
+        "properties": {
+          "left": {
+            "items": {
+              "$ref": "#/components/schemas/TranscriptLine"
+            },
+            "title": "Left",
+            "type": "array"
+          },
+          "right": {
+            "items": {
+              "$ref": "#/components/schemas/TranscriptLine"
+            },
+            "title": "Right",
+            "type": "array"
+          }
+        },
+        "required": [
+          "left",
+          "right"
+        ],
+        "title": "PairRow",
+        "type": "object"
+      },
       "Panel": {
         "properties": {
           "canonical": {
@@ -1593,6 +2158,29 @@
           "missing"
         ],
         "title": "Panel",
+        "type": "object"
+      },
+      "ParagraphView": {
+        "properties": {
+          "mark": {
+            "title": "Mark",
+            "type": "boolean"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "n",
+          "text",
+          "mark"
+        ],
+        "title": "ParagraphView",
         "type": "object"
       },
       "People": {
@@ -1635,6 +2223,25 @@
           "also"
         ],
         "title": "Person",
+        "type": "object"
+      },
+      "Piece": {
+        "description": "A stretch of a snippet's text, marked when it is one of the query's words.",
+        "properties": {
+          "mark": {
+            "default": false,
+            "title": "Mark",
+            "type": "boolean"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "Piece",
         "type": "object"
       },
       "Point": {
@@ -1867,6 +2474,187 @@
         "title": "Queue",
         "type": "object"
       },
+      "RecordingRead": {
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "view": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordingView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "waiting": {
+            "title": "Waiting",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canonical",
+          "view",
+          "waiting"
+        ],
+        "title": "RecordingRead",
+        "type": "object"
+      },
+      "RecordingView": {
+        "properties": {
+          "audio": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Audio"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "docs": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/DocChoice"
+            },
+            "title": "Docs",
+            "type": "array"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link"
+          },
+          "link_label": {
+            "default": "",
+            "title": "Link Label",
+            "type": "string"
+          },
+          "locator": {
+            "default": "",
+            "title": "Locator",
+            "type": "string"
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "meta": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Meta",
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "start",
+              "recording",
+              "held",
+              "missing",
+              "other"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "no_summary": {
+            "default": "",
+            "title": "No Summary",
+            "type": "string"
+          },
+          "no_transcript": {
+            "default": "",
+            "title": "No Transcript",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "others": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/OtherTranscript"
+            },
+            "title": "Others",
+            "type": "array"
+          },
+          "pair": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TranscriptPair"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "player": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Player"
+          },
+          "problems": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "rid": {
+            "default": "",
+            "title": "Rid",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SummaryDoc"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "transcripts": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/TranscriptView"
+            },
+            "title": "Transcripts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "RecordingView",
+        "type": "object"
+      },
       "Refused": {
         "description": "Why a read or a write was refused, in the writer's or the reader's own words; an add refused as a look-alike\nnames the open items it looks like, so the page can offer Add anyway (DR-0710).",
         "properties": {
@@ -1887,6 +2675,78 @@
           "error"
         ],
         "title": "Refused",
+        "type": "object"
+      },
+      "Results": {
+        "properties": {
+          "announce": {
+            "default": "",
+            "title": "Announce",
+            "type": "string"
+          },
+          "candidates": {
+            "default": 0,
+            "title": "Candidates",
+            "type": "integer"
+          },
+          "chips": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Chosen"
+            },
+            "title": "Chips",
+            "type": "array"
+          },
+          "drops": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Chosen"
+            },
+            "title": "Drops",
+            "type": "array"
+          },
+          "facets": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Facet"
+            },
+            "title": "Facets",
+            "type": "array"
+          },
+          "groups": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HitGroup"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "hits": {
+            "default": 0,
+            "title": "Hits",
+            "type": "integer"
+          },
+          "more": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "More"
+          },
+          "reading": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Reading",
+            "type": "array"
+          }
+        },
+        "title": "Results",
         "type": "object"
       },
       "Row": {
@@ -2043,6 +2903,86 @@
         "title": "SavedMeeting",
         "type": "object"
       },
+      "SearchRead": {
+        "description": "The results the Search page lists for its URL, with what the start and the waiting state say.",
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "index_line": {
+            "title": "Index Line",
+            "type": "string"
+          },
+          "locator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locator"
+          },
+          "results": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Results"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "waiting": {
+            "title": "Waiting",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canonical",
+          "results",
+          "locator",
+          "waiting",
+          "index_line"
+        ],
+        "title": "SearchRead",
+        "type": "object"
+      },
+      "SegmentView": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "locator": {
+            "title": "Locator",
+            "type": "string"
+          },
+          "mark": {
+            "title": "Mark",
+            "type": "boolean"
+          },
+          "speaker": {
+            "title": "Speaker",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "locator",
+          "speaker",
+          "text",
+          "mark"
+        ],
+        "title": "SegmentView",
+        "type": "object"
+      },
       "Shell": {
         "description": "What the sidebar shows beside its pages (DR-0708): the counts and marks, and the vault, machine and index line\nat its foot. A count is None when its part of the vault doesn't read; `problem` says why the vault doesn't open.",
         "properties": {
@@ -2160,6 +3100,190 @@
           "title"
         ],
         "title": "Snooze",
+        "type": "object"
+      },
+      "SpanView": {
+        "properties": {
+          "anchor": {
+            "title": "Anchor",
+            "type": "string"
+          },
+          "head": {
+            "title": "Head",
+            "type": "string"
+          },
+          "mark": {
+            "title": "Mark",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "paragraphs": {
+            "items": {
+              "$ref": "#/components/schemas/ParagraphView"
+            },
+            "title": "Paragraphs",
+            "type": "array"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "rid": {
+            "title": "Rid",
+            "type": "string"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/SegmentView"
+            },
+            "title": "Segments",
+            "type": "array"
+          },
+          "versions": {
+            "title": "Versions",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rid",
+          "anchor",
+          "head",
+          "versions",
+          "problem",
+          "segments",
+          "paragraphs",
+          "mark"
+        ],
+        "title": "SpanView",
+        "type": "object"
+      },
+      "SummaryDoc": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/SummaryLine"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "rev": {
+            "title": "Rev",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "rev",
+          "title",
+          "lines"
+        ],
+        "title": "SummaryDoc",
+        "type": "object"
+      },
+      "SummaryLine": {
+        "properties": {
+          "anchors": {
+            "items": {
+              "$ref": "#/components/schemas/AnchorLink"
+            },
+            "title": "Anchors",
+            "type": "array"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "cited": {
+            "default": false,
+            "title": "Cited",
+            "type": "boolean"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "style": {
+            "enum": [
+              "heading",
+              "bullet",
+              "text",
+              "blank"
+            ],
+            "title": "Style",
+            "type": "string"
+          }
+        },
+        "required": [
+          "n",
+          "body",
+          "style",
+          "anchors"
+        ],
+        "title": "SummaryLine",
+        "type": "object"
+      },
+      "SummaryLink": {
+        "description": "The doc that summarises a group, opened beside the results.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "rev": {
+            "title": "Rev",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "type",
+          "rev",
+          "url"
+        ],
+        "title": "SummaryLink",
         "type": "object"
       },
       "SyncLine": {
@@ -2397,6 +3521,123 @@
         "title": "TodayPanel",
         "type": "object"
       },
+      "TranscriptLine": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "cut": {
+            "default": false,
+            "title": "Cut",
+            "type": "boolean"
+          },
+          "mark": {
+            "title": "Mark",
+            "type": "boolean"
+          },
+          "speaker": {
+            "title": "Speaker",
+            "type": "string"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "target": {
+            "default": false,
+            "title": "Target",
+            "type": "boolean"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "url",
+          "speaker",
+          "text",
+          "mark"
+        ],
+        "title": "TranscriptLine",
+        "type": "object"
+      },
+      "TranscriptPair": {
+        "description": "The recorder's transcript and Whisper's side by side, aligned by time (DR-0570).",
+        "properties": {
+          "left": {
+            "$ref": "#/components/schemas/TranscriptView"
+          },
+          "right": {
+            "$ref": "#/components/schemas/TranscriptView"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/PairRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "left",
+          "right",
+          "rows"
+        ],
+        "title": "TranscriptPair",
+        "type": "object"
+      },
+      "TranscriptView": {
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/TranscriptLine"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "meta": {
+            "title": "Meta",
+            "type": "string"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "rid": {
+            "title": "Rid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rid",
+          "meta",
+          "lines",
+          "problem"
+        ],
+        "title": "TranscriptView",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -2435,6 +3676,40 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VerifiedLine": {
+        "description": "A summary line beside the raw its anchors point at; flagged when they don't all resolve.",
+        "properties": {
+          "flagged": {
+            "title": "Flagged",
+            "type": "boolean"
+          },
+          "line": {
+            "$ref": "#/components/schemas/SummaryLine"
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "spans": {
+            "items": {
+              "$ref": "#/components/schemas/SpanView"
+            },
+            "title": "Spans",
+            "type": "array"
+          }
+        },
+        "required": [
+          "line",
+          "spans",
+          "problems",
+          "flagged"
+        ],
+        "title": "VerifiedLine",
         "type": "object"
       },
       "Viewer": {
@@ -2954,6 +4229,90 @@
           }
         },
         "summary": "Queue Panel"
+      }
+    },
+    "/api/web/recording": {
+      "get": {
+        "operationId": "recording_api_web_recording_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Recording"
+      }
+    },
+    "/api/web/search": {
+      "get": {
+        "operationId": "search_api_web_search_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Search"
+      }
+    },
+    "/api/web/search/panel": {
+      "get": {
+        "operationId": "search_panel_api_web_search_panel_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HitRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Search Panel"
       }
     },
     "/api/web/shell": {

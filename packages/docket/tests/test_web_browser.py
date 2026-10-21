@@ -16,16 +16,13 @@ from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 import pytest
 from briefs_kit import NORTHWIND, briefs_template
 from browser_kit import live
 from curate_kit import curate_vault
 from decisions_kit import BRIEF, decisions_template
-from docket_testkit import index_template
 from playwright.sync_api import Page, expect, sync_playwright
-from recording_kit import CRANE, NOTE, TOUR, recording_template, with_audio
 from settings_kit import settings_template
 from staging_kit import staging_vault
 from sync_kit import as_structured, as_text, memo, sync_template
@@ -33,24 +30,11 @@ from sync_kit import as_structured, as_text, memo, sync_template
 from docket.service import client
 from docket.service.client import call_json
 from docket.vault.config import CONFIG_FILE, VaultConfig
-from docket.vault.vault import Vault
 from docket.web import settings as settings_routes
 from docket.web.settings_view import Facts
 
 BROWSER = os.environ.get("DOCKET_TEST_BROWSER", "")
 pytestmark = pytest.mark.skipif(not BROWSER, reason="drives a real browser: DOCKET_TEST_BROWSER=chrome or msedge")
-
-
-@pytest.fixture(scope="module")
-def template(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return index_template(tmp_path_factory)
-
-
-@pytest.fixture
-def service(template: Path, tmp_path: Path) -> Iterator[tuple[int, str]]:
-    """The real service on a free port, in a thread: its port and its token."""
-    shutil.copytree(template, tmp_path / "vault")
-    yield from _serve(tmp_path / "vault")
 
 
 @pytest.fixture(scope="module")
@@ -90,18 +74,6 @@ def curate_service(tmp_path: Path) -> Iterator[tuple[int, str]]:
 
 
 @pytest.fixture(scope="module")
-def recording_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return recording_template(tmp_path_factory)
-
-
-@pytest.fixture
-def recording_service(recording_project: Path, tmp_path: Path) -> Iterator[tuple[int, str]]:
-    """The real service over the invented recording vault: calls kept as Plaud keeps them, a note on one."""
-    shutil.copytree(recording_project, tmp_path / "vault")
-    yield from _serve(tmp_path / "vault")
-
-
-@pytest.fixture(scope="module")
 def briefs_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return briefs_template(tmp_path_factory)
 
@@ -126,112 +98,6 @@ def decisions_service(decisions_project: Path, tmp_path: Path) -> Iterator[tuple
 
 
 _serve = live
-
-
-def test_the_search_page_in_a_browser(service: tuple[int, str], tmp_path: Path) -> None:
-    port, token = service
-    shots = Path(os.environ.get("DOCKET_TEST_SCREENSHOTS") or tmp_path)
-    shots.mkdir(parents=True, exist_ok=True)
-    link = client.call("POST", "/api/session", token=token, at=port)
-    assert link is not None
-    errors: list[str] = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
-        page = browser.new_page(viewport={"width": 1440, "height": 900})
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        # A console error names no URL; these do, so a failure says which request it was.
-        page.on("requestfailed", lambda r: errors.append(f"request failed: {r.method} {r.url} ({r.failure})"))
-        page.on(
-            "response", lambda r: errors.append(f"{r.status} {r.request.method} {r.url}") if r.status >= 400 else None
-        )
-        base = f"http://127.0.0.1:{port}"
-        page.goto(f"{link.body['url']}&next=/search")
-        page.wait_for_url(f"{base}/search")
-        page.evaluate("document.fonts.ready")
-        assert page.evaluate("document.fonts.check('13px Inter') && document.fonts.check('13px \"JetBrains Mono\"')")
-
-        # A query typed and sent: the results swap in, the address bar holds the canonical URL.
-        page.fill("#query", "Nortwin")
-        page.press("#query", "Enter")
-        page.wait_for_selector(".groups")
-        assert page.url.endswith("/search?query=Nortwin")
-        expect(page.locator("#announce")).to_contain_text("hits in")
-
-        # Escape leaves the box with the query kept; j moves through the hits; Enter opens one beside the results.
-        page.keyboard.press("Escape")
-        assert page.input_value("#query") == "Nortwin"
-        # Titles that name Northwind lead (DR-0231), so the call isn't the first group: j walks on to it, a new hit each
-        # time.
-        page.keyboard.press("j")
-        seen = [page.evaluate("document.activeElement.dataset.locator")]
-        while not seen[-1].startswith("r:calls:") and len(seen) < 8:
-            page.keyboard.press("j")
-            seen.append(page.evaluate("document.activeElement.dataset.locator"))
-        hit = seen[-1]
-        assert hit.startswith("r:calls:") and len(seen) > 1 and len(set(seen)) == len(seen)
-        page.keyboard.press("Enter")
-        page.wait_for_selector("#panel .raw-column .segment")
-        expect(page.locator("#panel .summary-column")).to_be_visible()
-        assert page.evaluate("document.activeElement.id") == "panel-title"
-        page.screenshot(path=str(shots / "search-panel.png"))
-
-        # v verifies the summary; Escape closes the panel and gives the focus back to the hit.
-        page.keyboard.press("v")
-        page.wait_for_selector("#panel .pairs")
-        page.keyboard.press("Escape")
-        expect(page.locator("#panel .panel")).to_have_count(0)
-        assert page.evaluate("document.activeElement.dataset.locator") == hit
-
-        # Back restores the search before.
-        page.fill("#query", "fleet")
-        page.press("#query", "Enter")
-        page.wait_for_url(f"{base}/search?query=fleet")
-        page.go_back()
-        page.wait_for_url(f"{base}/search?query=Nortwin")
-        expect(page.locator("#query")).to_have_value("Nortwin")
-        page.screenshot(path=str(shots / "search-results.png"))
-
-        # The theme switch, light then dark, survives a reload.
-        page.click('[data-action="theme"]')
-        page.click('[data-action="theme"]')
-        page.reload()
-        assert page.evaluate("document.documentElement.dataset.theme") == "dark"
-        page.screenshot(path=str(shots / "search-dark.png"))
-
-        # A narrow window wraps and never scrolls sideways: the close button and the switches stay in view.
-        for width, height in ((800, 900), (390, 844)):
-            page.set_viewport_size({"width": width, "height": height})
-            page.goto(f"{base}/search?query=Nortwin&hit={quote(hit)}")
-            page.wait_for_selector("#panel .panel")
-            wide = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.clientWidth]")
-            assert wide[0] == wide[1], (width, wide)
-            for control in ("#panel .close", '[data-action="theme"]', '[data-action="keys"]'):
-                box = page.locator(control).bounding_box()
-                assert box is not None
-                assert box["x"] >= 0 and box["x"] + box["width"] <= wide[1], (width, control, box)
-            if width == 800:
-                page.screenshot(path=str(shots / "search-800.png"))
-        page.set_viewport_size({"width": 1440, "height": 900})
-        page.goto(f"{base}/search?query=Nortwin")
-        page.wait_for_selector(".groups")
-        assert not errors, errors
-
-        # With the single keys switched off, j moves nothing.
-        page.keyboard.press("?")
-        page.click('[data-action="keys-switch"]')
-        page.click('[data-action="close-dialog"]')
-        page.locator("body").click(position={"x": 5, "y": 500})
-        page.keyboard.press("j")
-        assert page.evaluate("document.activeElement.classList.contains('hit-link')") is False
-
-        # A session that ended: the next search reloads into the whole sign-in page, naming the page to come back to.
-        page.context.clear_cookies()
-        page.fill("#query", "pallet labels")
-        page.press("#query", "Enter")
-        page.wait_for_selector("text=Open Docket from a terminal on this machine")
-        assert page.locator("code").inner_text() == 'docket open "/search?query=Nortwin"'
-        browser.close()
 
 
 def test_the_sync_page_in_a_browser(sync_service: tuple[int, str], tmp_path: Path) -> None:
@@ -588,102 +454,6 @@ def test_windows_paths_wrap_on_the_settings_page_at_phone_width(
         _fits(page, "#source-documents", "section[aria-labelledby='models-title']")
         page.screenshot(path=str(shots / "settings-windows-390.png"), full_page=True)
         browser.close()
-
-
-def _seeking(request: Any) -> bool:
-    return "/recording/audio" in request.url and request.failure == "net::ERR_ABORTED"
-
-
-def test_the_recording_page_in_a_browser(recording_service: tuple[int, str], tmp_path: Path) -> None:
-    port, token = recording_service
-    shots = Path(os.environ.get("DOCKET_TEST_SCREENSHOTS") or tmp_path)
-    shots.mkdir(parents=True, exist_ok=True)
-    link = client.call("POST", "/api/session", token=token, at=port)
-    assert link is not None
-    errors: list[str] = []
-    base = f"http://127.0.0.1:{port}"
-    note = f"{base}/recording?rid={CRANE}&doc={NOTE}"
-    with sync_playwright() as p:
-        browser = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
-        page = browser.new_page(viewport={"width": 1440, "height": 900})
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        # A media element cancels its own requests as it seeks and reads ahead: that isn't a failure.
-        page.on("requestfailed", lambda r: None if _seeking(r) else errors.append(f"request failed: {r.url}"))
-        page.on(
-            "response", lambda r: errors.append(f"{r.status} {r.request.method} {r.url}") if r.status >= 400 else None
-        )
-        page.goto(f"{link.body['url']}&next=/recording")
-        page.wait_for_url(f"{base}/recording")
-
-        # The start takes a locator; the page opens at its time.
-        page.fill("#rid", f"r:{CRANE}@01:40")
-        page.press("#rid", "Enter")
-        expect(page.locator("h1")).to_have_text("Harbour crane check")
-        expect(page.locator("li.segment.mark").first).to_contain_text("01:40")
-        expect(page.locator(".audio")).to_contain_text("No audio stored yet")
-
-        # A summary line's anchor marks the lines it points at, and the address holds the rid and the time.
-        page.goto(note)
-        page.click("a.anchor:has-text('@00:40-01:39')")
-        page.wait_for_url(f"{note}&at=00:40-01:39#at")
-        expect(page.locator("li.segment.mark")).to_have_count(3)
-        expect(page.locator(".summary-column .line.cited")).to_contain_text("west crane needs a new brake pad")
-        page.screenshot(path=str(shots / "recording.png"), full_page=True)
-
-        # At phone width the columns stack, the link scrolls the marked line into view, and nothing scrolls sideways.
-        page.set_viewport_size({"width": 390, "height": 844})
-        page.goto(note)
-        page.click("a.anchor:has-text('@02:40')")
-        page.wait_for_url(f"{note}&at=02:40#at")
-        expect(page.locator("li#at")).to_be_in_viewport()
-        _fits(page, ".recording-locator", ".summary-column", "li#at")
-        page.screenshot(path=str(shots / "recording-390.png"))
-        page.set_viewport_size({"width": 1440, "height": 900})
-        page.click('[data-action="theme"]')
-        page.click('[data-action="theme"]')
-        page.reload()
-        assert page.evaluate("document.documentElement.dataset.theme") == "dark"
-        page.screenshot(path=str(shots / "recording-dark.png"), full_page=True)
-        page.click('[data-action="theme"]')
-
-        # The tour's audio stored, and Whisper's transcript beside the recorder's: a line's time plays from there.
-        with_audio(Vault.open(tmp_path / "vault"))
-        tour = f"{base}/recording?rid={TOUR}"
-        page.goto(tour)
-        expect(page.locator("table.aligned tbody tr")).to_have_count(4)
-        expect(page.locator("table.aligned tbody tr:nth-child(3) li.segment.cut")).to_have_count(2)
-        page.click("table.aligned tbody tr:nth-child(2) td:first-child a.time")
-        page.wait_for_function(
-            "() => { const p = document.getElementById('player'); return p && !p.paused && p.currentTime >= 20; }"
-        )
-        assert page.url == f"{tour}&at=00:20#at"
-        expect(page.locator("li.segment.playing")).to_contain_text("The new gate opens on Friday.")
-        page.screenshot(path=str(shots / "recording-player.png"), full_page=True)
-        assert not errors, errors
-        browser.close()
-
-        # Without JavaScript the page and its links work the same.
-        again = client.call("POST", "/api/session", token=token, at=port)
-        assert again is not None
-        scriptless = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
-        bare = scriptless.new_context(java_script_enabled=False, viewport={"width": 1280, "height": 900})
-        plain = bare.new_page()
-        plain.goto(f"{again.body['url']}&next=/recording")
-        plain.wait_for_url(f"{base}/recording")
-        plain.goto(note)
-        plain.click("li.segment:nth-child(5) a.time")
-        plain.wait_for_url(f"{note}&at=01:20#at")
-        expect(plain.locator("li.segment.mark")).to_have_text([re.compile("01:20")])
-        expect(plain.locator(".summary-column .line.cited")).to_have_count(1)
-        plain.screenshot(path=str(shots / "recording-no-script.png"), full_page=True)
-        # The player starts at the line its link opens, by its own #t=.
-        plain.goto(tour)
-        plain.click("table.aligned tbody tr:nth-child(2) td:first-child a.time")
-        plain.wait_for_url(f"{tour}&at=00:20#at")
-        expect(plain.locator("#player")).to_have_attribute("src", re.compile(r"#t=20\.000$"))
-        plain.screenshot(path=str(shots / "recording-player-no-script.png"), full_page=True)
-        scriptless.close()
 
 
 def test_the_briefs_page_in_a_browser(briefs_service: tuple[int, str], tmp_path: Path) -> None:

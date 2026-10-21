@@ -226,6 +226,8 @@
     "packages/docket/tests/test_web_browser_ledger.py",
     "packages/docket/tests/test_web_browser_meetings.py",
     "packages/docket/tests/test_web_browser_queue.py",
+    "packages/docket/tests/test_web_browser_recording.py",
+    "packages/docket/tests/test_web_browser_search.py",
     "packages/docket/tests/test_web_browser_today.py",
     "packages/docket/tests/test_web_curate.py",
     "packages/docket/tests/test_web_curate_view.py",

@@ -210,6 +210,8 @@
     "packages/docket/tests/test_web_browser_ledger.py": 0.0,
     "packages/docket/tests/test_web_browser_meetings.py": 0.0,
     "packages/docket/tests/test_web_browser_queue.py": 0.0,
+    "packages/docket/tests/test_web_browser_recording.py": 0.0,
+    "packages/docket/tests/test_web_browser_search.py": 0.0,
     "packages/docket/tests/test_web_browser_today.py": 0.0,
     "packages/docket/tests/test_web_curate.py": 9.4,
     "packages/docket/tests/test_web_curate_view.py": 0.0,
@@ -457,6 +459,8 @@
     "packages/docket/tests/test_web_browser_ledger.py": 0.0,
     "packages/docket/tests/test_web_browser_meetings.py": 0.0,
     "packages/docket/tests/test_web_browser_queue.py": 0.0,
+    "packages/docket/tests/test_web_browser_recording.py": 0.0,
+    "packages/docket/tests/test_web_browser_search.py": 0.0,
     "packages/docket/tests/test_web_browser_today.py": 0.0,
     "packages/docket/tests/test_web_curate.py": 5.5,
     "packages/docket/tests/test_web_curate_view.py": 0.0,
@@ -495,11 +499,13 @@
     "tools/devkit/tests/test_yamlio.py": 0.0
   },
   "Linux browser": {
-    "packages/docket/tests/test_web_browser.py": 58.8,
+    "packages/docket/tests/test_web_browser.py": 38.0,
     "packages/docket/tests/test_web_browser_design.py": 28.8,
     "packages/docket/tests/test_web_browser_ledger.py": 58.3,
     "packages/docket/tests/test_web_browser_meetings.py": 30.0,
     "packages/docket/tests/test_web_browser_queue.py": 26.4,
+    "packages/docket/tests/test_web_browser_recording.py": 24.0,
+    "packages/docket/tests/test_web_browser_search.py": 26.0,
     "packages/docket/tests/test_web_browser_today.py": 32.0
   },
   "Windows": {
@@ -712,6 +718,8 @@
     "packages/docket/tests/test_web_browser_ledger.py": 0.0,
     "packages/docket/tests/test_web_browser_meetings.py": 0.0,
     "packages/docket/tests/test_web_browser_queue.py": 0.0,
+    "packages/docket/tests/test_web_browser_recording.py": 0.0,
+    "packages/docket/tests/test_web_browser_search.py": 0.0,
     "packages/docket/tests/test_web_browser_today.py": 0.0,
     "packages/docket/tests/test_web_curate.py": 10.5,
     "packages/docket/tests/test_web_curate_view.py": 0.0,

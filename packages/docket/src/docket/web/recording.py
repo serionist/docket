@@ -1,19 +1,25 @@
-"""The Recording page: `/recording` is always a whole page, and its links are plain links (DR-0544).
+"""The Recording page's reads under /api/web (DR-0709): the recording its URL names, and its stored audio for the
+page's player (DR-0777).
 
-The page reads the raw log, the hold list and the docs in this process, through recall's own reads, and writes
-nothing: GET only, as Search's routes are. The summary search attaches comes from the index, so the page waits for an
-update as a search does. A value the URL can't hold, or a `DocketError`, is the page's own error state; anything else is
-logged as its type and frames and answered with the error page, as on the other pages (DR-0170).
+| Route | What |
+|---|---|
+| `GET /recording` | the recording, its summary and transcripts, why no audio plays or the player, the canonical URL |
+| `GET`, `HEAD /recording/audio` | the stored audio by byte range, only while the reader says ok |
+
+The read takes the raw log, the hold list and the docs in this process, through recall's own reads, and writes
+nothing. The summary search attaches comes from the index, so the read waits for an update as a search does, and an
+index still being built answers `waiting`. A value the URL can't hold, or a `DocketError`, answers 400 with its words;
+anything else is logged as its type and frames and answers 500 with no detail.
 """
 
 from __future__ import annotations
 
 import asyncio
 import dataclasses
-from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request
+from pydantic import BaseModel
 from starlette.responses import Response
 
 from docket import index, recall
@@ -27,10 +33,19 @@ from docket.vault import forgotten, holds
 from docket.vault.records import RID, is_native_id, owning_id, source_name_problem
 from docket.vault.spans import RawLookup, is_transcript
 from docket.vault.vault import Vault
-from docket.web import audio, templating
-from docket.web.recording_state import RecordingState, RecordingStateError
+from docket.web import audio
+from docket.web.day_api import Refused, safely
+from docket.web.recording_state import RecordingState
 from docket.web.recording_view import Facts, NoAudio, RecordingView, build, is_recording
-from docket.web.shell import shell
+
+
+class RecordingRead(BaseModel):
+    # The URL as the server writes it, without the `#at` a link adds (DR-0704).
+    canonical: str
+    # None while the index is being built.
+    view: RecordingView | None
+    # Why the index can't answer yet; the page asks again in 5 s.
+    waiting: str
 
 
 def _held(vault: Vault, rid: str) -> bool:
@@ -134,25 +149,32 @@ def _audio(vault: Vault, rid: str, lookup: RawLookup) -> NoAudio:
     return AUDIO[reader.state_of(vault, rid, raw=lookup)]
 
 
-def _page(
-    context: dict[str, Any], view: RecordingView | None, state: RecordingState, problem: str = "", *, status: int = 200
-) -> Response:
-    page = context | {"view": view, "state": state, "problem": problem}
-    return templating.page("recording/page.html", page, status=status)
-
-
 def router(service: Service) -> APIRouter:
-    web = APIRouter()
+    api = APIRouter()
 
     plain = audio.Plain()
 
-    @web.api_route("/recording/audio", methods=["GET", "HEAD"], include_in_schema=False)
+    async def read(request: Request) -> RecordingRead:
+        state = RecordingState.read(request.query_params)
+        if state.rid is None:
+            return RecordingRead(canonical=state.url(), view=RecordingView(mode="start"), waiting="")
+        try:
+            await service.updater.fresh()
+            facts = await asyncio.to_thread(gather, service.vault(), state)
+        except IndexBuildingError as e:
+            return RecordingRead(canonical=state.url(), view=None, waiting=str(e))
+        return RecordingRead(canonical=state.url(), view=build(_with_speech(service, facts), state), waiting="")
+
+    @api.get("/recording", response_model=RecordingRead, responses={400: {"model": Refused}})
+    async def recording(request: Request) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
+        return await safely(request, lambda: read(request))
+
+    @api.api_route("/recording/audio", methods=["GET", "HEAD"], include_in_schema=False)
     async def recording_audio(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        """The recording's stored audio for the page's player (#159, DR-0576): only while the reader says ok, read
+        """The recording's stored audio for the page's player (#159, DR-0777): only while the reader says ok, read
         again on every request; decrypted through it, kept a minute for the next range; served by byte range with no
-        caching. The browser's session only: the token never fetches it. Nothing of it is logged."""
-        if request.headers.get("authorization") is not None:
-            return audio.token_refused()
+        caching. The browser's session only, as every /api/web route: the token never fetches it. Nothing of it is
+        logged."""
         rid = request.query_params.get("rid", "")
         if RID.match(rid) is None or not is_native_id(rid.partition(":")[2]):
             return audio.refused("give a recording's rid")
@@ -168,31 +190,4 @@ def router(service: Service) -> APIRouter:
             return audio.head(size, media_type)
         return audio.ranged(data, media_type, request.headers.get("range"))
 
-    @web.get("/recording", include_in_schema=False)
-    async def recording_page(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        async def answer() -> Response:
-            context = shell(service, request, "Recording", current="recording")
-            try:
-                state = RecordingState.read(request.query_params)
-            except RecordingStateError as e:
-                return _page(context, None, RecordingState(), str(e), status=400)
-            if state.rid is None:
-                return _page(context, RecordingView(mode="start"), state)
-            try:
-                await service.updater.fresh()
-                facts = await asyncio.to_thread(gather, service.vault(), state)
-            except IndexBuildingError as e:
-                return _page(context, None, state, str(e), status=503)
-            except DocketError as e:
-                return _page(context, None, state, str(e), status=400)
-            view = build(_with_speech(service, facts), state)
-            context["title"] = f"{view.title} - Recording"
-            return _page(context, view, state, status=404 if view.mode in ("missing", "other") else 200)
-
-        def failed() -> Response:
-            context = shell(None, request, "Something failed", current="recording")
-            return templating.page("error.html", context, status=500)
-
-        return await templating.safely(request, "/recording", answer, failed)
-
-    return web
+    return api

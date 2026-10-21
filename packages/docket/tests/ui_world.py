@@ -12,6 +12,9 @@ it (its own config and state folders, the failing keyring), which is where the f
 | `today` | the meetings world with a second live source, mail, both synced this morning, a follow-up later today |
 | | and an item on the meeting under way, so Today's next meeting has prep of both kinds |
 | `stale` | today's world with chat synced three days ago and mail never, so both are due a sync |
+| `search` | the index fixture: calls, chat, mail and the calendar with their minutes, notes and entities, indexed |
+| `recording` | recording_kit's calls, one held, the yard tour's audio stored with Whisper's transcript beside the |
+| | recorder's and a stretch cut, a correction on it, indexed |
 
 Invented people only: Ada Example, Ben Sample and Cleo Example.
 """
@@ -28,8 +31,9 @@ from typing import Any
 
 from briefs_kit import brief
 from day_kit import ZONE, add, day, seed
-from docket_testkit import fixture_records, make_config, make_record
+from docket_testkit import fill_index_vault, fixture_records, index_config, make_config, make_record
 from ledger_kit import write_ops
+from recording_kit import TOUR_POLISHED, doc, fill_recording_vault, recording_sources, with_audio
 from staging_kit import mail, memo, transcript
 
 from docket import recall
@@ -38,10 +42,11 @@ from docket.ledger import ops, store
 from docket.service.token import Tokens
 from docket.vault import cursors
 from docket.vault.config import SourceConfig, VaultConfig
+from docket.vault.docstore import DocStore
 from docket.vault.gate import Gate
 from docket.vault.vault import Vault
 
-WORLDS = ("empty", "week", "meetings", "today", "stale")
+WORLDS = ("empty", "week", "meetings", "today", "stale", "search", "recording")
 # The worlds Today is shot on: the meetings world, a second live source and the day's syncs.
 DAYS = ("today", "stale")
 MACHINE = "ui-box"
@@ -56,7 +61,15 @@ Book the room first, then the caterer.
 
 
 def config(world: str = "week") -> VaultConfig:
+    if world == "search":
+        found = index_config()
+        found.primary_machine = MACHINE
+        return found
     made = make_config()
+    if world == "recording":
+        made.primary_machine = MACHINE
+        made.sources = recording_sources()
+        return made
     made.primary_machine = MACHINE
     # A live source: one the capture hook posts for, so the Sync page and the sidebar mark it due until it syncs.
     made.sources["chat"] = SourceConfig(tools=["read_channel"])
@@ -222,6 +235,35 @@ def the_day(vault: Vault, world: str) -> None:
         cursors.save(vault, source, cursors.Cursor(mark=mark))
 
 
+TOUR_NOTE = "recording-note:2026-10-14-yard-tour"
+CORRECTION = "correction:2026-10-14-yard-tour"
+THURSDAY = f"- The new gate opens on Thursday. [r:{TOUR_POLISHED}@00:20]"
+
+
+def recordings(vault: Vault) -> None:
+    """recording_kit's calls with the tour's audio stored and Whisper's transcript beside the recorder's, its note
+    and a correction of the note's line on the gate, so the Recording page shows a doc of each kind it lists."""
+    fill_recording_vault(vault)
+    with_audio(vault)
+    note = [
+        "# Yard tour",
+        "",
+        "- Ada welcomed everyone to the yard tour. @00:00",
+        THURSDAY,
+        f"- The fence is done by the end of the month. [r:{TOUR_POLISHED}@01:00]",
+    ]
+    recall.doc_put(vault, doc(TOUR_NOTE, [TOUR_POLISHED], note))
+    stored = DocStore(vault).get(TOUR_NOTE)
+    assert stored is not None
+    n = next(n for n, line in stored.lines() if line == THURSDAY)
+    fix = [
+        "# Yard tour: a correction",
+        "",
+        f"- The gate opens on Friday, as Ben said. [r:{TOUR_POLISHED}@00:20] [d:{TOUR_NOTE}@{stored.meta.rev}#{n}]",
+    ]
+    recall.doc_put(vault, doc(CORRECTION, [TOUR_POLISHED], fix))
+
+
 def build(folder: Path, world: str) -> Vault:
     if world not in WORLDS:
         raise ValueError(f"no world {world!r}; the worlds are {', '.join(WORLDS)}")
@@ -238,12 +280,17 @@ def build(folder: Path, world: str) -> Vault:
         meetings(vault)
     if world in DAYS:
         the_day(vault, world)
+    if world == "search":
+        fill_index_vault(vault)
+    if world == "recording":
+        recordings(vault)
     if world in ("meetings", *DAYS):
         # The op files an hour old, as files no write just wrote are, so the index takes them as settled and a read
         # finds nothing to catch up.
         hour_ago = time.time_ns() - 3600 * 10**9
         for path in (vault.root / ops.OPS_DIR).iterdir():
             os.utime(path, ns=(hour_ago, hour_ago))
+    if world in ("meetings", "search", "recording", *DAYS):
         index_build.rebuild(vault)
     return vault
 

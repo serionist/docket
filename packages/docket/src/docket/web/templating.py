@@ -10,19 +10,15 @@ from __future__ import annotations
 
 import json
 import logging
-import re
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from importlib.resources import files
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
-from markupsafe import Markup, escape
+from markupsafe import Markup
 from starlette.datastructures import QueryParams
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, PlainTextResponse, Response
 
-from docket.index.query import SPLIT_FIRST, SPLIT_SECOND
-from docket.index.text import HYPHENS, has_letter
-from docket.plaintext import WORD, fold
 from docket.web import assets, pages
 from docket.web.display import at, clock
 
@@ -39,20 +35,17 @@ STYLESHEETS = (
     "css/tokens.css",
     "css/base.css",
     "css/components.css",
-    "css/search.css",
+    "css/panes.css",
     "css/sync.css",
     "css/staging.css",
     "css/curate.css",
     "css/settings.css",
-    "css/recording.css",
     "css/briefs.css",
 )
 # A page that posts a form says so: under the service's floor, no-referrer, a browser sends Origin: null on a
 # same-origin post (Fetch's rule for serializing a request's origin), and the Guard refuses that as cross-origin.
 POSTS_FORMS = "same-origin"
 SCRIPTS = (assets.HTMX, "js/docket.js")
-# A word of a snippet is marked when it is a query word, or starts with one this long (an inflected form).
-MARK_PREFIX = 4
 # A form's body: a few hundred fields at most. Anything bigger isn't a page's.
 MAX_BODY = 64 * 1024
 FORM = "application/x-www-form-urlencoded"
@@ -65,38 +58,6 @@ def icon(name: str) -> Markup:
     return Markup(  # noqa: S704 - the paths are the package's own icons.json, never content
         f'<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{ICONS[name]}</svg>'
     )
-
-
-def _pair(text: str, a: re.Match[str], b: re.Match[str], wanted: set[str]) -> bool:
-    """Two words in a row joining into a query word (DR-0282): a hyphenated pair always; a spaced one only with the
-    halves a split has, since the page can't see which splits the index admitted (DR-0281)."""
-    if fold(a.group(0)) + fold(b.group(0)) not in wanted:
-        return False
-    if text[a.end() : b.start()] in HYPHENS:
-        return True
-    first, second = a.group(0), b.group(0)
-    return len(first) >= SPLIT_FIRST and len(second) >= SPLIT_SECOND and has_letter(first) and has_letter(second)
-
-
-def marked(text: str, terms: Iterable[str]) -> Markup:
-    """A snippet with the query's words marked, built from escaped pieces so a record's markup stays text."""
-    wanted = {fold(t) for t in terms if t}
-    found = list(WORD.finditer(text))
-    marks: set[int] = set()
-    for i, m in enumerate(found):
-        word = fold(m.group(0))
-        if word in wanted or any(len(t) >= MARK_PREFIX and word.startswith(t) for t in wanted):
-            marks.add(i)
-        if i + 1 < len(found) and _pair(text, m, found[i + 1], wanted):
-            marks |= {i, i + 1}
-    out: list[str] = []
-    last = 0
-    for i in sorted(marks):
-        m = found[i]
-        out += [str(escape(text[last : m.start()])), f"<mark>{escape(m.group(0))}</mark>"]
-        last = m.end()
-    out.append(str(escape(text[last:])))
-    return Markup("".join(out))  # noqa: S704 - every piece is escaped above
 
 
 def _environment() -> Environment:
@@ -118,7 +79,7 @@ def _environment() -> Environment:
         "scripts": SCRIPTS,
         "nav": pages.NAV,
     }
-    filters: dict[str, object] = {"at": at, "clock": clock, "marked": marked}
+    filters: dict[str, object] = {"at": at, "clock": clock}
     for name, value in names.items():
         env.globals[name] = value  # pyright: ignore[reportUnknownMemberType]
     for name, value in filters.items():

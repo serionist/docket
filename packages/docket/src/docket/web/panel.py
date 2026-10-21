@@ -1,35 +1,38 @@
-"""The panel beside the results: a hit's summary next to the raw it came from, or a summary verified line by line.
+"""The panel beside the results: a hit's raw next to the summary that covers it, or a summary verified line by line,
+as models the app's JSON read answers (DR-0709).
 
 | The open locator | Shows |
 |---|---|
-| a record, `r:<rid>@12:08` | its group's summary, the lines pointing here marked, next to its raw read with `around` |
+| a record, `r:<rid>@12:08` | its raw read with `around`, and its group's summary with the lines pointing here marked |
 | a record, with `verify=1` | that summary verified: each line next to the raw its anchors point at |
 | a doc id | the doc verified, its hit lines only when `lines` names them |
 | a legacy note, or a doc's path | the note, next to the raw it covers |
 
 Everything goes through `docket.service.calls`, so the panel reads what the MCP tools read. Text from records and
-docs is data: the templates escape it, and no link is made from it.
+docs is data: the app shows it as text, and no link is made from it. Each link is the Search page's URL for the state
+it opens.
 """
 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
 from typing import Literal
 from zoneinfo import ZoneInfo
+
+from pydantic import BaseModel
 
 from docket import index
 from docket.errors import DocketError
 from docket.recall import DocView
 from docket.service import calls
 from docket.service.state import Service
+from docket.service.writer import IndexBuildingError
 from docket.vault.anchors import Anchor, AnchorError, format_anchor, paragraphs, parse_locator, trailing_anchors
 from docket.vault.processed import DOC_TYPES
 from docket.vault.spans import Span
 from docket.web.display import at, clock
 from docket.web.recording_state import RecordingState, time_at
 from docket.web.state import MAX_AROUND, SearchState
-from docket.web.views import Link, panel_link
 
 Mode = Literal["raw", "verify", "error"]
 Style = Literal["heading", "bullet", "text", "blank"]
@@ -38,23 +41,24 @@ UNITS = {"time": "min", "part": "paragraph", "record": "message"}
 RECORDING_KINDS = ("recording", "transcript")
 
 
-@dataclass(frozen=True)
-class AnchorLink:
+class AnchorLink(BaseModel):
+    """An anchor at a doc line's end, with where it opens; none for one that names no record."""
+
     text: str
-    link: Link | None
+    url: str | None = None
+    title: str = ""
 
 
-@dataclass(frozen=True)
-class LineView:
+class SummaryLine(BaseModel):
     n: int
     body: str
     style: Style
     anchors: list[AnchorLink]
+    # It points at what the page marks: the hit, or the transcript lines the Recording page's `at` marks.
     cited: bool = False
 
 
-@dataclass(frozen=True)
-class SegmentView:
+class SegmentView(BaseModel):
     at: str
     locator: str
     speaker: str
@@ -62,15 +66,13 @@ class SegmentView:
     mark: bool
 
 
-@dataclass(frozen=True)
-class ParagraphView:
+class ParagraphView(BaseModel):
     n: int
     text: str
     mark: bool
 
 
-@dataclass(frozen=True)
-class SpanView:
+class SpanView(BaseModel):
     rid: str
     anchor: str
     head: str
@@ -83,49 +85,47 @@ class SpanView:
     note: str | None = None
 
 
-@dataclass(frozen=True)
-class PairView:
-    line: LineView
+class VerifiedLine(BaseModel):
+    """A summary line beside the raw its anchors point at; flagged when they don't all resolve."""
+
+    line: SummaryLine
     spans: list[SpanView]
     problems: list[str]
-
-    @property
-    def flagged(self) -> bool:
-        """A line whose anchors don't all resolve: a problem of its own, or one in the raw it points at."""
-        return bool(self.problems) or any(s.problem for s in self.spans)
+    flagged: bool
 
 
-@dataclass(frozen=True)
-class SummaryView:
+class SummaryDoc(BaseModel):
     id: str
     type: str
     rev: int
     title: str
-    lines: list[LineView]
+    lines: list[SummaryLine]
 
 
-@dataclass
-class PanelView:
+class HitPanel(BaseModel):
     mode: Mode
     locator: str
     title: str = ""
-    close: Link | None = None
+    # The same search with the panel closed.
+    close: str | None = None
     resolved: str | None = None
-    problems: list[str] = field(default_factory=list[str])
-    summary: SummaryView | None = None
+    problems: list[str] = []
+    summary: SummaryDoc | None = None
     no_summary: str = ""
-    citing: list[str] = field(default_factory=list[str])
-    legacy: list[str] = field(default_factory=list[str])
-    spans: list[SpanView] = field(default_factory=list[SpanView])
-    pairs: list[PairView] = field(default_factory=list[PairView])
+    citing: list[str] = []
+    legacy: list[str] = []
+    spans: list[SpanView] = []
+    pairs: list[VerifiedLine] = []
     around: int = 0
     unit: str = ""
-    less: Link | None = None
-    more: Link | None = None
-    verify: Link | None = None
+    # How much raw shows either side of the hit, as the page says it: "± 1 min", "± 2 messages".
+    around_text: str = ""
+    less: str | None = None
+    more: str | None = None
+    verify: str | None = None
     verify_label: str = ""
     error: str = ""
-    # The open recording or transcript on the Recording page, at the hit's time (DR-0544).
+    # The open recording or transcript on the Recording page, at the hit's time (DR-0776).
     recording: str | None = None
 
 
@@ -158,23 +158,28 @@ def line_parts(text: str) -> tuple[Style, str, list[Anchor]]:
     return style, body, trailing.anchors
 
 
-def line_view(n: int, text: str, covers: list[str], state: SearchState, cited: bool = False) -> LineView:
+def line_view(n: int, text: str, covers: list[str], state: SearchState, cited: bool = False) -> SummaryLine:
     """A doc line: its words, and its anchors as links that open their raw in the panel."""
     style, body, found = line_parts(text)
     anchors: list[AnchorLink] = []
     for anchor in found:
         target = _anchor_locator(anchor, covers)
-        to = None if target is None else panel_link(state.search_only().but(hit=target))
-        anchors.append(AnchorLink(anchor.token, to))
-    return LineView(n, body, style, anchors, cited)
+        to = None if target is None else state.search_only().but(hit=target).url()
+        title = "" if target is None else f"Open the raw at {anchor.token}"
+        anchors.append(AnchorLink(text=anchor.token, url=to, title=title))
+    return SummaryLine(n=n, body=body, style=style, anchors=anchors, cited=cited)
 
 
-def summary_view(doc: DocView, state: SearchState, cited: set[int] | None = None) -> SummaryView:
+def title_of(lines: list[SummaryLine], fallback: str) -> str:
+    """A doc's title: its first heading, else what the caller names it by."""
+    return next((line.body for line in lines if line.style == "heading"), fallback)
+
+
+def summary_view(doc: DocView, state: SearchState, cited: set[int] | None = None) -> SummaryDoc:
     start = frontmatter_end(doc)
     lines = [line_view(line.n, line.text, doc.covers, state, line.n in (cited or set())) for line in doc.lines]
     body = [line for line in lines if line.n > start]
-    title = next((line.body for line in body if line.style == "heading"), doc.id)
-    return SummaryView(doc.id, doc.type, doc.rev, title, body)
+    return SummaryDoc(id=doc.id, type=doc.type, rev=doc.rev, title=title_of(body, doc.id), lines=body)
 
 
 def span_view(span: Span, tz: ZoneInfo, hit: Anchor | None = None, whole: bool = False) -> SpanView:
@@ -188,30 +193,45 @@ def span_view(span: Span, tz: ZoneInfo, hit: Anchor | None = None, whole: bool =
             mark = seg.start_ms < (hit.last + 1) * 1000 and seg.end_ms > hit.start * 1000
         second = seg.start_ms // 1000
         locator = format_anchor(span.rid, "time", second)[1:-1]
-        segments.append(SegmentView(clock(second), locator, seg.speaker or "?", seg.text, mark))
+        segments.append(
+            SegmentView(at=clock(second), locator=locator, speaker=seg.speaker or "?", text=seg.text, mark=mark)
+        )
     paras: list[ParagraphView] = []
     if not segments and span.text:
         first = span.paragraphs[0] if span.paragraphs else 1
         for i, text in enumerate(paragraphs(span.text)):
             n = first + i
             mark = hit is not None and hit.kind == "part" and hit.start <= n <= hit.last
-            paras.append(ParagraphView(n, text, mark))
-    return SpanView(span.rid, span.anchor, head, versions, span.problem, segments, paras, whole, span.note)
+            paras.append(ParagraphView(n=n, text=text, mark=mark))
+    return SpanView(
+        rid=span.rid,
+        anchor=span.anchor,
+        head=head,
+        versions=versions,
+        problem=span.problem,
+        segments=segments,
+        paragraphs=paras,
+        mark=whole,
+        note=span.note,
+    )
 
 
-def _around(state: SearchState, kind: str, view: PanelView) -> None:
+def _around(state: SearchState, kind: str, view: HitPanel) -> None:
     view.around = state.around
     view.unit = UNITS[kind]
+    plural = "s" if state.around != 1 and view.unit != "min" else ""
+    view.around_text = f"\N{PLUS-MINUS SIGN} {state.around} {view.unit}{plural}"
     if state.around > 0:
-        view.less = panel_link(state.but(around=state.around - 1))
+        view.less = state.but(around=state.around - 1).url()
     if state.around < MAX_AROUND:
-        view.more = panel_link(state.but(around=state.around + 1))
+        view.more = state.but(around=state.around + 1).url()
 
 
-async def build(service: Service, state: SearchState, tz: ZoneInfo) -> PanelView:
-    """The panel for the open locator; a locator that doesn't resolve is the panel's own error."""
+async def build(service: Service, state: SearchState, tz: ZoneInfo) -> HitPanel:
+    """The panel for the open locator; a locator that doesn't resolve is the panel's own error. An index still being
+    built is no error of the hit's: it goes to the caller, which says the page waits."""
     target = state.open_hit or ""
-    view = PanelView(mode="raw", locator=target, close=panel_link(state.search_only()))
+    view = HitPanel(mode="raw", locator=target, close=state.search_only().url())
     try:
         locator = parse_locator(target, DOC_TYPES)
         if locator.kind == "doc":
@@ -222,12 +242,14 @@ async def build(service: Service, state: SearchState, tz: ZoneInfo) -> PanelView
             await _record(service, state, locator.value, locator.anchor, view=view, tz=tz)
     except AnchorError as e:
         view.mode, view.error = "error", str(e)
+    except IndexBuildingError:
+        raise
     except DocketError as e:
         view.mode, view.error = "error", str(e)
     return view
 
 
-async def _note(service: Service, state: SearchState, target: str, view: PanelView, tz: ZoneInfo) -> None:
+async def _note(service: Service, state: SearchState, target: str, view: HitPanel, tz: ZoneInfo) -> None:
     """A legacy note, or a doc by its path: the note next to the raw it covers, or the raw at its time."""
     found, _ = await calls.read(service, target, view="both", around=state.around)
     view.resolved = found.resolved
@@ -238,7 +260,7 @@ async def _note(service: Service, state: SearchState, target: str, view: PanelVi
     view.spans = [span_view(s, tz) for s in found.spans]
 
 
-async def _doc(service: Service, state: SearchState, doc_id: str, view: PanelView) -> None:
+async def _doc(service: Service, state: SearchState, doc_id: str, view: HitPanel) -> None:
     read, _ = await calls.read(service, doc_id, view="summary")
     doc = read.doc
     if doc is None:  # pragma: no cover - a doc id always reads as a doc, or raises
@@ -252,23 +274,31 @@ async def _doc(service: Service, state: SearchState, doc_id: str, view: PanelVie
     lines = None if state.verify or not state.lines else state.line_numbers()
     await _pairs(service, doc_id, doc, lines=lines, state=state, view=view)
     if state.lines:
-        view.verify = panel_link(state.but(verify=not state.verify))
+        view.verify = state.but(verify=not state.verify).url()
         view.verify_label = "Only the hit's lines" if state.verify else "Verify every line"
 
 
 async def _pairs(
-    service: Service, doc_id: str, doc: DocView, *, lines: list[int] | None, state: SearchState, view: PanelView
+    service: Service, doc_id: str, doc: DocView, *, lines: list[int] | None, state: SearchState, view: HitPanel
 ) -> None:
     checked, _ = await calls.verify(service, doc_id, lines=lines)
     view.mode = "verify"
     tz = ZoneInfo(service.vault().config.owner.time_zone)
     for line in checked.lines:
         spans = [span_view(s, tz) for s in line.spans]
-        view.pairs.append(PairView(line_view(line.n, line.text, doc.covers, state), spans, list(line.problems)))
+        problems = list(line.problems)
+        view.pairs.append(
+            VerifiedLine(
+                line=line_view(line.n, line.text, doc.covers, state),
+                spans=spans,
+                problems=problems,
+                flagged=bool(problems) or any(s.problem for s in spans),
+            )
+        )
 
 
 async def _record(
-    service: Service, state: SearchState, rid: str, anchor: Anchor | None, *, view: PanelView, tz: ZoneInfo
+    service: Service, state: SearchState, rid: str, anchor: Anchor | None, *, view: HitPanel, tz: ZoneInfo
 ) -> None:
     vault = service.vault()
     # The summary comes from the index, so it waits for an update as a search does: a panel opened first thing, from
@@ -276,7 +306,7 @@ async def _record(
     await service.updater.fresh()
     ref = await asyncio.to_thread(index.summary_for, vault, rid)
     if state.verify:
-        view.verify = panel_link(state.but(verify=False))
+        view.verify = state.but(verify=False).url()
         view.verify_label = "Back to the raw"
         if ref is None:
             view.title = rid
@@ -309,5 +339,5 @@ async def _record(
     if read.doc is None:  # pragma: no cover - a doc id always reads as a doc, or raises
         raise DocketError(f"no doc {ref.id}")
     view.summary = summary_view(read.doc, state, cited)
-    view.verify = panel_link(state.but(verify=True))
+    view.verify = state.but(verify=True).url()
     view.verify_label = "Verify the summary"

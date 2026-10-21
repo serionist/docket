@@ -1,17 +1,25 @@
+"""The Search page's panel read, signed in, on the index fixture (DR-0709, DR-0775): a hit's raw beside the summary that
+covers it, the raw around it widened and narrowed, a doc verified line by line, the Recording page's link, and the
+panel's own errors. Each link is the Search page's URL for the state it opens."""
+
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 import pytest
 from docket_testkit import PLAUD, POLISHED, index_template, make_record, note, plaud_records
-from docket_webkit import a11y_problems, html_problems, parse, signed_in
+from docket_webkit import signed_in
 from starlette.testclient import TestClient
 
 from docket import recall
 from docket.documents import records
+from docket.service.app import ServiceApp
+from docket.service.writer import IndexUpdater
 from docket.vault.processed import DocMeta, ProcessedDoc
 from docket.vault.records import RawRecord
 from docket.vault.vault import Vault
@@ -19,6 +27,7 @@ from docket.vault.vault import Vault
 CALL = "r:calls:rec-0100@01:50-03:20"
 OFFER = "r:mail:<offer-1@northwind.example>#1-4"
 MESSAGE = "r:chat:C0OPS/1791400800.000100"
+API = "/api/web/search/panel"
 
 
 @pytest.fixture(scope="module")
@@ -32,106 +41,113 @@ def client(template: Path, tmp_path: Path) -> Iterator[TestClient]:
         yield found
 
 
-def panel(client: TestClient, hit: str, extra: str = "", status: int = 200) -> str:
-    answer = client.get(f"/search/panel?hit={quote(hit)}{extra}")
-    assert answer.status_code == status, answer.text
-    assert not html_problems(answer.text)
-    assert not a11y_problems(answer.text, whole=False)
-    return answer.text
+def panel(client: TestClient, hit: str, extra: str = "") -> dict[str, Any]:
+    answer = client.get(f"{API}?hit={quote(hit)}{extra}")
+    assert answer.status_code == 200, answer.text
+    found = answer.json()["panel"]
+    assert found is not None
+    return found
 
 
-def test_a_transcript_hit_puts_its_summary_next_to_its_raw(client: TestClient) -> None:
-    tree = parse(panel(client, CALL))
-    summary = tree.find("section", class_="summary-column")
-    assert "minutes:2026-10-07-supplier-call, minutes, rev 1" in summary.text()
-    cited = summary.find_all("div", class_="cited")
-    assert [line.attrs["data-line"] for line in cited] == ["14"]
-    assert "points at this hit" in cited[0].text()
-    anchor = cited[0].find("a", class_="anchor")
-    assert anchor.text() == "@01:50-02:30"
-    assert "hit=r:calls:rec-0100@01:50-02:30" in anchor.attrs["href"]
-    assert "Also pointing here:" in summary.text()
-    assert "recording-note:2026-10-07-supplier-call rev 1, line 16" in summary.text()
-    raw = tree.find("section", class_="raw-column")
-    segments = raw.find_all("li", class_="segment")
-    marked = [s.find("button", class_="time").text() for s in segments if "mark" in s.attrs["class"].split()]
+def cited(lines: list[dict[str, Any]]) -> list[int]:
+    return [line["n"] for line in lines if line["cited"]]
+
+
+def segments(found: dict[str, Any]) -> list[dict[str, Any]]:
+    return [seg for span in found["spans"] for seg in span["segments"]]
+
+
+def text_of(found: dict[str, Any]) -> str:
+    """Everything the panel says, as one text, to find a sentence in."""
+    parts = [found["title"], found["no_summary"], *found["citing"], *found["legacy"], *found["problems"]]
+    for span in found["spans"]:
+        parts += [span["head"], span["versions"], span["note"] or "", span["problem"] or ""]
+        parts += [s["text"] for s in span["segments"]] + [p["text"] for p in span["paragraphs"]]
+    if found["summary"]:
+        parts += [line["body"] for line in found["summary"]["lines"]]
+    return "\n".join(parts)
+
+
+def test_a_transcript_hit_puts_its_raw_beside_its_summary(client: TestClient) -> None:
+    found = panel(client, CALL)
+    summary = found["summary"]
+    assert (summary["id"], summary["type"], summary["rev"]) == ("minutes:2026-10-07-supplier-call", "minutes", 1)
+    assert cited(summary["lines"]) == [14]
+    line = next(line for line in summary["lines"] if line["cited"])
+    anchor = line["anchors"][0]
+    assert anchor["text"] == "@01:50-02:30"
+    assert anchor["url"] == "/search?hit=r:calls:rec-0100@01:50-02:30"
+    assert "recording-note:2026-10-07-supplier-call rev 1, line 16" in found["citing"]
+    marked = [s["at"] for s in segments(found) if s["mark"]]
     assert marked[0] == "01:50"
     assert all("01:50" <= t <= "03:20" for t in marked)
-    assert any(s.find("button").text() < "01:50" for s in segments if s not in raw.find_all("li", class_="mark"))
-    assert segments[0].find("button").attrs["data-locator"].startswith("r:calls:rec-0100@")
-    assert "1 min" in tree.find("span", class_="around").text()
-    assert tree.find("a", data_key="v").text() == "Verify the summary"
+    assert any(s["at"] < "01:50" for s in segments(found) if not s["mark"])
+    assert segments(found)[0]["locator"].startswith("r:calls:rec-0100@")
+    assert found["around_text"] == "\N{PLUS-MINUS SIGN} 1 min"
+    assert (found["verify_label"], found["verify"]) == ("Verify the summary", f"/search?hit={CALL}&verify=1")
 
 
 def test_a_recording_hit_links_to_the_recording_page_and_another_hit_doesn_t(
     client: TestClient, tmp_path: Path
 ) -> None:
-    tree = parse(panel(client, CALL))
-    link = next(a for a in tree.find_all("a", class_="button") if "On the Recording page" in a.text())
-    assert link.attrs["href"] == "/recording?rid=calls:rec-0100&at=01:50-03:20#at"
-    assert "hx-get" not in link.attrs
-    assert not [a for a in parse(panel(client, OFFER)).find_all("a") if "Recording page" in a.text()]
+    assert panel(client, CALL)["recording"] == "/recording?rid=calls:rec-0100&at=01:50-03:20#at"
+    assert panel(client, OFFER)["recording"] is None
     # A recording kept without segments of its own, as Plaud's mapper keeps one, opens there whole.
     Vault.open(tmp_path / "vault").write_run("plaud", plaud_records("transaction_polish"))
-    whole = parse(panel(client, f"r:{PLAUD}"))
-    assert [a.attrs["href"] for a in whole.find_all("a") if "Recording page" in a.text()] == [f"/recording?rid={PLAUD}"]
+    assert panel(client, f"r:{PLAUD}")["recording"] == f"/recording?rid={PLAUD}"
 
 
 def test_around_widens_the_raw(client: TestClient) -> None:
     def count(around: int) -> int:
-        return len(parse(panel(client, CALL, f"&around={around}")).find_all("li", class_="segment"))
+        return len(segments(panel(client, CALL, f"&around={around}")))
 
     assert count(0) < count(1) < count(3)
-    tree = parse(panel(client, CALL, "&around=0"))
-    assert not tree.find_all("a", data_key="[")
+    least = panel(client, CALL, "&around=0")
+    assert least["less"] is None
     # One minute is the default, so the URL leaves it out.
-    assert tree.find("a", data_key="]").attrs["href"] == f"/search?hit={CALL}"
-    top = parse(panel(client, CALL, "&around=30"))
-    assert not top.find_all("a", data_key="]")
-    assert top.find("a", data_key="[").attrs["hx-get"].endswith("&around=29")
+    assert least["more"] == f"/search?hit={CALL}"
+    top = panel(client, CALL, "&around=30")
+    assert top["more"] is None
+    assert top["less"] == f"/search?hit={CALL}&around=29"
 
 
 def test_a_message_hit_shows_its_neighbours_with_itself_marked(client: TestClient) -> None:
-    tree = parse(panel(client, MESSAGE))
-    spans = tree.find_all("article", class_="span")
-    assert len(spans) == 3
-    assert [("mark" in s.attrs["class"].split()) for s in spans] == [False, True, False]
-    assert "cold-rated" in spans[1].text()
-    assert "1 message" in tree.find("span", class_="around").text()
-    assert "2 messages" in parse(panel(client, MESSAGE, "&around=2")).find("span", class_="around").text()
+    found = panel(client, MESSAGE)
+    assert [span["mark"] for span in found["spans"]] == [False, True, False]
+    assert any("cold-rated" in p["text"] for p in found["spans"][1]["paragraphs"])
+    assert found["around_text"] == "\N{PLUS-MINUS SIGN} 1 message"
+    assert panel(client, MESSAGE, "&around=2")["around_text"] == "\N{PLUS-MINUS SIGN} 2 messages"
 
 
 def test_a_mail_paragraph_hit_numbers_the_paragraphs_and_marks_its_own(client: TestClient) -> None:
-    tree = parse(panel(client, OFFER, "&around=0"))
-    paras = tree.find_all("li", class_="paragraph")
-    assert [p.attrs["value"] for p in paras] == ["1", "2", "3", "4"]
-    assert all("mark" in p.attrs["class"].split() for p in paras)
-    assert "0 paragraphs" in tree.find("span", class_="around").text()
-    assert "day rate" in tree.text()
+    found = panel(client, OFFER, "&around=0")
+    paras = [p for span in found["spans"] for p in span["paragraphs"]]
+    assert [p["n"] for p in paras] == [1, 2, 3, 4]
+    assert all(p["mark"] for p in paras)
+    assert found["around_text"] == "\N{PLUS-MINUS SIGN} 0 paragraphs"
+    assert "day rate" in text_of(found)
 
 
 def test_a_doc_hit_verifies_its_lines_and_then_every_line(client: TestClient) -> None:
     doc = "recording-note:2026-10-07-supplier-call"
-    tree = parse(panel(client, doc, "&lines=21-22"))
-    pairs = tree.find_all("li", class_="pair")
-    assert [p.find("div", class_="line").attrs["data-line"] for p in pairs] == ["21", "22"]
-    assert all(p.find_all("article", class_="span") for p in pairs)
-    toggle = tree.find("a", data_key="v")
-    assert toggle.text() == "Verify every line"
-    every = parse(panel(client, doc, "&lines=21-22&verify=1"))
-    assert len(every.find_all("li", class_="pair")) > 2
-    assert every.find("a", data_key="v").text() == "Only the hit's lines"
-    whole = parse(panel(client, doc))
-    assert len(whole.find_all("li", class_="pair")) == len(every.find_all("li", class_="pair"))
-    assert not whole.find_all("a", data_key="v")
+    found = panel(client, doc, "&lines=21-22")
+    assert found["mode"] == "verify"
+    assert [p["line"]["n"] for p in found["pairs"]] == [21, 22]
+    assert all(p["spans"] for p in found["pairs"])
+    assert (found["verify_label"], found["verify"]) == ("Verify every line", f"/search?hit={doc}&lines=21-22&verify=1")
+    every = panel(client, doc, "&lines=21-22&verify=1")
+    assert len(every["pairs"]) > 2
+    assert every["verify_label"] == "Only the hit's lines"
+    whole = panel(client, doc)
+    assert len(whole["pairs"]) == len(every["pairs"])
+    assert whole["verify"] is None
 
 
 def test_verify_on_a_record_hit_verifies_its_summary(client: TestClient) -> None:
-    tree = parse(panel(client, CALL, "&verify=1"))
-    pairs = tree.find_all("li", class_="pair")
-    assert [p.find("div", class_="line").attrs["data-line"] for p in pairs] == ["14"]
-    assert tree.find("h2").text() == "Minutes: supplier call"
-    assert tree.find("a", data_key="v").text() == "Back to the raw"
+    found = panel(client, CALL, "&verify=1")
+    assert [p["line"]["n"] for p in found["pairs"]] == [14]
+    assert found["title"] == "Minutes: supplier call"
+    assert (found["verify_label"], found["verify"]) == ("Back to the raw", f"/search?hit={CALL}")
 
 
 def test_a_line_whose_anchor_doesnt_resolve_shows_its_problem(client: TestClient, tmp_path: Path) -> None:
@@ -143,52 +159,67 @@ def test_a_line_whose_anchor_doesnt_resolve_shows_its_problem(client: TestClient
         encoding="utf-8",
         newline="\n",
     )
-    tree = parse(panel(client, "minutes:2026-10-15-hand-written"))
-    pairs = tree.find_all("li", class_="pair")
-    flagged = [p for p in pairs if "has-problem" in p.attrs["class"].split()]
+    pairs = panel(client, "minutes:2026-10-15-hand-written")["pairs"]
+    flagged = [p for p in pairs if p["flagged"]]
     assert len(pairs) == 3
     assert len(flagged) == 2
-    assert "is outside calls:rec-0101" in flagged[0].text()
-    assert "no anchors at the end of the line" in flagged[1].text()
+    assert "is outside calls:rec-0101" in " ".join(s["problem"] or "" for s in flagged[0]["spans"])
+    assert "no anchors at the end of the line" in " ".join(flagged[1]["problems"])
 
 
 def test_a_record_no_summary_covers(client: TestClient) -> None:
     hit = "r:chat:C0SIDE/1791500000.000100"
-    tree = parse(panel(client, hit))
-    assert "No summary covers this yet." in tree.text()
-    assert not tree.find_all("a", data_key="v")
-    verify = parse(panel(client, hit, "&verify=1"))
-    assert "nothing to verify" in verify.text()
+    found = panel(client, hit)
+    assert found["no_summary"] == "No summary covers this yet."
+    assert found["verify"] is None
+    assert "nothing to verify" in panel(client, hit, "&verify=1")["no_summary"]
 
 
 def test_a_legacy_note_by_id_and_a_doc_by_its_path(client: TestClient, tmp_path: Path) -> None:
-    tree = parse(panel(client, "legacy-note:old-northwind-notes"))
-    assert "A legacy note has no anchors" in tree.text()
-    assert "Northwind's site lead prefers calls on Tuesdays." in tree.text()
+    found = panel(client, "legacy-note:old-northwind-notes")
+    assert "A legacy note has no anchors" in found["no_summary"]
+    assert "Northwind's site lead prefers calls on Tuesdays." in text_of(found)
     path = next((tmp_path / "vault" / "processed").rglob("2026-10-13-fleet-review.md"))
     rel = path.relative_to(tmp_path / "vault").as_posix()
-    by_path = parse(panel(client, rel, "&lines=12"))
-    assert by_path.find("p", class_="muted").text().startswith("Read as")
-    assert by_path.find_all("div", class_="cited")
-    assert by_path.find_all("article", class_="span")
+    by_path = panel(client, rel, "&lines=12")
+    assert by_path["resolved"]
+    assert cited(by_path["summary"]["lines"])
+    assert by_path["spans"]
 
 
 def test_a_locator_that_doesnt_resolve_is_the_panel_s_own_error(client: TestClient) -> None:
     for hit in ("r:calls:rec-9999@00:10", "[r:broken", "minutes:2026-01-01-no-such-doc"):
-        assert parse(panel(client, hit, status=400)).find("div", class_="error").text()
-    page = client.get("/search?query=Nortwin&hit=r:calls:rec-9999@00:10")
-    assert page.status_code == 200
-    assert 'class="groups"' in page.text
-    assert "no record calls:rec-9999" in page.text
+        found = panel(client, hit)
+        assert (found["mode"], bool(found["error"])) == ("error", True), hit
+    # The results beside it read as before.
+    results = client.get("/api/web/search?query=Nortwin&hit=r:calls:rec-9999@00:10").json()["results"]
+    assert results["groups"]
+    assert "no record calls:rec-9999" in panel(client, "r:calls:rec-9999@00:10")["error"]
+
+
+def test_the_index_being_built_is_a_state_the_panel_waits_out(client: TestClient) -> None:
+    """While an index update runs past the updater's wait, the panel says so, as the results do, and the page asks
+    again; it never answers the wait as the hit's own error, which the page would keep."""
+    app = client.app
+    assert isinstance(app, ServiceApp)
+    app.service.updater = IndexUpdater(lambda: time.sleep(0.5), wait_seconds=0.01)
+    answer = client.get(f"{API}?query=Nortwin&hit={quote(CALL)}")
+    assert answer.status_code == 200, answer.text
+    found = answer.json()
+    assert found["panel"] is None
+    assert "the index is being built" in found["waiting"]
+    assert found["canonical"] == f"/search?query=Nortwin&hit={CALL}"
+    # A bad value is still refused, whatever the index is doing.
+    assert client.get(f"{API}?hit={quote(CALL)}&around=99").status_code == 400
 
 
 def test_a_record_with_two_versions_says_the_latest_is_shown(client: TestClient, tmp_path: Path) -> None:
     vault = Vault.open(tmp_path / "vault")
     vault.write_run("chat", [make_record(3, container="chat:C0X", text="first words")])
     vault.write_run("chat", [make_record(3, container="chat:C0X", text="second words")])
-    tree = parse(panel(client, "r:chat:C0TEST/1791000003.000100"))
-    assert "2 versions; this is the latest" in tree.text()
-    assert "second words" in tree.text()
+    found = panel(client, "r:chat:C0TEST/1791000003.000100")
+    assert "2 versions; this is the latest" in text_of(found)
+    assert "second words" in text_of(found)
 
 
 def test_a_transcript_hit_names_what_covers_its_recording(client: TestClient, tmp_path: Path) -> None:
@@ -200,32 +231,19 @@ def test_a_transcript_hit_names_what_covers_its_recording(client: TestClient, tm
     )
     recall.doc_put(vault, ProcessedDoc(head, "# Supplier sync\n\nPrice agreed.\n", 0).render())
     recall.doc_put(vault, note("recording-note:2026-10-14-sync", covers=[PLAUD], lines=[f"- The call. [r:{PLAUD}]"]))
-    tree = parse(panel(client, f"r:{POLISHED}@10:42"))
-    summary = tree.find("section", class_="summary-column")
-    assert "recording-note:2026-10-14-sync, recording-note, rev 1" in summary.text()
-    assert [line.attrs["data-line"] for line in summary.find_all("div", class_="cited")] == ["14"]
-    assert f"Legacy notes that cover it: legacy-note:supplier-sync: {old}" in summary.text()
+    found = panel(client, f"r:{POLISHED}@10:42")
+    assert found["summary"]["id"] == "recording-note:2026-10-14-sync"
+    assert cited(found["summary"]["lines"]) == [14]
+    assert found["legacy"] == [f"legacy-note:supplier-sync: {old}"]
 
 
 def test_a_recording_hit_marks_the_lines_on_its_transcript(client: TestClient, tmp_path: Path) -> None:
     vault = Vault.open(tmp_path / "vault")
     vault.write_run("plaud", plaud_records("transaction_polish"))
     recall.doc_put(vault, note("recording-note:2026-10-14-sync", covers=[POLISHED], lines=["- Ten million. @10:42"]))
-    summary = parse(panel(client, f"r:{PLAUD}")).find("section", class_="summary-column")
-    assert "recording-note:2026-10-14-sync, recording-note, rev 1" in summary.text()
-    assert [line.attrs["data-line"] for line in summary.find_all("div", class_="cited")] == ["14"]
-
-
-def test_the_whole_page_opens_with_the_panel(client: TestClient) -> None:
-    page = client.get(f"/search?query=Nortwin&hit={quote(CALL)}")
-    assert page.status_code == 200
-    tree = parse(page.text)
-    assert tree.find("section", class_="panel")
-    assert tree.find("li", class_="open").find("a").attrs["data-locator"] == CALL
-    close = tree.find("a", data_key="Escape")
-    assert close.attrs["href"] == "/search?query=Nortwin"
-    assert close.attrs["hx-get"] == "/search/panel?query=Nortwin"
-    assert not a11y_problems(page.text)
+    summary = panel(client, f"r:{PLAUD}")["summary"]
+    assert summary["id"] == "recording-note:2026-10-14-sync"
+    assert cited(summary["lines"]) == [14]
 
 
 def test_a_folder_file_that_went_shows_its_last_text_with_a_note_in_place_of_the_latest_badge(
@@ -240,8 +258,7 @@ def test_a_folder_file_that_went_shows_its_last_text_with_a_note_in_place_of_the
     vault.write_run("documents", [first], when)
     gone = records.gone_version(first, at=when, day="2026-10-16", moved_to="documents:ba9876543210")
     vault.write_run("documents", [gone], datetime(2026, 10, 16, 9, 0, tzinfo=UTC))
-    tree = parse(panel(client, f"r:{first.rid}"))
-    text = tree.text()
+    text = text_of(panel(client, f"r:{first.rid}"))
     assert "the gearbox overheated" in text
     assert "the last version with text; the latest says: Not read from the folder since 2026-10-16." in text
     assert "It moved to documents:ba9876543210." in text

@@ -1,7 +1,7 @@
-"""The Recording page's player (#159): the stored audio served by exact byte ranges with no caching, only while the
-reader says ok; every other state refused with its reason; the player's start at the line `at` marks; and the
-recorder's transcript beside Whisper's, aligned by time, a cut stretch cut in both. The audio is a tone made here and
-the records are invented."""
+"""The Recording page's player (#159, DR-0777): the stored audio served by exact byte ranges with no caching, only
+while the reader says ok, to the browser's session only; every other state refused with its reason; the player's start
+at the line `at` marks; and the recorder's transcript beside Whisper's, aligned by time, a cut stretch cut in both. The
+audio is a tone made here and the records are invented."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from docket_testkit import make_record
-from docket_webkit import TOKEN, Element, a11y_problems, html_problems, parse, signed_in
+from docket_webkit import TOKEN, signed_in
 from recording_kit import TOUR, TOUR_POLISHED, WHISPER, recording_template, with_audio
 from starlette.datastructures import QueryParams
 from starlette.testclient import TestClient
@@ -33,9 +33,8 @@ from docket.vault.vault import Vault
 from docket.web import audio
 from docket.web.recording_state import RecordingState
 from docket.web.recording_view import NO_AUDIO, Facts, build
-from docket.web.templating import PAGE_CSP
 
-AUDIO = f"/recording/audio?rid={TOUR}"
+AUDIO = f"/api/web/recording/audio?rid={TOUR}"
 
 
 @pytest.fixture(scope="module")
@@ -57,13 +56,13 @@ def stored(client: TestClient, tmp_path: Path) -> Vault:
     return vault
 
 
-def tree(client: TestClient, path: str) -> Element:
-    answer = client.get(path)
+def view(client: TestClient, query: str) -> dict[str, Any]:
+    """The Recording page's read for a query string."""
+    answer = client.get(f"/api/web/recording?{query}")
     assert answer.status_code == 200, answer.text
-    assert answer.headers["Content-Security-Policy"] == PAGE_CSP and "media-src 'self';" in PAGE_CSP
-    assert not html_problems(answer.text), html_problems(answer.text)
-    assert not a11y_problems(answer.text), a11y_problems(answer.text)
-    return parse(answer.text)
+    found = answer.json()["view"]
+    assert found is not None
+    return found
 
 
 @pytest.mark.parametrize(
@@ -143,7 +142,7 @@ def test_every_state_but_ok_plays_nothing_and_says_why(
 def test_a_rid_a_file_that_isn_t_audio_and_a_reader_s_refusal_are_named(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert client.get("/recording/audio?rid=not%20a%20rid").text == "no audio: give a recording's rid"
+    assert client.get("/api/web/recording/audio?rid=not%20a%20rid").text == "no audio: give a recording's rid"
     monkeypatch.setattr(reader, "state_of", lambda *a, **k: "ok")
     monkeypatch.setattr(layout, "stored_files", lambda *a, **k: [Path("media/plaud/2026/10/x.pdf.age")])
     assert client.get(AUDIO).text == "no audio: it isn't audio"
@@ -170,7 +169,8 @@ def test_the_token_never_fetches_the_audio(client: TestClient, stored: Vault) ->
     assert client.get(AUDIO, headers=bearer).status_code == 403, "with the session too"
     client.cookies.clear()
     refused = client.get(AUDIO, headers=bearer)
-    assert refused.status_code == 403 and refused.text == "the audio plays in the browser, with its session"
+    assert refused.status_code == 403
+    assert refused.json() == {"detail": "the web app's routes take the browser's session only"}
 
 
 def test_one_file_is_decrypted_once_for_its_ranges_and_its_state_is_read_every_time(
@@ -235,7 +235,8 @@ def test_the_audio_needs_the_session_and_leaves_nothing_in_the_log(
     assert client.get(AUDIO, headers={"Range": "bytes=0-9"}).status_code == 206
     said = [r.getMessage() for r in caplog.records if r.name.startswith("docket")]
     # The request's line names the route's template and its status, never the rid, the range or a byte.
-    assert [m for m in said if "audio" in m] == [m for m in said if re.fullmatch(r"GET /recording/audio 206 \d+ ms", m)]
+    audio_lines = [m for m in said if "audio" in m]
+    assert audio_lines == [m for m in said if re.fullmatch(r"GET /recording/audio 206 \d+ ms", m)]
     assert not [m for m in said if "tour" in m or "rid" in m or "bytes" in m], said
     client.cookies.clear()
     assert client.get(AUDIO).status_code != 200
@@ -247,41 +248,34 @@ def test_withheld_audio_doesn_t_play_and_the_page_says_why(client: TestClient, s
     config.never_store.keywords.append("yard tour")
     path.write_text(config.dump(), encoding="utf-8", newline="\n")
     assert client.get(AUDIO).text == "no audio: withheld"
-    shown = tree(client, f"/recording?rid={TOUR}").find("section", class_="audio")
-    assert shown.attrs["data-why"] == "withheld" and NO_AUDIO["withheld"] in shown.text()
-    assert shown.find_all("audio") == []
+    shown = view(client, f"rid={TOUR}")
+    assert shown["audio"]["why"] == "withheld" and shown["audio"]["message"] == NO_AUDIO["withheld"]
+    assert shown["player"] is None
 
 
 def test_the_player_starts_at_the_line_at_marks_and_every_spoken_line_plays(client: TestClient, stored: Vault) -> None:
-    page = tree(client, f"/recording?rid={TOUR}&at=00:20")
-    player = page.find("audio", id="player")
-    assert player is not None and player.attrs["src"] == f"{AUDIO}#t=20.000" and player.attrs["preload"] == "none"
-    assert NO_AUDIO["stored"] in page.find("section", class_="audio").text()
-    lines = page.find_all("li", class_="segment")
-    spoken = [li for li in lines if "cut" not in li.attrs["class"].split()]
-    assert spoken and all(li.attrs.get("data-start") for li in spoken)
-    assert all("data-start" not in li.attrs for li in lines if "cut" in li.attrs["class"].split())
-    plain = tree(client, f"/recording?rid={TOUR}").find("audio", id="player")
-    assert plain is not None and plain.attrs["src"] == AUDIO
+    page = view(client, f"rid={TOUR}&at=00:20")
+    assert page["player"] == f"{AUDIO}#t=20.000"
+    assert page["audio"]["message"] == NO_AUDIO["stored"]
+    lines = [line for row in page["pair"]["rows"] for side in (row["left"], row["right"]) for line in side]
+    spoken = [line for line in lines if not line["cut"]]
+    assert spoken and all(line["start"] is not None for line in spoken)
+    assert all(line["start"] is None for line in lines if line["cut"])
+    assert view(client, f"rid={TOUR}")["player"] == AUDIO
 
 
 def test_the_two_transcripts_sit_side_by_side_by_time_and_a_cut_is_cut_in_both(
     client: TestClient, stored: Vault
 ) -> None:
-    pair = tree(client, f"/recording?rid={TOUR}").find("table", class_="aligned")
+    pair = view(client, f"rid={TOUR}")["pair"]
     assert pair is not None
-    heads = [th.text() for th in pair.find_all("th")]
-    assert heads[0].startswith("The recorder's") and TOUR_POLISHED in heads[0]
-    assert heads[1].startswith("Whisper's") and WHISPER in heads[1]
-    rows = [
-        [td.find_all("li", class_="segment") for td in tr.find_all("td")] for tr in pair.find("tbody").find_all("tr")
-    ]
+    assert pair["left"]["meta"].startswith(TOUR_POLISHED) and WHISPER in pair["right"]["meta"]
+    rows = [(row["left"], row["right"]) for row in pair["rows"]]
     shape = [(len(left), len(right)) for left, right in rows]
     # The recorder's first line holds two of Whisper's; the cut stretch is one row, cut in both.
     assert shape == [(1, 2), (1, 1), (1, 1), (1, 1)]
-    cut = rows[2]
-    assert all("cut" in li.attrs["class"].split() for side in cut for li in side)
-    assert "Thanks for coming." in rows[0][1][1].text()
+    assert all(line["cut"] for side in rows[2] for line in side)
+    assert rows[0][1][1]["text"] == "Thanks for coming."
 
 
 def test_a_whisper_transcript_waiting_at_the_gate_isn_t_shown(client: TestClient, tmp_path: Path) -> None:
@@ -292,9 +286,9 @@ def test_a_whisper_transcript_waiting_at_the_gate_isn_t_shown(client: TestClient
         via="docket transcribe 0f", engine=WHISPER, fidelity="derived",
     )  # fmt: skip
     Gate(vault).stage([staged])
-    page = tree(client, f"/recording?rid={TOUR}")
-    assert page.find_all("table", class_="aligned") == [] and page.find_all("audio") == []
-    assert "No audio stored yet" in page.find("section", class_="audio").text()
+    page = view(client, f"rid={TOUR}")
+    assert page["pair"] is None and page["player"] is None
+    assert page["audio"]["message"].startswith("No audio stored yet")
 
 
 # -- the pair, from the facts alone ---------------------------------------------------------------------------------
@@ -332,7 +326,7 @@ def test_whisper_s_lines_in_a_gap_get_their_own_rows_and_the_rid_may_name_either
         assert rows == [(["one"], ["one"]), ([], ["between"]), (["two"], []), ([], ["late"])]
         assert all(s.speaker == "" for r in view.pair.rows for s in r.right), "Whisper names no speaker"
     late = view_of(CALL, (LEFT, RIGHT), "&at=00:30")
-    assert late.player == "/recording/audio?rid=plaud:rec-x"
+    assert late.player == "/api/web/recording/audio?rid=plaud:rec-x"
     marked = [s for r in late.pair.rows for s in r.right if s.mark]
     assert [s.text for s in marked] == ["late"] and marked[0].target, "a time only Whisper has is marked on its side"
     alone = view_of(f"{CALL}/whisper", (RIGHT,))

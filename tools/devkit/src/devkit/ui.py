@@ -68,6 +68,9 @@ DROPPED = frozenset({"PYTHON_KEYRING_BACKEND", "PYTHONPATH"})
 VERBS = ("press", "click", "fill", "wait")
 # What Chrome logs for a refusal's 400, which a state that shows a refusal brings about on purpose.
 REFUSED = "the server responded with a status of 400"
+# The supplier call's hit in the index fixture, and the harbour crane check's recording note in recording_kit's.
+CALL_HIT = "r:calls:rec-0100@01:50-03:20"
+CRANE_NOTE = "recording-note:2026-10-12-harbour-crane-check"
 
 
 @dataclass(frozen=True)
@@ -231,6 +234,43 @@ PAGES: dict[str, Page] = {
             ),
             State("empty", "/today", world="empty"),
             State("stale", "/today", world="stale"),
+        ),
+    ),
+    # ui_world's search: the index fixture, Nortwin the supplier, Ben Sample a person, rec-0100 the supplier call with
+    # its minutes and recording note.
+    "search": Page(
+        world="search",
+        states=(
+            State("start", "/search"),
+            State("results", "/search?query=Nortwin"),
+            State("hit", f"/search?query=Nortwin&hit={CALL_HIT}"),
+            State("verify", f"/search?query=Nortwin&hit={CALL_HIT}&verify=1"),
+            State("doc", "/search?query=fleet&hit=recording-note:2026-10-13-fleet-review&lines=14"),
+            State("chosen", "/search?query=Nortwin&people=ben-sample&since=2026-10-01&until=2026-10-31"),
+            State("facet", "/search?query=Nortwin", (("click", "[data-facet=people]"),)),
+            State("keys", "/search?query=Nortwin", (("press", "j"), ("press", "j"), ("press", "Enter"))),
+            State("empty", "/search?query=zeppelin&sources=chat"),
+            State("refused", "/search?query=fleet&since=soon", expects=(REFUSED,)),
+        ),
+    ),
+    # ui_world's recording: the harbour crane check with its minutes and note, the yard tour with its audio stored, a
+    # stretch cut, Whisper's transcript beside the recorder's and a correction, a held call and a legacy note.
+    "recording": Page(
+        world="recording",
+        states=(
+            State("start", "/recording"),
+            State("marked", f"/recording?rid=plaud:rec-crane&doc={CRANE_NOTE}&at=00:40-01:39"),
+            State("cuts", "/recording?rid=plaud:rec-tour"),
+            State(
+                "playing",
+                "/recording?rid=plaud:rec-tour",
+                (("click", "tbody tr:nth-child(2) td:first-child a"), ("wait", "[data-playing]")),
+            ),
+            State("correction", "/recording?rid=plaud:rec-tour&doc=correction:2026-10-14-yard-tour&at=00:20"),
+            State("held", "/recording?rid=plaud:rec-held"),
+            State("legacy", "/recording?rid=plaud:rec-old"),
+            State("missing", "/recording?rid=plaud:rec-nothing"),
+            State("refused", "/recording?rid=not+a+rid", expects=(REFUSED,)),
         ),
     ),
 }

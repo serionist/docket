@@ -59,6 +59,13 @@ def test_the_ledger_s_parameters_go_in_the_order_the_app_writes_them_in() -> Non
     assert [name for name, _ in every.pairs()] == order
 
 
+def test_search_s_parameters_go_in_the_order_the_app_writes_them_in() -> None:
+    order = json.loads(CANONICAL.read_text(encoding="utf-8"))["search_order"]
+    every = SearchState(query="x", sources=("calls",), people=("ada",), entities=("acme",), since="2026-10-01",
+                        until="2026-10-31", k=40, hit="r:calls:rec-1", lines=("4",), around=2, verify=True)  # fmt: skip
+    assert [name for name, _ in every.pairs()] == order
+
+
 def test_the_queue_s_parameters_are_the_ledger_s_without_its_own() -> None:
     order = json.loads(CANONICAL.read_text(encoding="utf-8"))["order"]["/queue"]
     every = DayState(page="queue", open="A-0002", at="A-0001", q="x", stream="ops", kind="task", who="Ada", k=200,

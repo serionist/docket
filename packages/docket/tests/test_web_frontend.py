@@ -45,7 +45,7 @@ def stranger(template: Path, tmp_path: Path) -> Iterator[TestClient]:
 
 
 def test_each_route_of_the_app_answers_its_document_with_a_nonce_and_the_csp_naming_it(client: TestClient) -> None:
-    assert frontend.BUILD.routes == ("/design", "/today", "/queue", "/ledger", "/meetings")
+    assert frontend.BUILD.routes == ("/design", "/today", "/queue", "/ledger", "/meetings", "/search", "/recording")
     first, second = client.get("/design?part=tokens"), client.get("/ledger?open=A-0012&q=Ada%27s+offer")
     nonces = []
     for answer in (first, second):
@@ -101,7 +101,8 @@ def test_the_build_s_files_are_served_as_static_files_are_and_its_document_only_
 
 def test_a_path_the_app_doesn_t_list_is_still_the_server_s_own(client: TestClient) -> None:
     assert client.get("/design/more").status_code == 404
-    assert client.get("/search").status_code == 200
+    page = client.get("/sync")
+    assert page.status_code == 200 and '<div id="root">' not in page.text
 
 
 def test_the_build_lists_its_licences_routes_and_stamp(tmp_path: Path) -> None:

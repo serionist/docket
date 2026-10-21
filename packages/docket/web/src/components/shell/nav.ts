@@ -37,7 +37,7 @@ export const DAY: NavPage[] = [
 ];
 
 export const REST: NavPage[] = [
-  { key: "search", title: "Search", href: "/search", icon: SearchIcon, inApp: false },
+  { key: "search", title: "Search", href: "/search", icon: SearchIcon, inApp: true },
   { key: "briefs", title: "Briefs", href: "/briefs", icon: NotebookTextIcon, inApp: false },
   { key: "staging", title: "Staging", href: "/staging", icon: InboxIcon, inApp: false, mark: "staging" },
   { key: "curate", title: "Curate", href: "/curate", icon: ListChecksIcon, inApp: false },

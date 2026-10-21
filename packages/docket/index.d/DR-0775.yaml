@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0775
+    title: "Search is the app's page: its results and the open hit's panel are two JSON reads, its facets a bar, and its keys and links as they were"
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#252", "#9"]
+    description: "/search is the app's page (#252): its URL, its parameters and their one canonical form are DR-0174's, the facets DR-0175's, so Claude's links, /search?query=... and Curate's /search?hit=..., and every bookmark open the same state, written back byte for byte as the server writes it (DR-0704). GET /api/web/search reads the results for the page's query string with the panel's parameters (hit, lines, around, verify) left out, so opening, moving or closing a hit asks no new search: how search read the query, the chips, the facets with their counts over the candidates, the groups of hits with their summaries, each hit's snippet as text in pieces with the query's words marked by the old marked rule (never HTML), its locator, why it was found, what it mentions and, for a transcript, its place on the Recording page; a query that is one locator answers no results and names it, which the panel opens instead. GET /api/web/search/panel reads the open hit's panel for the whole query string, built by panel.py as before: the raw with around, the summary covering it with the lines pointing here marked, or the summary verified line by line. A value the URL can't hold answers 400 naming every one that didn't read; an index still being built answers waiting with why, and the page asks again every 5 s; a locator that doesn't resolve is the panel's own error. Every link the reads carry is the page's URL for the state it opens, a hit's lines in their canonical form. The page: the query box, then a bar with a menu per facet, the dates typed as the tool reads them and a chip per filter or boost taking it off, the reading line under it; the results under sticky group heads as ruled rows, the words found under a highlighter of their own; the open hit's panel beside them, its raw first and its summary under it, 480 px wide as every panel (DR-0708). Search keeps its keys (DR-0711): / to the box, j and k, Enter or o, v to verify and back, [ and ] for less or more around, c to copy the selected hit's locator, Esc to close the panel or leave the box with its words kept; one selection, so with the panel open j and k carry it to the next hit, replacing the history entry, as on the day pages. The results are said in a polite live region."
+    binds:
+      - "Claude's links and bookmarks open the same state: the URL is DR-0174's, written back as the server writes it."
+      - The results are read without the panel's parameters, so a hit opened, moved or closed asks no new search.
+    not_chosen:
+      - "The facets in a column beside the results: beside a 480 px panel the results would be a third of the page, and at phone width the column would push them off the screen."
+      - "The summary and the raw in two columns inside the panel: 480 px holds one readable column; the raw comes first, as the hit is what was clicked."
+      - "j and k moving the focus only, as the Jinja page did: the panel stayed on another hit than the selected one."

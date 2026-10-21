@@ -28,7 +28,6 @@ def test_defaults_are_left_out_and_others_kept() -> None:
     assert state.url() == (
         "/search?query=fleet&entities=northwind&k=40&hit=r:calls:rec-0101@00:00-01:30&around=2&verify=1"
     )
-    assert state.url("/search/panel").startswith("/search/panel?query=fleet")
 
 
 def test_a_locator_keeps_its_colons_and_at_and_encodes_the_rest() -> None:
@@ -109,11 +108,3 @@ def test_what_counts_as_asked() -> None:
 def test_search_only_closes_the_panel_and_keeps_the_search() -> None:
     state = SearchState(query="fleet", k=40, hit="x:y", lines=("4",), around=3, verify=True)
     assert state.search_only() == SearchState(query="fleet", k=40)
-
-
-def test_from_url_reads_the_search_page_and_nothing_else() -> None:
-    assert SearchState.from_url("http://127.0.0.1:8741/search?query=fleet") == SearchState(query="fleet")
-    assert SearchState.from_url("http://127.0.0.1:8741/search") == SearchState()
-    assert SearchState.from_url("http://127.0.0.1:8741/today?query=fleet") is None
-    assert SearchState.from_url("http://127.0.0.1:8741/search?k=0") is None
-    assert SearchState.from_url("") is None

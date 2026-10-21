@@ -1,0 +1,18 @@
+decisions:
+  - id: DR-0778
+    title: Only the owner's click on the Recording page decides an unsure fix, a JSON write from the app
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#252", "#183"]
+    supersedes: [DR-0586]
+    description: "Each fix line on the Recording page shows the click that sets its other state: Confirm on an unsure or rejected fix, Reject on an unsure, sure or confirmed one; a cut or hidden line shows no click. A Reject leaves the recorder's text standing and settles the place (DR-0583). A click is a JSON write, POST /api/web/recording/fix, with the browser's session only, a request carrying Authorization refused, its body checked before any route reads it and the write by the Guard (DR-0709), run on the writer thread, carrying the doc's id, the rev shown, the line and the pick, and answered with what it did, the page reading the recording again (DR-0776). DocStore.settle writes it as DocStore.decide writes a decision: it builds the next rev from the doc's last commit, never from the file on disk, and is refused when the file differs from that commit (edited by hand: put it with the reconcile skill, or check it out again) or when the doc moved since the page showed it; it sets that line's state to confirmed or rejected, by: <owner>, Recording page, in a commit Fix: <doc id> line <n> <state> on the Recording page. The same rev drops every line now cut or hidden, the one change allowed to lines that aren't sure, since doc_put and the take-in would refuse a rev that kept them, and the answer says how many it dropped. So a Claude edit on disk can't ride along with an owner's click, and an owner's own hand edit is never written over. DocStore.settle is the only writer of those two states: a scan over the package pins that only the Recording page's route calls it. doc_put and the take-in refuse a put or an edit that adds a confirmed or rejected line or changes a committed line that isn't sure, and let one be dropped only when it is now cut, hidden or no longer matching (DR-0582); every read takes the doc from its last commit, so neither Claude's tools nor its edits set an unsure fix's state. A place whose every line the owner rejected takes one new unsure line with a pick none of them had, offered only with new evidence, which waits for the owner in turn. An unsure fix is not applied until the owner confirms it, and one left alone is safe: the reading keeps the recorder's text. Claude could still drive the page, post its write with a session got from the token, or commit with git itself, each a deliberate step outside every door: DR-0564's floor."
+    binds:
+      - DocStore.settle is the only writer of a confirmed or rejected fix, and only the Recording page's route calls it.
+      - "The token never posts a click: the route refuses Authorization."
+      - DocStore.settle builds from the doc's last commit and refuses a file that differs from it.
+    not_chosen:
+      - "Curate's round in chat (DR-0472): Claude runs the writes on the user's word, so it could set the state, and auto mode or an allow rule removes the prompt."
+      - "A console code per batch (DR-0202): a code for a word in a transcript, which lets nothing private in."
+      - "A same-origin form post answered 303, as DR-0586 had: the page is the app's now, and its writes are JSON (DR-0709)."

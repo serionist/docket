@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -44,7 +43,7 @@ from docket.index.terms import Checker, phrase_of
 from docket.index.text import Analyzer
 from docket.vault.records import RawRecord
 from docket.vault.vault import Vault
-from docket.web import templating, views
+from docket.web import views
 
 QUESTIONS: list[dict[str, Any]] = yaml.safe_load((INDEX_FIXTURE / "questions.yaml").read_text(encoding="utf-8"))
 LATER = datetime(2026, 10, 14, 9, 0, tzinfo=UTC)
@@ -679,5 +678,5 @@ def test_a_compound_s_snippet_shows_it_as_written(compounds: Vault) -> None:
     assert "kick off" in snippets[COMPOUND_KICK] and "kick-off" in snippets[MAIL_KICK]
     # "We'll" opens the message, "well" ends it 60 words on: the snippet starts at the word, not at the contraction.
     assert "went well" in {h.rid: h.snippet for h in ranked(find(compounds, "well"))}[compound_chat("well-long")]
-    marks = templating.marked("we kick off, the kick-off, a kickoff; we'll see", ["kickoff", "well"])
-    assert re.findall(r"<mark>(.*?)</mark>", str(marks)) == ["kick", "off", "kick", "off", "kickoff"]
+    marks = views.pieces("we kick off, the kick-off, a kickoff; we'll see", ["kickoff", "well"])
+    assert [p.text for p in marks if p.mark] == ["kick", "off", "kick", "off", "kickoff"]

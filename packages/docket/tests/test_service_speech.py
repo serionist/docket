@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from docket_webkit import OURS, PORT, TOKEN, parse
+from docket_webkit import OURS, PORT, TOKEN
 from mcp import Client
 from mcp.types import TextContent
 from media_kit import CALL, in_raw, media_vault
@@ -245,8 +245,8 @@ def test_the_route_takes_the_token_and_the_page_shows_the_job(tmp_path: Path, fa
         assert started is not None
         http.cookies.set(COOKIE, started)
         assert http.post(f"/api/transcribe?rid={CALL}").status_code in (401, 403), "a page never queues a job"
-        shown = parse(http.get(f"/recording?rid={CALL}").text).find("p", class_="speech-job")
-    assert shown is not None and shown.text() == f"Whisper: staged {CALL}/whisper: 2 segment(s), en"
+        shown = http.get(f"/api/web/recording?rid={CALL}").json()["view"]["audio"]["speech"]
+    assert shown == f"Whisper: staged {CALL}/whisper: 2 segment(s), en"
 
 
 def test_the_command_asks_the_service_or_runs_the_job_here(

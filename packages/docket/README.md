@@ -884,28 +884,29 @@ Queue, the Ledger, Meetings, Search, Recording, Briefs, Sync, Staging, Curate an
 pages still to come, with the phase each arrives in.
 
 The pages are moving, one by one, into a new app built in React; the day pages, Today, the Queue, the Ledger and
-Meetings, are its first. Its shell is the sidebar with
+Meetings, are its first, then Search and the Recording page. Its shell is the sidebar with
 what waits at the gate and whether a sync is due, the theme and keys switches at its foot, the list and the open item
 beside it; `/design` shows its parts on invented data. It comes built with Docket; nothing to install.
 
 - Search runs the search Claude runs: the same words, names, time words and dates. Sources and a month narrow it;
-  people and entities favour the hits that mention them, as Claude's boosts do. Facet counts are within the top 200.
-- A hit opens beside the results: its summary, with the lines pointing at it marked, next to the raw it came from.
-  Widen or narrow the raw with `[` and `]`; `v` checks each line of the summary against its raw.
+  people and entities favour the hits that mention them, as Claude's boosts do, each from a menu over the results,
+  with the dates beside them. Facet counts are within the top 200. The words it found are highlighted (DR-0775).
+- A hit opens beside the results: the raw it came from, then the summary covering it with the lines pointing at it
+  marked. Widen or narrow the raw with `[` and `]`; `v` checks each line of the summary against its raw.
 - A search's URL holds the search tool's parameters (`query`, `sources`, `people`, `entities`, `since`, `until`,
-  `k`) and the open hit (`hit`, `lines`, `around`, `verify`), so a bookmark reopens it. Paste a locator from Claude's
-  answer into the box to open it.
-- Keys: `/` the box, `j` and `k` through the hits, `Enter` to open one, `Esc` to close it, `c` to copy a locator,
-  `?` for the rest. The keys dialog turns the single keys off.
-- Nothing loads from the network: htmx, the fonts and the icons come with Docket, and the pages work offline. Any
-  browser from mid-2024 on.
+  `k`) and the open hit (`hit`, `lines`, `around`, `verify`), so a bookmark or a link from Claude reopens it. Paste a
+  locator from Claude's answer into the box to open it.
+- Keys: `/` the box, `j` and `k` through the hits, carrying an open hit along, `Enter` or `o` to open one, `Esc` to
+  close it, `c` to copy a locator, `?` for the rest. The keys switch at the sidebar's foot turns the single keys off.
+- Nothing loads from the network: the app, htmx, the fonts and the icons come with Docket, and the pages work
+  offline. Any browser from mid-2024 on; the app's pages need JavaScript.
 - A session lasts 12 hours, and ends when the service restarts; the sign-in page then names the `docket open` command
   that brings you back to the page you were on.
 
 ### The Recording page
 
 `/recording?rid=<rid>` puts a recording's summary beside its transcript, and plays its audio from any line
-(DR-0544, DR-0545, DR-0576). It only reads.
+(DR-0545, DR-0776, DR-0777). It only reads.
 
 | Part | Shows |
 |---|---|
@@ -915,13 +916,12 @@ beside it; `/design` shows its parts on invented data. It comes built with Docke
 | Audio | the browser's own player, when the stored audio reads ok; else why there is none: not stored yet, waiting at the gate, held, kept out by a never-store value, cut before its latest cuts, no key here, or not downloaded |
 
 - Its URL holds `rid` (a recording's or a transcript's, or a locator such as `r:plaud:4f1c@02:30`), `doc` and `at`
-  (`02:30` or `02:30-03:20`). A link that sets `at` lands on the first line it marks, without JavaScript.
-- A line's time plays the audio from its start. Without JavaScript the same link opens the page at the line, and
-  the player starts there by itself.
-- The audio comes from `/recording/audio`, in the browser's session only: the token never fetches it. It plays only
-  while the audio reads ok, checked on every request; one file's decrypted bytes stay in memory a minute for the
-  player's next range, answered exactly and never cached (`Cache-Control: no-store`). Nothing about it is logged but
-  the route's name.
+  (`02:30` or `02:30-03:20`). A link that sets `at` lands on the first line it marks, scrolled into view.
+- A line's time plays the audio from its start, and the address keeps the line. A cut stretch never plays.
+- The audio comes from `/api/web/recording/audio`, in the browser's session only: the token never fetches it. It
+  plays only while the audio reads ok, checked on every request; one file's decrypted bytes stay in memory a minute
+  for the player's next range, answered exactly and never cached (`Cache-Control: no-store`). Nothing about it is
+  logged but the route's name.
 - Search's transcript hits, and its panel on a recording, link here at the hit's time.
 - A held recording shows only that it is held, with a link to the holds on the Staging page.
 - Keys: `?`.

@@ -1,6 +1,10 @@
+"""The Search page's read, signed in, on the index fixture (DR-0174, DR-0175, DR-0709, DR-0775): the search Claude runs,
+the canonical URL for what it read, the facets and chips with their links, how the query was read, the groups with
+their marked snippets, the transcript hits' Recording page links, the states without results, and the refusals. The
+page itself is the app's document; its links are the URLs these answers carry."""
+
 from __future__ import annotations
 
-import re
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -12,7 +16,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 from docket_testkit import INDEX_FIXTURE, index_template, make_record
-from docket_webkit import OURS, a11y_problems, html_problems, parse, signed_in
+from docket_webkit import signed_in
 from starlette.testclient import TestClient
 
 from docket import index
@@ -24,6 +28,7 @@ from docket.web import views
 
 QUESTIONS: list[dict[str, Any]] = yaml.safe_load((INDEX_FIXTURE / "questions.yaml").read_text(encoding="utf-8"))
 TIME_WORDS = ("múlt héten", "last week", "yesterday")
+API = "/api/web/search"
 
 
 @pytest.fixture(scope="module")
@@ -37,278 +42,217 @@ def client(template: Path, tmp_path: Path) -> Iterator[TestClient]:
         yield found
 
 
-def page_hits(html: str) -> list[str]:
-    """The hits a page lists, with the ones collapsed under them, in the page's order."""
-    tree = parse(html)
-    out: list[str] = []
-    for item in tree.find_all("li", class_="hit"):
-        out.append(item.find("a", class_="hit-link").attrs["data-locator"])
-        out += [span.text() for span in item.find_all("span", class_="locator")[1:]]
-    return out
+def read(client: TestClient, query: str, status: int = 200, path: str = API) -> dict[str, Any]:
+    answer = client.get(f"{path}?{query}" if query else path)
+    assert answer.status_code == status, answer.text
+    return answer.json()
+
+
+def hits(found: dict[str, Any]) -> list[dict[str, Any]]:
+    return [hit for group in found["results"]["groups"] for hit in group["hits"]]
+
+
+def listed(found: dict[str, Any]) -> list[str]:
+    """The hits the page lists, with the ones collapsed under them, in the page's order."""
+    return [loc for hit in hits(found) for loc in (hit["locator"], *hit["also"])]
+
+
+def facet(found: dict[str, Any], key: str) -> dict[str, dict[str, Any]]:
+    """A facet's items by their label."""
+    return {item["label"]: item for f in found["results"]["facets"] if f["key"] == key for item in f["items"]}
+
+
+def text_of(pieces: list[dict[str, Any]]) -> str:
+    return "".join(p["text"] for p in pieces)
 
 
 def answers(loc: str, expect: str) -> bool:
     return loc == expect or loc.startswith((f"{expect}@", f"{expect}#"))
 
 
-def link_to(html: str, text: str) -> tuple[str, str]:
-    """A link's page URL and fragment URL, by the text it shows."""
-    found = [a for a in parse(html).find_all("a") if text in a.text()]
-    assert found, text
-    return found[0].attrs["href"], found[0].attrs["hx-get"]
-
-
 @pytest.mark.parametrize("question", QUESTIONS, ids=[q["q"] for q in QUESTIONS])
 def test_the_page_runs_the_search_claude_runs(client: TestClient, tmp_path: Path, question: dict[str, Any]) -> None:
-    html = client.get("/search", params={"query": question["q"], "k": 5}).text
-    shown = page_hits(html)
-    vault = Vault.open(tmp_path / "vault")
-    result = index.search(vault, question["q"], k=5)
+    shown = listed(read(client, f"query={quote(question['q'])}&k=5"))
+    result = index.search(Vault.open(tmp_path / "vault"), question["q"], k=5)
     assert sorted(shown) == sorted(loc for g in result.groups for h in g.hits for loc in (h.locator, *h.also))
     if not any(word in question["q"] for word in TIME_WORDS):
         # A time word's range moves with today; the fixture's own date is what the index tests freeze.
         assert any(answers(loc, question["expect"]) for loc in shown), shown
 
 
-def test_the_page_and_its_fragment_and_the_canonical_url(client: TestClient) -> None:
+def test_the_page_is_the_app_s_and_each_read_answers_its_canonical_url(client: TestClient) -> None:
     page = client.get("/search?people=ben-sample&query=Nortwin&sources=calls")
-    assert page.text.startswith("<!doctype html>")
-    assert "HX-Push-Url" not in page.headers
-    fragment = client.get("/search/results?people=ben-sample&query=Nortwin&sources=calls")
-    assert not fragment.text.lstrip().startswith("<!doctype")
-    assert 'class="groups"' in fragment.text
-    canonical = "/search?query=Nortwin&sources=calls&people=ben-sample"
-    assert fragment.headers["HX-Push-Url"] == canonical
-    # Asked again from the page it already is: a replace, so history gains no entry.
-    again = client.get("/search/results?query=Nortwin&people=ben-sample&sources=calls", headers={
-        "HX-Request": "true", "HX-Current-URL": f"{OURS}{canonical}"
-    })  # fmt: skip
-    assert again.headers["HX-Replace-Url"] == canonical
-    assert "HX-Push-Url" not in again.headers
-    moved = client.get("/search/results?query=fleet", headers={"HX-Current-URL": f"{OURS}{canonical}"})
-    assert moved.headers["HX-Push-Url"] == "/search?query=fleet"
-    retry = client.get(
-        "/search/results?query=fleet", headers={"HX-Current-URL": f"{OURS}/today", "X-Docket-Retry": "1"}
-    )
-    assert retry.headers["HX-Replace-Url"] == "/search?query=fleet"
-
-
-def test_the_panel_fragment_names_the_page_with_the_hit_open(client: TestClient) -> None:
+    assert page.status_code == 200
+    assert '<div id="root">' in page.text
+    found = read(client, "people=ben-sample&query=Nortwin&sources=calls&unknown=kept+out")
+    assert found["canonical"] == "/search?query=Nortwin&sources=calls&people=ben-sample"
     hit = "r:calls:rec-0100@01:50-03:20"
-    answer = client.get(f"/search/panel?query=Nortwin&hit={quote(hit)}")
-    assert answer.headers["HX-Push-Url"] == f"/search?query=Nortwin&hit={hit}"
-    same = client.get(
-        f"/search/panel?query=Nortwin&hit={quote(hit)}",
-        headers={"HX-Current-URL": f"{OURS}/search?hit={hit}&query=Nortwin"},
-    )
-    assert same.headers["HX-Replace-Url"] == f"/search?query=Nortwin&hit={hit}"
-    closed = client.get("/search/panel?query=Nortwin")
-    assert closed.status_code == 200
-    assert closed.text.strip() == ""
-    assert closed.headers["HX-Push-Url"] == "/search?query=Nortwin"
+    opened = read(client, f"hit={quote(hit)}&query=Nortwin", path=f"{API}/panel")
+    assert opened["canonical"] == f"/search?query=Nortwin&hit={hit}"
+    assert opened["panel"]["close"] == "/search?query=Nortwin"
+    closed = read(client, "query=Nortwin", path=f"{API}/panel")
+    assert closed == {"canonical": "/search?query=Nortwin", "panel": None, "waiting": ""}
 
 
 def test_the_facets_narrow_by_source_and_time_and_favour_people_and_entities(client: TestClient) -> None:
-    html = client.get("/search?query=Nortwin").text
-    tree = parse(html)
-    titles = [h.text() for h in tree.find_all("h2") if h.attrs.get("id", "").startswith("facet-")]
-    assert titles == ["Sources", "People favour", "Entities favour", "Time", "Dates"]
-    candidates = parse(html).find("details", class_="facets").find("p", class_="facet-note").text()
-    assert re.fullmatch(r"Counts are over the \d+ best matches, not the whole vault\.", candidates)
-    url, fragment = link_to(html, "calls")
-    assert url == "/search?query=Nortwin&sources=calls"
-    assert fragment == "/search/results?query=Nortwin&sources=calls"
-    url, _ = link_to(html, "Ben Sample")
-    assert url == "/search?query=Nortwin&people=ben-sample"
-    chosen = client.get(url).text
-    chip = parse(chosen).find("a", class_="chip")
-    assert chip.text().startswith("favour Ben Sample")
-    assert chip.attrs["href"] == "/search?query=Nortwin"
-    assert parse(chosen).find("a", class_="facet-item", aria_current="true").text().startswith("Ben Sample")
-    url, _ = link_to(html, "Northwind")
-    assert url == "/search?query=Nortwin&entities=northwind"
-    url, _ = link_to(html, "Oct 2026")
-    assert url == "/search?query=Nortwin&since=2026-10-01&until=2026-10-31"
-    month = client.get(url).text
-    assert [c.text() for c in parse(month).find_all("a", class_="chip")] == ["Oct 2026 : remove"]
-    assert link_to(month, "Oct 2026")[0] == "/search?query=Nortwin"
-    carried = {(i.attrs["name"], i.attrs["value"]) for i in parse(chosen).find_all("input", form="search-form")}
-    assert ("people", "ben-sample") in carried
+    found = read(client, "query=Nortwin")
+    assert [(f["key"], f["title"], f["favours"]) for f in found["results"]["facets"]] == [
+        ("sources", "Sources", False),
+        ("people", "People", True),
+        ("entities", "Entities", True),
+        ("time", "Time", False),
+    ]
+    assert 0 < found["results"]["candidates"] <= 200
+    assert facet(found, "sources")["calls"]["url"] == "/search?query=Nortwin&sources=calls"
+    ben = facet(found, "people")["Ben Sample"]
+    assert (ben["url"], ben["on"]) == ("/search?query=Nortwin&people=ben-sample", False)
+    chosen = read(client, "query=Nortwin&people=ben-sample")
+    assert chosen["results"]["chips"] == [{"label": "favour Ben Sample", "url": "/search?query=Nortwin"}]
+    assert facet(chosen, "people")["Ben Sample"]["on"] is True
+    assert facet(found, "entities")["Northwind"]["url"] == "/search?query=Nortwin&entities=northwind"
+    month = facet(found, "time")["Oct 2026"]
+    assert month["url"] == "/search?query=Nortwin&since=2026-10-01&until=2026-10-31"
+    october = read(client, "query=Nortwin&since=2026-10-01&until=2026-10-31")
+    assert october["results"]["chips"] == [{"label": "Oct 2026", "url": "/search?query=Nortwin"}]
+    chosen_month = facet(october, "time")["Oct 2026"]
+    assert (chosen_month["on"], chosen_month["url"]) == (True, "/search?query=Nortwin")
 
 
 def test_dates_that_arent_a_month_are_chips_of_their_own(client: TestClient) -> None:
-    html = client.get("/search?query=fleet&since=2026-10-02&until=2026-10-20&entities=nobody-known").text
-    chips = [c.text() for c in parse(html).find_all("a", class_="chip")]
-    assert chips == ["favour nobody-known : remove", "since 2026-10-02 : remove", "until 2026-10-20 : remove"]
-    assert link_to(html, "since 2026-10-02")[0] == "/search?query=fleet&entities=nobody-known&until=2026-10-20"
+    found = read(client, "query=fleet&since=2026-10-02&until=2026-10-20&entities=nobody-known")
+    assert [(c["label"], c["url"]) for c in found["results"]["chips"]] == [
+        ("favour nobody-known", "/search?query=fleet&since=2026-10-02&until=2026-10-20"),
+        ("since 2026-10-02", "/search?query=fleet&entities=nobody-known&until=2026-10-20"),
+        ("until 2026-10-20", "/search?query=fleet&entities=nobody-known&since=2026-10-02"),
+    ]
 
 
 def test_the_line_says_how_search_read_the_query(client: TestClient) -> None:
-    html = client.get("/search?query=Nortwin+the+2026-10-07&people=Zoltan+Nobody").text
-    reading = [s.text() for s in parse(html).find("p", class_="reading").find_all("span")]
+    reading = read(client, "query=Nortwin+the+2026-10-07&people=Zoltan+Nobody")["results"]["reading"]
     assert reading[0].startswith("from 7 Oct 2026 to 7 Oct 2026")
     assert '"nortwin" is Northwind' in reading
     assert "not found as a person or entity: Zoltan Nobody" in reading
-    since = parse(client.get("/search?since=2026-10-08").text).find("p", class_="reading").text()
-    assert since == "from 8 Oct 2026 to now"
-    until = parse(client.get("/search?until=2026-10-07T12:30").text).find("p", class_="reading").text()
-    assert until == "from the start to 7 Oct 2026"
+    assert read(client, "since=2026-10-08")["results"]["reading"] == ["from 8 Oct 2026 to now"]
+    assert read(client, "until=2026-10-07T12:30")["results"]["reading"] == ["from the start to 7 Oct 2026"]
 
 
 def test_a_group_shows_its_summary_and_each_hit_why_it_was_found(client: TestClient) -> None:
-    html = client.get("/search?query=deadline+with+Ben").text
-    tree = parse(html)
-    summary = tree.find("p", class_="summary-line").find("a")
-    assert summary.attrs["data-locator"] == "minutes:2026-10-07-supplier-call"
-    assert summary.attrs["hx-get"] == "/search/panel?query=deadline+with+Ben&hit=minutes:2026-10-07-supplier-call"
-    assert "lines 21-22" in html
-    marks = [m.text() for m in tree.find_all("mark")]
-    assert "deadline" in marks
-    assert "Friday" not in marks
-    groups = tree.find_all("li", class_="group")
-    assert groups[0].find("span", class_="kind").text() == "recording"
-    assert any(b.text() == "some words" for b in tree.find_all("span", class_="badge"))
-    doc_hits = [a.attrs["href"] for a in tree.find_all("a", class_="hit-link") if "lines=" in a.attrs["href"]]
-    assert any(href.endswith("&lines=21-22") for href in doc_hits), doc_hits
+    found = read(client, "query=deadline+with+Ben")
+    groups = found["results"]["groups"]
+    summary = groups[0]["summary"]
+    assert summary["id"] == "minutes:2026-10-07-supplier-call"
+    assert summary["url"] == "/search?query=deadline+with+Ben&hit=minutes:2026-10-07-supplier-call"
+    assert (groups[0]["kind"], groups[0]["icon"]) == ("recording", "recording")
+    every = hits(found)
+    assert any(h["stretch"] == "lines 21-22" for h in every)
+    marked = {p["text"] for h in every for p in h["snippet"] if p["mark"]}
+    assert "deadline" in marked
+    assert "Friday" not in marked
+    assert any(h["found"] == "some words" for h in every)
+    assert any(h["url"].endswith("&lines=21-22") for h in every)
 
 
 def test_a_transcript_hit_opens_on_the_recording_page_at_its_stretch(client: TestClient) -> None:
-    tree = parse(client.get("/search?query=pallet+labels+printer").text)
-    hits = tree.find_all("li", class_="hit")
-    links = {
-        hit.find("a", class_="hit-link").attrs["data-locator"]: [
-            a.attrs["href"] for a in hit.find_all("a", class_="to-recording")
-        ]
-        for hit in hits
-    }
-    transcripts = {loc: found for loc, found in links.items() if loc.startswith("r:calls:")}
-    assert transcripts, links
-    for loc, found in transcripts.items():
+    found = hits(read(client, "query=pallet+labels+printer"))
+    transcripts = {h["locator"]: h["recording"] for h in found if h["locator"].startswith("r:calls:")}
+    assert transcripts
+    for loc, link in transcripts.items():
         rid, _, stretch = loc.removeprefix("r:").partition("@")
-        assert found == [f"/recording?rid={rid}&at={stretch}#at"]
-    assert all(not found for loc, found in links.items() if not loc.startswith("r:calls:"))
-    # The link lands on the page with the hit's lines marked.
-    href = next(iter(transcripts.values()))[0].partition("#")[0]
-    page = parse(client.get(href).text)
-    assert page.find("li", id="at")
-    assert page.find_all("li", class_="mark")
+        assert link == f"/recording?rid={rid}&at={stretch}#at"
+    assert all(h["recording"] is None for h in found if not h["locator"].startswith("r:calls:"))
+    # The link opens the Recording page with the hit's lines marked, the first of them its target.
+    query = next(iter(transcripts.values())).partition("?")[2].partition("#")[0]
+    page = client.get(f"/api/web/recording?{query}").json()["view"]
+    lines = page["transcripts"][0]["lines"]
+    assert [line["target"] for line in lines].count(True) == 1
+    assert any(line["mark"] for line in lines)
 
 
 def test_show_more_asks_for_twenty_more(client: TestClient) -> None:
-    html = client.get("/search?query=Nortwin&k=2").text
-    assert len(page_hits(html)) >= 2
-    url, fragment = link_to(html, "Show more")
-    assert url.endswith("&k=22")
-    assert fragment.startswith("/search/results?")
-    assert "Show more" not in client.get(url).text
+    found = read(client, "query=Nortwin&k=2")
+    assert len(listed(found)) >= 2
+    assert found["results"]["more"] == "/search?query=Nortwin&k=22"
+    assert read(client, "query=Nortwin&k=22")["results"]["more"] is None
 
 
 def test_nothing_found_offers_each_filter_to_drop(client: TestClient) -> None:
-    html = client.get("/search?query=zeppelin&sources=chat&entities=nobody-known").text
-    assert "Nothing found" in html
-    drops = [a.attrs["href"] for a in parse(html).find("div", class_="empty").find_all("a")]
-    assert drops == ["/search?query=zeppelin&entities=nobody-known", "/search?query=zeppelin&sources=chat"]
-    plain = client.get("/search?query=zeppelin").text
-    assert "Fewer words, another spelling" in plain
-    assert parse(plain).find("section", class_="results").attrs["data-announce"] == "nothing found"
+    found = read(client, "query=zeppelin&sources=chat&entities=nobody-known")["results"]
+    assert found["groups"] == []
+    assert [d["url"] for d in found["drops"]] == [
+        "/search?query=zeppelin&entities=nobody-known",
+        "/search?query=zeppelin&sources=chat",
+    ]
+    plain = read(client, "query=zeppelin")["results"]
+    assert (plain["drops"], plain["announce"]) == ([], "nothing found")
 
 
-def test_the_start_runs_no_search_and_says_what_a_query_can_hold(client: TestClient) -> None:
-    html = client.get("/search").text
-    assert "Find anything you kept" in html
-    assert 'class="facets"' not in html
-    assert parse(html).find("input", id="query").attrs["value"] == ""
+def test_the_results_say_what_came_back_for_the_live_region(client: TestClient) -> None:
+    found = read(client, "query=Nortwin")["results"]
+    assert found["announce"] == f"{found['hits']} hits in {len(found['groups'])} groups"
+    assert read(client, "query=cold-rated+model&k=1")["results"]["announce"] == "1 hit in 1 group"
 
 
-def test_a_bad_date_keeps_the_query_and_the_filters_that_read(client: TestClient) -> None:
-    page = client.get("/search?query=day+rate&sources=chat&people=ben-sample&since=soon&until=2026-10-31")
-    assert page.status_code == 400
-    tree = parse(page.text)
-    assert tree.find("input", id="query").attrs["value"] == "day rate"
-    assert tree.find("input", name="since").attrs["value"] == "soon"
-    assert tree.find("input", name="until").attrs["value"] == "2026-10-31"
-    carried = {(i.attrs["name"], i.attrs["value"]) for i in tree.find_all("input", type="hidden")}
-    assert {("sources", "chat"), ("people", "ben-sample")} <= carried
-    assert "since is a date or a time" in tree.find("div", class_="error").text()
-    assert tree.find("details", class_="facets")
-    both = client.get("/search/results?query=x&since=soon&until=later").text
-    assert "since is a date or a time" in both
-    assert "until is a date or a time" in both
-    assert parse(both).find("input", name="until").attrs["value"] == "later"
+def test_the_start_runs_no_search_and_names_the_index(client: TestClient) -> None:
+    found = read(client, "")
+    assert found["results"] is None and found["locator"] is None and found["canonical"] == "/search"
+    assert found["index_line"]
+
+
+def test_a_bad_value_is_refused_naming_every_one_that_didn_t_read(client: TestClient) -> None:
+    one = read(client, "query=day+rate&sources=chat&since=soon&until=2026-10-31", status=400)
+    assert "since is a date or a time" in one["error"]
+    both = read(client, "query=x&since=soon&until=later", status=400)
+    assert "since is a date or a time" in both["error"] and "until is a date or a time" in both["error"]
+    panel = read(client, "hit=r:calls:rec-0100&around=99", status=400, path=f"{API}/panel")
+    assert "around is a whole number from 0 to 30" in panel["error"]
+    assert read(client, "people=ben-sample&query=")["results"] is not None
 
 
 def test_a_person_given_by_name_is_one_entry_with_its_id(client: TestClient) -> None:
-    html = client.get("/search?query=Nortwin&people=Ben+Sample").text
-    people = parse(html).find("section", aria_labelledby="facet-people")
-    labels = [a.find("span", class_="label").text() for a in people.find_all("a")]
-    assert labels.count("Ben Sample") == 1
-    ben = next(a for a in people.find_all("a") if a.find("span", class_="label").text() == "Ben Sample")
-    assert "on" in ben.attrs["class"].split()
-    assert ben.attrs["href"] == "/search?query=Nortwin"
-    assert [c.text() for c in parse(html).find_all("a", class_="chip")] == ["favour Ben Sample : remove"]
-    by_alias = parse(client.get("/search?query=Nortwin&people=Ben").text).find(
-        "section", aria_labelledby="facet-people"
-    )
-    assert [a.find("span", class_="label").text() for a in by_alias.find_all("a")].count("Ben Sample") == 1
-    entity = client.get("/search?query=fleet&entities=Northwind").text
-    found = parse(entity).find("section", aria_labelledby="facet-entities")
-    assert [a.find("span", class_="label").text() for a in found.find_all("a")].count("Northwind") == 1
+    def labels(found: dict[str, Any], key: str) -> list[str]:
+        return [i["label"] for f in found["results"]["facets"] if f["key"] == key for i in f["items"]]
 
-
-def test_a_bad_value_is_the_page_s_own_error(client: TestClient) -> None:
-    for path in ("/search?query=fleet&since=soon", "/search/results?query=fleet&since=soon"):
-        answer = client.get(path)
-        assert answer.status_code == 400
-        assert "since is a date or a time" in answer.text
-        assert answer.headers["Content-Type"].startswith("text/html")
-    panel = client.get("/search/panel?hit=r:calls:rec-0100&around=99")
-    assert panel.status_code == 400
-    assert "around is a whole number from 0 to 30" in panel.text
-    refused = client.get("/search?people=ben-sample&query=")
-    assert refused.status_code == 200
+    found = read(client, "query=Nortwin&people=Ben+Sample")
+    assert labels(found, "people").count("Ben Sample") == 1
+    ben = facet(found, "people")["Ben Sample"]
+    assert (ben["on"], ben["url"]) == (True, "/search?query=Nortwin")
+    assert [c["label"] for c in found["results"]["chips"]] == ["favour Ben Sample"]
+    assert labels(read(client, "query=Nortwin&people=Ben"), "people").count("Ben Sample") == 1
+    assert labels(read(client, "query=fleet&entities=Northwind"), "entities").count("Northwind") == 1
 
 
 def test_the_index_being_built_is_a_state_that_asks_again(client: TestClient) -> None:
     app = client.app
     assert isinstance(app, ServiceApp)
     app.service.updater = IndexUpdater(lambda: time.sleep(0.5), wait_seconds=0.01)
-    answer = client.get("/search/results?query=fleet")
-    assert answer.status_code == 200
-    waiting = parse(answer.text).find("div", class_="wait")
-    assert "the index is being built" in waiting.text()
-    assert waiting.attrs["hx-get"] == "/search/results?query=fleet"
-    assert waiting.attrs["hx-trigger"] == "load delay:5s"
-    assert waiting.attrs["hx-headers"] == '{"X-Docket-Retry": "1"}'
-    assert not html_problems(answer.text)
+    found = read(client, "query=fleet")
+    assert found["results"] is None
+    assert "the index is being built" in found["waiting"]
 
 
 def test_a_record_s_markup_stays_text(client: TestClient, tmp_path: Path) -> None:
     vault = Vault.open(tmp_path / "vault")
     text = 'pallet <script>alert(1)</script> <img src=x onerror="alert(2)"> javascript:alert(3) <b>bold</b>'
     vault.write_run("chat", [make_record(7, container="chat:C0OPS", text=text)])
-    html = client.get("/search?query=pallet+onerror&sources=chat").text
-    assert "<script>alert" not in html
-    assert "<img src=x" not in html
-    assert "<b>bold" not in html
-    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
-    assert not html_problems(html)
-    assert not a11y_problems(html)
-    hit = next(loc for loc in page_hits(html) if "1791000007" in loc)
-    panel = client.get("/search/panel", params={"hit": hit}).text
-    assert "&lt;img src=x onerror=" in panel
-    assert "<img" not in panel
-    assert not html_problems(panel)
+    found = hits(read(client, "query=pallet+onerror&sources=chat"))
+    hit = next(h for h in found if "1791000007" in h["locator"])
+    # The pieces give the words back as written, markup and all: the app shows them as text.
+    assert "<script>alert(1)</script>" in text_of(hit["snippet"])
+    marked = [p["text"] for p in hit["snippet"] if p["mark"]]
+    assert "pallet" in marked and "onerror" in marked
+    panel = read(client, f"hit={quote(hit['locator'])}", path=f"{API}/panel")["panel"]
+    said = [p["text"] for span in panel["spans"] for p in span["paragraphs"]]
+    assert any('<img src=x onerror="alert(2)">' in t for t in said)
 
 
 def test_a_locator_as_the_query_opens_it_instead_of_searching(client: TestClient) -> None:
-    html = client.get("/search?query=r:chat:C0OPS/1791400800.000100").text
-    assert "Opened" in html
-    assert 'class="groups"' not in html
-    panel = parse(html).find("section", class_="panel")
-    assert panel.find("h2").text()
-    assert "cold-rated" in panel.text()
-    filtered = client.get("/search?query=r:chat:C0OPS/1791400800.000100&sources=chat").text
-    assert 'class="groups"' in filtered
+    query = "query=r:chat:C0OPS/1791400800.000100"
+    found = read(client, query)
+    assert (found["results"], found["locator"]) == (None, "r:chat:C0OPS/1791400800.000100")
+    panel = read(client, query, path=f"{API}/panel")["panel"]
+    assert panel["title"] and panel["locator"] == "r:chat:C0OPS/1791400800.000100"
+    assert any("cold-rated" in p["text"] for span in panel["spans"] for p in span["paragraphs"])
+    assert read(client, f"{query}&sources=chat")["results"]["groups"]
 
 
 def test_the_reading_line_and_the_group_times_read_plainly() -> None:
@@ -326,6 +270,21 @@ def test_the_reading_line_and_the_group_times_read_plainly() -> None:
     assert views._stretch(Hit(locator="d", kind="doc", lines=(4, 4))) == "line 4"  # pyright: ignore[reportPrivateUsage]
 
 
+@pytest.mark.parametrize(
+    ("text", "marks"),
+    [
+        ("we kick off, the kick-off, a kickoff; we'll see", ["kick", "off", "kick", "off", "kickoff"]),
+        ("", []),
+        ("Kickoff", ["Kickoff"]),
+        ("no match here", []),
+    ],
+)
+def test_a_snippet_s_pieces_give_its_text_back_with_the_query_s_words_marked(text: str, marks: list[str]) -> None:
+    found = views.pieces(text, ["kickoff", "well"])
+    assert "".join(p.text for p in found) == text
+    assert [p.text for p in found if p.mark] == marks
+
+
 def test_a_quoted_phrase_marks_its_words(client: TestClient) -> None:
-    html = client.get('/search?query="day+rate"').text
-    assert {m.text().lower() for m in parse(html).find_all("mark")} >= {"day", "rate"}
+    found = hits(read(client, 'query="day+rate"'))
+    assert {p["text"].lower() for h in found for p in h["snippet"] if p["mark"]} >= {"day", "rate"}

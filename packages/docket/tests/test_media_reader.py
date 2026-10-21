@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-from docket_webkit import OURS, PORT, TOKEN, parse
+from docket_webkit import OURS, PORT, TOKEN
 from media_kit import CALL, audio, in_raw, media_vault
 from starlette.testclient import TestClient
 
@@ -121,7 +121,6 @@ def test_the_recording_page_says_why_it_plays_nothing(
         started = sessions.redeem(sessions.new_code())
         assert started is not None
         client.cookies.set(COOKIE, started)
-        page = parse(client.get(f"/recording?rid={CALL}").text)
-    shown = page.find("section", class_="audio")
-    assert shown.attrs["data-why"] == state
-    assert NO_AUDIO[state] in shown.text()  # pyright: ignore[reportArgumentType]
+        shown = client.get(f"/api/web/recording?rid={CALL}").json()["view"]["audio"]
+    assert shown["why"] == state
+    assert shown["message"] == NO_AUDIO[state]  # pyright: ignore[reportArgumentType]

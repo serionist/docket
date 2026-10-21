@@ -23,6 +23,9 @@
   --on-green: light-dark(#ffffff, #0e1a13);
   --selection: light-dark(#e1ece4, #22352a);
 
+  /* A highlighter over the words a search found, in a snippet or the raw beside it. */
+  --mark: light-dark(#f8e6a0, #4a3d0e);
+
   /* Red ink: overdue, drop and errors. */
   --red: light-dark(#b0281f, #f08a80);
   --red-wash: light-dark(#fbe9e6, #3b211e);

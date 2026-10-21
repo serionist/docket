@@ -1,4 +1,4 @@
-"""The Recording page's audio (#159, DR-0576): the stored file, decrypted through the one reader (DR-0551) and served
+"""The Recording page's audio (#159, DR-0777): the stored file, decrypted through the one reader (DR-0551) and served
 with byte ranges, so the browser's player seeks to a line's time.
 
 | Request | Answer |
@@ -80,11 +80,6 @@ def head(size: int, media_type: str) -> Response:
 def refused(why: str) -> Response:
     """No audio to play, and why, in the reader's words."""
     return PlainTextResponse(f"no audio: {why}", status_code=404, headers={"Cache-Control": "no-store"})
-
-
-def token_refused() -> Response:
-    """The token is Docket's API, Claude's too: the audio plays in the browser, with its session (DR-0576)."""
-    return PlainTextResponse("the audio plays in the browser, with its session", status_code=403)
 
 
 class Plain:

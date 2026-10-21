@@ -7,7 +7,9 @@ materials through the shared viewer. The clock is noon today in the owner's zone
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Iterator
+from contextlib import closing
 from datetime import UTC, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -247,6 +249,13 @@ def test_the_panel_links_its_people_to_their_briefs_and_its_recording(client: Te
     assert supplier["agenda"] == f"Supplier call, {supplier['when']}\n- The offer in writing"
     # A meeting's own add takes no Undo, as an item's never does.
     assert [(h["line"], h["button"]) for h in supplier["history"]][-1] == ("added", None)
+
+
+def test_a_ledger_folded_in_memory_links_no_one_to_a_brief() -> None:
+    """With no index yet the ledger is folded in memory, which holds no entities, so no attendee links to a brief.
+    Whether a page's read finds the index built depends on the updater's timing, so this is held here directly."""
+    with closing(sqlite3.connect(":memory:")) as conn:
+        assert day_routes.briefs(conn) == {}
 
 
 def test_a_carried_proposed_point_removed_stays_away_and_its_old_meeting_stays_closed(

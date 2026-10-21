@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0776
+    title: The Recording page's URL holds rid, doc and at, its read is JSON, and a link that sets at lands on the line it marks, which the app scrolls to
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#252", "#159"]
+    supersedes: [DR-0544]
+    description: "DR-0544's URL, in the app (#252). /recording takes rid (a recording's or a transcript's rid; a locator such as r:<rid>@02:30 reads too, its time read as at), doc (the doc shown as the summary, by its id; by default the summary search attaches, else a legacy note covering the recording) and at (a time or a stretch as an anchor writes it after the @: 02:30, 02:30-03:20). One canonical form: that order, defaults left out, unknown parameters ignored; without a rid the page is its start, a box that takes a rid or a locator. GET /api/web/recording reads what the page shows, recording_view.py's view as before, and the canonical URL, which the page writes back keeping the URL's hash (DR-0704). A malformed value answers 400 with its words, beside the start's box; a rid the raw log doesn't hold, or a record that isn't a recording, is the view's own words with a link to Search; a held rid shows only that it is held, with its link to the Staging page; an index still being built answers waiting, and the page asks again every 5 s. A summary line's anchor and a transcript line's time are links to the same page with at, and a link that sets at still ends in #at, the id of the first line at marks, so a link from Claude, Search or a brief lands there: the app scrolls that line into view once its read answers, and the marked lines and the summary lines pointing at them show in the selection's green. The Search page's transcript hits, and its panel on a recording or a transcript, link here at the hit's stretch."
+    binds:
+      - Parameters only gain optional ones whose default keeps today's meaning, so a bookmark or a link from Claude keeps opening.
+      - The read answers GET only and writes nothing.
+    not_chosen:
+      - "Plain links and a page per line, as the Jinja page had: the pages need JavaScript now (DR-0704), and a refetch in place keeps the player playing."
+      - "A fragment per line, such as #seg-12, in place of at: a link from Search can't know a line's number, and a stretch marks several lines."

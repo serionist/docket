@@ -134,7 +134,6 @@
     border-radius: 999px;
   }
   .chip:hover { text-decoration: none; border-color: var(--accent); }
-  .chip-x { display: inline-flex; color: var(--muted); }
   .chips { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
 
   .badge {
@@ -290,8 +289,6 @@
   .paragraph::marker { color: var(--muted); font-family: var(--font-mono); font-size: var(--text-xs); }
 
   .pairs { display: grid; gap: var(--space-2); }
-  .pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: var(--space-3); padding-bottom: var(--space-2); border-bottom: 1px solid var(--line); }
-  .pair.has-problem .pair-line { border-left: 3px solid var(--error); padding-left: var(--space-2); }
   .problem { display: flex; gap: 6px; margin-top: 4px; color: var(--error); font-size: var(--text-sm); }
 
   /* -- the empty state any page shows -------------------------------------------------------------------------- */
