@@ -159,7 +159,9 @@ def _holders(doc: ProcessedDoc, entity_id: str, known: list[Entity]) -> list[Ent
 def commit_times(git: Git, commits: list[str]) -> dict[str, str]:
     """Each commit's time (UTC, ISO), one call for all that aren't known yet, or one each when some aren't on this
     clone."""
-    known = {commit: _TIMES[commit] for commit in commits if commit in _TIMES}
+    # One look-up a commit: another thread may clear the keep between a check and a read.
+    seen = {commit: _TIMES.get(commit) for commit in commits}
+    known = {commit: when for commit, when in seen.items() if when is not None}
     asked = [commit for commit in commits if commit not in known]
     if asked:
         found = _times(git, asked)

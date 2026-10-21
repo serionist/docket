@@ -79,7 +79,9 @@ export function BriefsPage() {
 
   // What the last pick did, or a URL from before the app that still names it, said once at the list's foot.
   const [notice, setNotice] = React.useState<string | null>(null);
-  const [refused, setRefused] = React.useState("");
+  // Why the last pick wrote nothing, with the brief it was on: it goes when the page leaves that brief.
+  const [refused, setRefused] = React.useState<{ brief: string; words: string } | null>(null);
+  if (refused && refused.brief !== brief) setRefused(null);
   const [seenNotice, setSeenNotice] = React.useState<string | null>(null);
   if (fresh && data.notice && seenNotice !== data.asked) {
     setSeenNotice(data.asked);
@@ -162,14 +164,14 @@ export function BriefsPage() {
     pending,
     onPick: (card: Card, pick: Pick) => {
       setPending(card.id);
-      setRefused("");
+      setRefused(null);
       decide({ brief, decision: card.id, rev: card.rev, pick: pick.value })
         .then(
           (done) => setNotice(done.notice),
           (error: unknown) => {
             // A decision that moved since wrote nothing: the read below shows it as it stands now.
             setNotice(null);
-            setRefused(wordsOf(error));
+            setRefused({ brief, words: wordsOf(error) });
           },
         )
         .finally(() => {
@@ -222,7 +224,9 @@ export function BriefsPage() {
             {view.mode === "missing" ? <Refusal>{view.message}</Refusal> : <Note>{view.message}</Note>}
           </div>
         )}
-        {data.decisions && <Decisions part={data.decisions} refused={refused} picking={picking} />}
+        {data.decisions && (
+          <Decisions part={data.decisions} refused={refused?.brief === brief ? refused.words : ""} picking={picking} />
+        )}
       </div>
     );
   }

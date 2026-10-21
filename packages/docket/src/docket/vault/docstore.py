@@ -270,8 +270,10 @@ class DocStore:
         shallow = git.git_dir / "shallow"
         mark = f"{shallow.stat().st_mtime_ns}" if shallow.is_file() else ""
         key = (str(git.git_dir), head, mark, tuple(ids)) if head else None
-        if key is not None and key in _HISTORIES:
-            return {doc_id: list(revs) for doc_id, revs in _HISTORIES[key].items()}
+        # One look-up: another thread may clear the keep between a check and a read.
+        kept = _HISTORIES.get(key) if key is not None else None
+        if kept is not None:
+            return {doc_id: list(revs) for doc_id, revs in kept.items()}
         found = self._histories(ids)
         if key is not None:
             if len(_HISTORIES) >= HISTORIES_KEPT:

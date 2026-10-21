@@ -18,6 +18,7 @@ import type { BriefLine, BriefsRead, BriefsView, Card, DecisionsPart } from "./a
 
 const NORTHWIND = "brief:northwind";
 const FLEET = "brief:fleet-management";
+const PILOT = "brief:harbour-pilot";
 const WEEKLY = "decision:2026-10-14-weekly-review";
 
 function blank(mode: BriefsView["mode"], title = "Briefs"): BriefsView {
@@ -202,6 +203,12 @@ async function serve(request: Request): Promise<Response> {
   if (params.get("type") === "people") return json({ error: "type is an entity type, not 'people'" }, 400);
   const brief = params.get("brief");
   const notice = params.get("done") === "confirm" ? "Confirmed: it is a decision now." : null;
+  if (brief === PILOT) {
+    const view = { ...blank("entity", "Harbour pilot"), message: "No brief yet." };
+    const pilot = card("decision:2026-10-16-pilot-crane", "the crane goes first", 1, "proposed", true);
+    const part = { waiting: [pilot], current: [], rejected: [], hidden_note: "", empty: "" };
+    return read(`/briefs?brief=${PILOT}`, view, { decisions: part });
+  }
   if (brief === FLEET) {
     const view = { ...blank("entity", "Fleet management"), message: "No brief yet." };
     return read(`/briefs?brief=${FLEET}`, view, { decisions: fleetPart(), notice });
@@ -362,12 +369,23 @@ describe("a pick", () => {
 
   it("is refused in the server's words when the decision moved since, and the page shows it as it stands", async () => {
     moved = true;
-    await open(`/briefs?brief=${FLEET}`, "[data-decision]");
+    const router = await open(`/briefs?brief=${FLEET}`, "[data-decision]");
     fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(`${WEEKLY} is confirmed already`));
     expect(said()).toBe("");
     await waitFor(() => expect(document.querySelector('[aria-labelledby="decisions-waiting"]')).toBeNull());
     expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
+    // Another entity's decisions never show it, nor does the first's when the page comes back to it.
+    await act(async () => {
+      await router.navigate({ href: `/briefs?brief=${PILOT}` });
+    });
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Harbour pilot"));
+    expect(screen.queryByRole("alert")).toBeNull();
+    await act(async () => {
+      await router.navigate({ href: `/briefs?brief=${FLEET}` });
+    });
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Fleet management"));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("from a URL before the app says its click once and leaves the URL without it", async () => {
