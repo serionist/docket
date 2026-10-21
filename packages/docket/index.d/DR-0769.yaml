@@ -1,0 +1,13 @@
+decisions:
+  - id: DR-0769
+    title: A meeting's people link to their briefs by name, alias or address, and its recording is the material the sync labelled recording, on the Recording page
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#205", "#252"]
+    description: "The meeting panel links the organiser and each attendee to their brief, /briefs?brief=brief:<entity>, when exactly one person with a brief in the index goes by that name: a name or plain alias of a person entity that isn't archived, folded word by word as the index folds an alias, or an email address its ids give, lowercased. A name two such people share, a name no person goes by and a person with no brief stay plain text; the ledger folded in memory, with no index, has no people and links none. A material labelled recording, as the sync links a recording to its meeting by time (DR-0651), whose ref is a record of one of the vault's sources, links to the Recording page, /recording?rid=<rid>, rather than Search's panel, at the top of the panel and among its materials. Each item on the meeting and each suggested one links to its panel on the Ledger, and a carried point's meetings to their panels on Meetings, through the app's router, so the leave guard asks about unsaved text first."
+    binds: [An attendee links only to a brief the index holds.]
+    not_chosen:
+      - "A link for every entity whose name matches, brief or not: the Briefs page would open on nothing."
+      - "Telling a recording by reading each material's record: a raw read for a ledger panel, where the sync's label says it."

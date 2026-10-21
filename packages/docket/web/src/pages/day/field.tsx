@@ -1,8 +1,9 @@
 /**
- * A field of the open item, saved on change (DR-0710): a text field when it is left or Enter is pressed in it, a
- * select or a day as it changes, and who as a text field that also saves a name taken from its list (DR-0714). It is
- * unsaved from its first change until its save answers, and a refused one stays unsaved with the writer's words
- * beside it, its text as typed. A newer value read from the server replaces only text the owner hasn't changed.
+ * A field of the open item or meeting, saved on change (DR-0710): a text field when it is left or Enter is pressed in
+ * it, a select or a day as it changes, and who as a text field that also saves a name taken from its list (DR-0714). It
+ * is unsaved from its first change until its save answers, and a refused one stays unsaved with the writer's words
+ * beside it, its text as typed. A newer value read from the server replaces only text the owner hasn't changed. A
+ * meeting's outcome and notes are a set on the meeting (DR-0667), an item's notes the notes op.
  */
 import * as React from "react";
 import { DatePicker } from "@/components/date-picker";
@@ -11,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { setUnsaved, startSave, useUnsaved } from "@/lib/drafts";
 import { cn } from "@/lib/utils";
-import type { Body, ItemPanel } from "./api";
+import type { Body } from "./api";
 import { refusal, useActions } from "./context";
 import { WhoField } from "./who-field";
 
@@ -34,8 +35,8 @@ export function draftKey(item: string, name: string): string {
   return `panel:${item}:${name}`;
 }
 
-function bodyOf(item: string, name: FieldName, value: string): Body {
-  return name === "notes"
+function bodyOf(item: string, name: FieldName, value: string, meeting: boolean): Body {
+  return name === "notes" && !meeting
     ? { op: "notes", items: [item], notes: value }
     : { op: "set", items: [item], fields: { [name]: value } };
 }
@@ -55,6 +56,7 @@ export function Field({
   value,
   className,
   rows,
+  meeting = false,
 }: {
   item: string;
   name: FieldName;
@@ -62,6 +64,8 @@ export function Field({
   value: string;
   className?: string;
   rows?: number;
+  /** The field is a meeting's, `item` its ref. */
+  meeting?: boolean;
 }) {
   const { save, kinds, today } = useActions();
   const shape = SHAPES[name];
@@ -92,13 +96,13 @@ export function Field({
     if (next === sending.current) return;
     sending.current = next;
     const done = startSave();
-    const outcome = await save(bodyOf(item, name, next));
+    const outcome = await save(bodyOf(item, name, next, meeting));
     sending.current = null;
     setProblem(refusal(outcome));
     if (outcome.ok && typed.current === next) {
       // What the writer kept, which may differ from what was typed, such as a title's spaces. The drafts hear of it
       // before the save ends, so a panel waiting on the save never asks about text just saved.
-      const kept = String(outcome.answer.panel[name as keyof ItemPanel] ?? "");
+      const kept = String((outcome.answer.panel as Record<string, unknown>)[name] ?? "");
       setDraft(kept);
       setSeen(kept);
       setUnsaved(key, false);

@@ -6,6 +6,7 @@
  * row shows them on hover too. The Queue's groups by call carry the call's stamp in their head.
  */
 import { CheckIcon, CircleSlashIcon, XIcon } from "lucide-react";
+import type * as React from "react";
 import { KindTab } from "@/components/kind";
 import { Empty } from "@/components/shell/page";
 import { isVerdict, MEANING, Stamp, STAMP_KEY } from "@/components/stamp";
@@ -45,8 +46,80 @@ export interface ListProps {
 }
 
 /** A row's own URL: its page with its panel open, for a link to open in a tab of its own. */
-function rowHref(path: string, search: Search, ref: string): string {
-  return `${path}${stringifySearch(withSearch(quiet(search), { open: ref, at: undefined, drop: undefined, text: undefined }))}`;
+export function rowHref(path: string, search: Search, ref: string): string {
+  return `${path}${stringifySearch(withSearch(quiet(search), { open: ref, at: undefined, drop: undefined, text: undefined, suggest: undefined }))}`;
+}
+
+/**
+ * A ruled row of a day page's list, an item's or a meeting's: it holds the focus when selected and shows it with the
+ * green bar, Tab reaches the selected one, and a plain click on its link opens its panel while a click with a key
+ * held opens its own URL. `before` stands left of the link, such as a tick; `after` right of it inside the line, such
+ * as the quick buttons; `below` under the line.
+ */
+export function ListRow({
+  rowRef,
+  selected,
+  tinted,
+  tabbable,
+  opened,
+  href,
+  onSelect,
+  onOpen,
+  before,
+  after,
+  below,
+  marks,
+  children,
+}: {
+  rowRef: string;
+  selected: boolean;
+  /** Ticked, so its ground shows it while it isn't the selected one. */
+  tinted?: boolean;
+  tabbable: boolean;
+  opened: boolean;
+  href: string;
+  onSelect: (ref: string) => void;
+  onOpen: (ref: string) => void;
+  before?: React.ReactNode;
+  after?: React.ReactNode;
+  below?: React.ReactNode;
+  /** Data attributes a test or a style reads, such as `data-triage`. */
+  marks?: Record<`data-${string}`, string>;
+  children: React.ReactNode;
+}) {
+  return (
+    <li
+      data-row={rowRef}
+      {...marks}
+      tabIndex={tabbable ? 0 : -1}
+      aria-current={selected ? "true" : undefined}
+      onFocus={() => onSelect(rowRef)}
+      className={cn(
+        "group/row relative border-b border-rule text-sm outline-offset-[-2px]",
+        selected ? "bg-selection" : tinted ? "bg-hover" : "bg-sheet hover:bg-hover",
+      )}
+    >
+      {selected && <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-green" />}
+      <div className="flex min-h-8 items-center gap-2 pr-3 pl-1.5 pointer-coarse:min-h-11 sm:pr-4 sm:pl-2.5">
+        {before}
+        <a
+          href={href}
+          tabIndex={-1}
+          onClick={(event) => {
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            onOpen(rowRef);
+          }}
+          aria-current={opened ? "page" : undefined}
+          className="flex min-w-0 flex-1 cursor-default items-center gap-3 self-stretch py-1.5 text-ink outline-none"
+        >
+          {children}
+        </a>
+        {after}
+      </div>
+      {below}
+    </li>
+  );
 }
 
 function Quick({
@@ -134,23 +207,20 @@ function RowLine({
 }) {
   const selected = row.ref === props.selected;
   const ticked = props.ticked.has(row.ref);
-  const opened = row.ref === props.open;
   const quickShown = selected && row.quick.length > 0;
   return (
-    <li
-      data-row={row.ref}
-      data-triage={row.triage ?? ""}
-      tabIndex={tabbable ? 0 : -1}
-      aria-current={selected ? "true" : undefined}
-      onFocus={() => props.onSelect(row.ref)}
-      className={cn(
-        "group/row relative border-b border-rule text-sm outline-offset-[-2px]",
-        selected ? "bg-selection" : ticked ? "bg-hover" : "bg-sheet hover:bg-hover",
-      )}
-    >
-      {selected && <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-green" />}
-      <div className="flex min-h-8 items-center gap-2 pr-3 pl-1.5 pointer-coarse:min-h-11 sm:pr-4 sm:pl-2.5">
-        {row.callable ? (
+    <ListRow
+      rowRef={row.ref}
+      marks={{ "data-triage": row.triage ?? "" }}
+      selected={selected}
+      tinted={ticked}
+      tabbable={tabbable}
+      opened={row.ref === props.open}
+      href={rowHref(props.path, props.search, row.ref)}
+      onSelect={props.onSelect}
+      onOpen={props.onOpen}
+      before={
+        row.callable ? (
           <Checkbox
             checked={ticked}
             tabIndex={tabbable ? 0 : -1}
@@ -159,62 +229,11 @@ function RowLine({
           />
         ) : (
           <span aria-hidden className="size-6 shrink-0 pointer-coarse:size-11" />
-        )}
-        <a
-          href={rowHref(props.path, props.search, row.ref)}
-          tabIndex={-1}
-          onClick={(event) => {
-            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-            event.preventDefault();
-            props.onOpen(row.ref);
-          }}
-          aria-current={opened ? "page" : undefined}
-          className="flex min-w-0 flex-1 cursor-default items-center gap-3 self-stretch py-1.5 text-ink outline-none"
-        >
-          <span className="hidden w-14 shrink-0 font-mono text-xs text-ink-muted @lg:block">{row.ref}</span>
-          <span className="hidden w-[4.5rem] shrink-0 @lg:flex">
-            <KindTab kind={row.kind} />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="flex min-w-0 items-center gap-2">
-              <span className={cn("truncate", row.state !== "open" && !row.woke && "text-ink-muted")} dir="auto">
-                {row.title}
-              </span>
-              {row.meeting && (
-                <span className="hidden shrink-0 rounded-sm border border-rule px-1 font-mono text-xs text-ink-muted @md:inline">
-                  {row.meeting}
-                </span>
-              )}
-              {row.archived && (
-                <span className="shrink-0 rounded-sm border border-rule px-1 text-xs text-ink-muted">archived</span>
-              )}
-            </span>
-            <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-muted @lg:hidden">
-              <span className="shrink-0 whitespace-nowrap">{row.ref}</span>
-              <KindTab kind={row.kind} className="h-4" />
-              <span className="truncate" dir="auto">
-                {row.who}
-              </span>
-            </span>
-          </span>
-          {/* The calls stand in a column of their own, so they read down the list. */}
-          <span className="flex shrink-0 @lg:w-16">{isVerdict(row.triage) && <Stamp verdict={row.triage} />}</span>
-          <span className="hidden w-28 shrink-0 truncate text-xs text-ink-muted @2xl:block" dir="auto">
-            {row.who}
-          </span>
-          <span className="hidden w-20 shrink-0 truncate text-xs text-ink-muted @4xl:block">{row.stream}</span>
-          <span
-            title={row.due.title}
-            className={cn("w-20 shrink-0 text-right text-xs whitespace-nowrap tabular-nums", TONE[row.due.tone] ?? "")}
-          >
-            {row.due.text}
-          </span>
-          <span className="hidden w-8 shrink-0 text-right text-xs text-ink-muted tabular-nums @4xl:block">
-            <span className="sr-only">open </span>
-            {row.age}d
-          </span>
-        </a>
-        {row.quick.length > 0 && !props.narrow && (
+        )
+      }
+      after={
+        row.quick.length > 0 &&
+        !props.narrow && (
           <Quick
             row={row}
             pending={props.pending}
@@ -226,18 +245,64 @@ function RowLine({
               quickShown ? "flex bg-selection" : "hidden bg-hover group-hover/row:flex",
             )}
           />
-        )}
-      </div>
-      {quickShown && props.narrow && (
-        <Quick
-          row={row}
-          pending={props.pending}
-          onCall={props.onCall}
-          onDrop={props.onDrop}
-          className="flex flex-wrap pb-2 pl-12"
-        />
-      )}
-    </li>
+        )
+      }
+      below={
+        quickShown &&
+        props.narrow && (
+          <Quick
+            row={row}
+            pending={props.pending}
+            onCall={props.onCall}
+            onDrop={props.onDrop}
+            className="flex flex-wrap pb-2 pl-12"
+          />
+        )
+      }
+    >
+      <span className="hidden w-14 shrink-0 font-mono text-xs text-ink-muted @lg:block">{row.ref}</span>
+      <span className="hidden w-[4.5rem] shrink-0 @lg:flex">
+        <KindTab kind={row.kind} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className={cn("truncate", row.state !== "open" && !row.woke && "text-ink-muted")} dir="auto">
+            {row.title}
+          </span>
+          {row.meeting && (
+            <span className="hidden shrink-0 rounded-sm border border-rule px-1 font-mono text-xs text-ink-muted @md:inline">
+              {row.meeting}
+            </span>
+          )}
+          {row.archived && (
+            <span className="shrink-0 rounded-sm border border-rule px-1 text-xs text-ink-muted">archived</span>
+          )}
+        </span>
+        <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-muted @lg:hidden">
+          <span className="shrink-0 whitespace-nowrap">{row.ref}</span>
+          <KindTab kind={row.kind} className="h-4" />
+          <span className="truncate" dir="auto">
+            {row.who}
+          </span>
+        </span>
+      </span>
+      {/* The calls stand in a column of their own, so they read down the list. */}
+      <span className="flex shrink-0 @lg:w-16">{isVerdict(row.triage) && <Stamp verdict={row.triage} />}</span>
+      <span className="hidden w-28 shrink-0 truncate text-xs text-ink-muted @2xl:block" dir="auto">
+        {row.who}
+      </span>
+      <span className="hidden w-20 shrink-0 truncate text-xs text-ink-muted @4xl:block">{row.stream}</span>
+      <span
+        title={row.due.title}
+        className={cn("w-20 shrink-0 text-right text-xs whitespace-nowrap tabular-nums", TONE[row.due.tone] ?? "")}
+      >
+        {row.due.text}
+      </span>
+      <span className="hidden w-8 shrink-0 text-right text-xs text-ink-muted tabular-nums @4xl:block">
+        <span className="sr-only">open </span>
+        {row.age}d
+      </span>
+    </ListRow>
   );
 }
 

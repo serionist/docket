@@ -1,6 +1,8 @@
 """The day pages' URL (DR-0664 to DR-0666, DR-0704): one state for the Ledger, the Queue, Meetings and Today, the
 shared parameters first, then each page's own, in one canonical form with the defaults left out. The Queue takes the
-shared ones; `state`, `group` and `archived` are the Ledger's alone, and its canonical URL leaves them out.
+shared ones; `state`, `group` and `archived` are the Ledger's alone, and its canonical URL leaves them out. Meetings
+takes `q` and `stream` of the shared filters, `kind`, `who` and `k` being the items' (DR-0768), and `suggest` of its
+own.
 
 | Parameter | What | Default |
 |---|---|---|
@@ -13,7 +15,8 @@ shared ones; `state`, `group` and `archived` are the Ledger's alone, and its can
 | `group` | the Ledger's: open items by due, stream, kind, who or meeting | due |
 | `archived` | the Ledger's: `1` lists archived items too (DR-0615) | none |
 | `drop` | `1` opens the open item's drop form, its why focused | none |
-| `text` | a material of the open item shown in the panel's viewer | none |
+| `text` | a material of the open item or meeting shown in the panel's viewer | none |
+| `suggest` | Meetings': `1` lists the open meeting's suggestions, the items worth raising in it | none |
 | `done` | what the last write did: its batch, `nothing`, `opened` or `shown` | none |
 | `said` | what that batch was when it undid or redid one, `undo` or `redo`, so its notice says so | none |
 | `skipped` | the rows a bulk's op didn't take | none |
@@ -38,7 +41,7 @@ from docket.ledger.meetings import meeting_text
 from docket.ledger.store import MEETING_NUMBER, SLUG
 from docket.web import urls
 
-PATHS = {"ledger": "/ledger", "queue": "/queue"}
+PATHS = {"ledger": "/ledger", "queue": "/queue", "meetings": "/meetings"}
 DEFAULT_K = 100
 MORE = 100
 MAX_K = 100_000
@@ -90,6 +93,7 @@ class DayState:
     done: str | None = None
     said: str | None = None
     skipped: tuple[str, ...] = ()
+    suggest: bool = False
 
     @staticmethod
     def read(params: QueryParams | Mapping[str, str], page: str = "ledger") -> DayState:
@@ -112,15 +116,18 @@ class DayState:
         q = " ".join((params.get("q") or "").split()) or None
         if q is not None and len(q) > MAX_Q:
             raise DayStateError(f"q is at most {MAX_Q} characters")
-        stream, kind = first("stream"), first("kind")
+        stream = first("stream")
         if stream is not None and not SLUG.fullmatch(stream):
             raise DayStateError(f"stream is a stream's name, such as pilot, not {stream!r}")
+        # The items' own filters: Meetings ignores them, as any parameter it doesn't take.
+        items = page != "meetings"
+        kind = first("kind") if items else None
         if kind is not None and kind not in ops.KINDS:
             raise DayStateError(f"kind is one of {', '.join(ops.KINDS)}, not {kind!r}")
-        who = " ".join((params.get("who") or "").split()) or None
+        who = (" ".join((params.get("who") or "").split()) or None) if items else None
         if who is not None and len(who) > MAX_WHO:
             raise DayStateError(f"who is at most {MAX_WHO} characters")
-        given = first("k") or ""
+        given = (first("k") or "") if items else ""
         # isdigit alone takes a superscript two, which int() refuses.
         if given and (not (given.isascii() and given.isdigit()) or not 1 <= int(given) <= MAX_K):
             raise DayStateError(f"k is a whole number from 1 to {MAX_K}, not {given!r}")
@@ -155,28 +162,35 @@ class DayState:
             state=state,
             group=group,
             archived=flag("archived") if ledger else False,
-            drop=flag("drop"),
+            drop=flag("drop") if items else False,
             text=text,
             done=done,
             said=said,
             skipped=tuple(ref_of(s, "skipped") for s in skipped),
+            suggest=flag("suggest") if not items else False,
         ).canonical()
 
     def canonical(self) -> DayState:
-        """`at` only without an open panel; `drop` and `text` only with an open item; `said` and `skipped` only with
-        `done`; the Ledger's own parameters only on the Ledger."""
+        """`at` only without an open panel; `drop` only with an open item, `text` with it or on Meetings its meeting;
+        `said` and `skipped` only with `done`; the Ledger's own parameters only on the Ledger, the items' filters off
+        Meetings, and `suggest` only there with a panel open."""
         item = self.open is not None and not is_meeting(self.open)
         ledger = self.page == "ledger"
+        meetings = self.page == "meetings"
         return replace(
             self,
             state=self.state if ledger else "open",
             group=self.group if ledger else "due",
             archived=self.archived and ledger,
+            kind=None if meetings else self.kind,
+            who=None if meetings else self.who,
+            k=DEFAULT_K if meetings else self.k,
             at=None if self.open is not None else self.at,
-            drop=self.drop and item,
-            text=self.text if item else None,
+            drop=self.drop and item and not meetings,
+            text=self.text if item or (meetings and self.open is not None) else None,
             said=self.said if self.done is not None else None,
             skipped=self.skipped if self.done is not None else (),
+            suggest=self.suggest and meetings and self.open is not None,
         )
 
     def pairs(self) -> list[tuple[str, str]]:
@@ -193,6 +207,7 @@ class DayState:
         out += [("archived", "1")] if self.archived else []
         out += [("drop", "1")] if self.drop else []
         out += [("text", self.text)] if self.text else []
+        out += [("suggest", "1")] if self.suggest else []
         return out
 
     def url(self) -> str:

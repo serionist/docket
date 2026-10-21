@@ -1,8 +1,8 @@
 /**
- * A day page's filter bar (DR-0665, DR-0666): the Ledger's states with their counts, or the Queue's counts alone,
- * then the words to find and the list view's own filters, the Ledger's grouping and archived among them. The words
- * apply with Enter, who with Enter or a name taken from its list (DR-0714), a choice as it is made; the URL holds
- * each.
+ * A day page's filter bar (DR-0665, DR-0666): the Ledger's states with their counts, or the Queue's and Meetings'
+ * counts alone, then the words to find and the list view's own filters, the Ledger's grouping and archived among
+ * them; Meetings has no kind or who, which are the items' (DR-0768). The words apply with Enter, who with Enter or a
+ * name taken from its list (DR-0714), a choice as it is made; the URL holds each.
  */
 import { ListFilterIcon, SearchIcon } from "lucide-react";
 import * as React from "react";
@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import type { DayList, DayPageName } from "./api";
+import type { Chip, DayPageName, Filters as Filtered } from "./api";
 import { leaveOnEscape } from "./field";
 import type { Param } from "./url";
 import { WhoField } from "./who-field";
@@ -39,23 +39,37 @@ function useDraft(value: string): [string, (next: string) => void] {
   return [draft, setDraft];
 }
 
+const FIND_IN: Record<DayPageName, string> = {
+  ledger: "Find in titles, people, notes, history",
+  queue: "Find in titles, people, notes, history",
+  meetings: "Find in subjects, people, points, notes",
+};
+
 export function Filters({
   page,
-  data,
+  filters,
+  counts,
+  chips,
+  streams,
+  kinds,
   narrow,
   hrefOf,
   onChange,
 }: {
   page: DayPageName;
-  data: DayList;
+  filters: Filtered;
+  counts: string;
+  chips: Chip[];
+  streams: string[];
+  kinds: string[];
   /** At phone width the list view's filters fold behind a button, the words to find always shown. */
   narrow: boolean;
   hrefOf: (change: Change) => string;
   onChange: (change: Change) => void;
 }) {
-  const { filters, list } = data;
   const [unfolded, setUnfolded] = React.useState(false);
   const ledger = page === "ledger";
+  const items = page !== "meetings";
   const set = [filters.stream, filters.kind, filters.who, filters.group !== "due", filters.archived].filter(Boolean);
   const rest = !narrow || unfolded;
   const [q, setQ] = useDraft(filters.q);
@@ -69,9 +83,9 @@ export function Filters({
   return (
     <div className="grid shrink-0 gap-2 border-b border-rule px-3 py-2 sm:px-4">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        {list.chips.length > 0 && (
+        {chips.length > 0 && (
           <nav aria-label="States" className="-ml-1 flex flex-wrap gap-0.5">
-            {list.chips.map((chip) => {
+            {chips.map((chip) => {
               const change: Change = { state: chip.key === "open" ? undefined : chip.key, k: undefined };
               return (
                 <a
@@ -95,7 +109,7 @@ export function Filters({
             })}
           </nav>
         )}
-        <p className={cn("text-xs text-ink-muted", ledger && "hidden sm:block")}>{list.counts}</p>
+        <p className={cn("text-xs text-ink-muted", ledger && "hidden sm:block")}>{counts}</p>
       </div>
       <div role="search" className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-48 flex-1 basis-56">
@@ -107,7 +121,7 @@ export function Filters({
             id={FIND}
             type="search"
             aria-label="Find"
-            placeholder="Find in titles, people, notes, history"
+            placeholder={FIND_IN[page]}
             autoComplete="off"
             spellCheck={false}
             value={q}
@@ -135,43 +149,47 @@ export function Filters({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={ANY}>any</SelectItem>
-                {list.streams.map((stream) => (
+                {streams.map((stream) => (
                   <SelectItem key={stream} value={stream}>
                     {stream}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <Select
-              value={filters.kind || ANY}
-              onValueChange={(value) => onChange({ kind: value === ANY ? undefined : value, k: undefined })}
-            >
-              <SelectTrigger className="w-auto min-w-24" aria-label="Kind">
-                <span className="text-ink-muted">Kind</span>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ANY}>any</SelectItem>
-                {data.kinds.map((kind) => (
-                  <SelectItem key={kind} value={kind}>
-                    {kind}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <div className="w-36">
-              <WhoField
-                aria-label="Who"
-                placeholder="Who"
-                value={who}
-                onChange={setWho}
-                onPick={(name) => {
-                  setWho(name);
-                  onChange({ who: name.trim() || undefined, k: undefined });
-                }}
-                onKeyDown={enter(() => onChange({ who: who.trim() || undefined, k: undefined }))}
-              />
-            </div>
+            {items && (
+              <Select
+                value={filters.kind || ANY}
+                onValueChange={(value) => onChange({ kind: value === ANY ? undefined : value, k: undefined })}
+              >
+                <SelectTrigger className="w-auto min-w-24" aria-label="Kind">
+                  <span className="text-ink-muted">Kind</span>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ANY}>any</SelectItem>
+                  {kinds.map((kind) => (
+                    <SelectItem key={kind} value={kind}>
+                      {kind}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {items && (
+              <div className="w-36">
+                <WhoField
+                  aria-label="Who"
+                  placeholder="Who"
+                  value={who}
+                  onChange={setWho}
+                  onPick={(name) => {
+                    setWho(name);
+                    onChange({ who: name.trim() || undefined, k: undefined });
+                  }}
+                  onKeyDown={enter(() => onChange({ who: who.trim() || undefined, k: undefined }))}
+                />
+              </div>
+            )}
             {ledger && (filters.state === "open" || filters.state === "all") && (
               <Select
                 value={filters.group}

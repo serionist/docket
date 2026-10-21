@@ -358,7 +358,7 @@ def test_an_item_on_a_meeting_shows_the_meeting_with_its_points(client: TestClie
     ("ref", "said"),
     [
         ("A-0099", "no item A-0099"),
-        ("M-0001", "M-0001 is a meeting; its panel comes with the Meetings page."),
+        ("M-0001", "M-0001 is a meeting; its panel is on the Meetings page."),
     ],
 )
 def test_a_panel_that_can_t_open_says_why(client: TestClient, ref: str, said: str) -> None:
@@ -369,7 +369,7 @@ def test_a_panel_that_can_t_open_says_why(client: TestClient, ref: str, said: st
 def test_a_meeting_s_id_opens_no_item_panel(client: TestClient, vault: Vault) -> None:
     meeting = next(o for o in ops(vault) if o["op"] == "meeting")["id"]
     found = panel(client, f"open={meeting}")
-    assert found["missing"] == f"{meeting} is a meeting or a stream; its panel comes with the Meetings page."
+    assert found["missing"] == f"{meeting} is a meeting; its panel is on the Meetings page."
 
 
 def test_a_panel_with_nothing_open_has_nothing_to_say(client: TestClient) -> None:
@@ -772,8 +772,8 @@ def test_a_text_material_that_can_t_show_says_why(client: TestClient, vault: Vau
 def test_a_viewer_url_that_can_t_read_says_why(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     assert read(client, f"{API}/text?open=A-0005", status=400)["error"].startswith("text names")
     assert read(client, f"{API}/text?open=nope&text=x", status=400)["error"].startswith("open is an")
-    # A meeting opens no item, so there is no material to show.
-    assert read(client, f"{API}/text?open=M-0001&text=x", status=400)["error"].startswith("text names the material")
+    # A meeting's materials show too, and only those it names.
+    assert read(client, f"{API}/text?open=M-0001&text=x", status=400)["error"] == "M-0001 has no material x"
     assert read(client, f"{API}/text?open=A-0099&text=x", status=400)["error"] == "no item A-0099"
     real = Path.open
 

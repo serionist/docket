@@ -8,6 +8,11 @@ Unreleased in the same PR.
 
 ### Added
 
+- The Meetings page, `docket open /meetings`: your meetings from today on, then the earlier days, each with its
+  talking points open and its items; cancelled, declined and empty ones dimmed. Open one to answer, edit, drop or
+  reopen its points, keep or remove the ones Claude proposed, turn a point into an item, add the items worth raising
+  in one click, and write its outcome and notes; its attendees link to their briefs and its recording to the
+  Recording page. Every change shows with Undo, on a phone too.
 - The Queue page, `docket open /queue`: the open items to work through, the untriaged first with those whose snooze
   ended leading them, then your calls, discuss, claude, me and chase, each by due. The Ledger's keys, buttons, act bar
   and open item, so `1` to `4` triage the untriaged one after another; the sidebar counts what is untriaged, and a

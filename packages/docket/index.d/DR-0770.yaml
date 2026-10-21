@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0770
+    title: Meetings writes its points through ledger/write and its outcome and notes through ledger/save, which answers the meeting's line and panel
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#205", "#252"]
+    description: "The point buttons of DR-0667 post to POST /api/web/ledger/write with page meetings, the meeting in items and the point by its id in point, never its n: point with fields text, or item alone for a suggestion, which the route gives the item's whole title, the list's being cut at 72 characters; point_set with fields text, state or answer, an empty answer clearing it; keep with a point to keep that one, without one to keep every proposed point; remove with points, once the route has read that each is a point of the meeting, so a removal never undoes another op, all in one batch: a point the meeting holds of its own is undone, its point op left out, while a point a roll carried in is dropped, its proposal cleared, since undoing a copy undoes its roll too (DR-0624), which would open the point again on a meeting that is over for the next rollover to carry back; a rolled point is refused, as the writer refuses any change to one; point_item with fields stream, kind and who, a blank one left to the writer. A refusal writes nothing and answers 400 in the writer's or the route's words. A meeting's outcome and notes post to POST /api/web/ledger/save with page meetings as a set on the meeting; the route refuses any other field and a ref that isn't a meeting's before it writes, and answers SavedMeeting: the meeting's line, its panel and the versions just before and after the write, under its lock, as Saved answers an item's (DR-0710); the Ledger's and the Queue's save refuses a meeting before it writes. A set from a page takes notes too, so one field component saves an item's fields and a meeting's. A history line's Undo is never on a meeting's or a stream's own add, as never on an item's. On every day page the notice after a write, with its Undo, sits at the list's foot, or at the panel's foot while an open panel covers the list's: below 768 px, where it takes the screen, and from 768 to 1023 px, where it lies over the list's right side."
+    binds:
+      - A removal undoes only the points of its own meeting.
+      - A save on Meetings sets only a meeting's outcome or notes.
+      - A removal never brings a carried point back at the next rollover.
+    not_chosen:
+      - "Write routes of Meetings' own: the notice, Undo, the versions and the guard are the shared write's."
+      - "The page sending the item's title for a suggestion: the list it read cuts long titles."

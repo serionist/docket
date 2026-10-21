@@ -3,7 +3,8 @@
  * once when it mounts, so a page shown again from the cache never shows a stale read. A change refetches the page's
  * reads in place, so the selection, the ticks, the scroll and anything typed stay. It holds while the owner is
  * mid-change: a field focused or holding unsaved text, a save in flight, rows ticked, a dialog or menu open, or the
- * tab hidden; the first tick after that asks.
+ * tab hidden; the first tick after that asks. A read that goes out of date with no write, as Meetings' list does when a
+ * meeting starts or ends or the day turns, says so by `stale`, and the first tick that doesn't hold refetches it.
  */
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { anyUnsaved, saves } from "@/lib/drafts";
@@ -29,6 +30,8 @@ export interface Poll {
   hold: () => boolean;
   /** What a change does: refetch the page's reads. */
   changed: () => void;
+  /** Whether the page's read is out of date by the clock alone, so a change is due without asking. */
+  stale?: () => boolean;
 }
 
 export function usePoll(poll: Poll): void {
@@ -40,9 +43,13 @@ export function usePoll(poll: Poll): void {
     let alive = true;
     let asking = false;
     const tick = async () => {
-      const { version, ask, hold, changed } = latest.current;
+      const { version, ask, hold, changed, stale } = latest.current;
       const given = version();
       if (asking || given === undefined || hold()) return;
+      if (stale?.()) {
+        changed();
+        return;
+      }
       asking = true;
       try {
         const answer = await ask(given);

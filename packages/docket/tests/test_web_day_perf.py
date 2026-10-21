@@ -2,10 +2,11 @@
 with 20,000 point ops, the index rebuilt. Each read is asked once before the clock, so SQLite's cache is warm as a
 running service's is, then timed as the best of three runs: the Ledger's list, the list with q, the Queue's list, an
 item's panel and the who fields' names are each held to a quarter second, the poll to a hundredth, a button's write
-on one item, its notice's lines with it, to a tenth and a bulk of 50 to a quarter second, each on its own. A write is
-timed through its route with the commit left out, as the ledger's own timed write is dry: git's commit isn't the
-page's to time. Wall time is asserted only when no tracer runs. The pages in Chrome, from the sidebar to their rows
-with the keys live, are test_web_browser_ledger.py's and test_web_browser_queue.py's."""
+on one item, its notice's lines with it, to a tenth and a bulk of 50 to a quarter second, each on its own; Meetings'
+list and a meeting's panel to a quarter second, a point's write to a tenth. A write is timed through its route with
+the commit left out, as the ledger's own timed write is dry: git's commit isn't the page's to time. Wall time is
+asserted only when no tracer runs. The pages in Chrome, from the sidebar to their rows with the keys live, are the
+test_web_browser_*.py files'."""
 
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ from typing import Any
 import pytest
 from day_kit import SAME, signed_in
 from docket_testkit import Best, best_of, empty_vault, make_config, traced
-from ledger_kit import ITEMS, build
+from ledger_kit import ITEMS, MEETINGS, build
 from starlette.testclient import TestClient
 
 from docket.index import build as index_build
@@ -129,6 +130,35 @@ def test_the_queue_its_panel_and_the_who_field_s_names_answer_within_their_budge
         assert page_s < PAGE_SECONDS, f"the Queue took {page_s:.3f} s, over {PAGE_SECONDS} s"
         assert panel_s < PAGE_SECONDS, f"the Queue's panel took {panel_s:.3f} s, over {PAGE_SECONDS} s"
         assert who_s < PAGE_SECONDS, f"the who names took {who_s:.3f} s, over {PAGE_SECONDS} s"
+
+
+@pytest.mark.perf
+def test_meetings_and_a_meeting_s_panel_answer_within_their_budgets(client: TestClient) -> None:
+    """Meetings reads the snapshot over four weeks of the perf ledger's meetings, with those still holding an open
+    point from before; a meeting's panel reads its show, its suggestions and the briefs; a point's button writes
+    through the shared write. Each read is held to a page's quarter second, the write to a tenth."""
+    listed = timed(lambda: client.get("/api/web/meetings"))
+    page, page_s = listed.result, listed.seconds
+    assert page.status_code == 200
+    refs = [m["ref"] for d in page.json()["list"]["days"] for m in d["meetings"]]
+    assert len(refs) > 100
+    opened = timed(lambda: client.get(f"/api/web/meetings/panel?open={refs[0]}&suggest=1"))
+    panel, panel_s = opened.result, opened.seconds
+    assert panel.json()["panel"]["suggestions"] is not None
+    point = next(p["id"] for p in panel.json()["panel"]["points"] if p["state"] != "rolled")
+    body = {"page": "meetings", "op": "point_set", "items": [refs[0]], "point": point, "fields": {"text": "Dates"}}
+    written = timed(lambda: client.post("/api/web/ledger/write", json=body, headers=SAME))
+    wrote, write_s = written.result, written.seconds
+    assert wrote.status_code == 200, wrote.text
+    print(
+        f"Meetings on {MEETINGS:,} meetings: list {page_s * 1000:.0f} ms ({listed.runs('ms')}), panel with "
+        f"suggestions {panel_s * 1000:.0f} ms ({opened.runs('ms')}), a point's write {write_s * 1000:.0f} ms "
+        f"({written.runs('ms')})"
+    )
+    if not traced():
+        assert page_s < PAGE_SECONDS, f"Meetings took {page_s:.3f} s, over {PAGE_SECONDS} s"
+        assert panel_s < PAGE_SECONDS, f"a meeting's panel took {panel_s:.3f} s, over {PAGE_SECONDS} s"
+        assert write_s < WRITE_SECONDS, f"a point's write took {write_s:.3f} s, over {WRITE_SECONDS} s"
 
 
 def test_the_perf_ledger_s_builder_writes_its_files_under_the_root(tmp_path: Path) -> None:

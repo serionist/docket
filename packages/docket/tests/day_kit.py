@@ -1,7 +1,7 @@
 """What the day pages' tests share: a vault whose ledger holds invented items, a meeting with its points and two
 streams, written through the ledger's own writer as Claude via the CLI and dated from today, so every group of the
-Ledger shows; the host repo's files the materials name; and a signed-in client of the service over it. Invented people
-only: Ada Example and Ben Sample."""
+Ledger shows; the host repo's files the materials name; the meetings around it that Meetings' tests add; and a
+signed-in client of the service over it. Invented people only: Ada Example and Ben Sample."""
 
 from __future__ import annotations
 
@@ -69,6 +69,60 @@ def seed() -> list[dict[str, Any]]:
         {"op": "done", "item": "$old", "note": "sent in the thread"},
         add("nap", "task", "Renew the badge", "Ada Example", "ops"),
         {"op": "snooze", "item": "$nap", "until": day(5)},
+    ]
+
+
+RECORDING = "calls:rec-0100"
+LONG = "Ask the venue whether the long hall can hold forty seats with the stage set up at the far end"
+
+
+def at(days: int, hour: int, minute: int = 0) -> datetime:
+    return datetime.combine(today() + timedelta(days=days), datetime.min.time(), ZONE).replace(hour=hour, minute=minute)
+
+
+def meeting(name: str, subject: str, days: int, hour: int, minutes: int = 30, **fields: Any) -> dict[str, Any]:
+    start = at(days, hour)
+    span = {"subject": subject, "start": start.isoformat(), "end": (start + timedelta(minutes=minutes)).isoformat()}
+    return {"op": "meeting", "as": name, "fields": span | fields}
+
+
+def meetings_week() -> list[dict[str, Any]]:
+    """Meetings around seed()'s Pilot sync tomorrow, for Meetings' tests: a stand-up this morning with nothing on it,
+    a budget review under way at noon, yesterday's supplier call with its recording and an open point, a cancelled and
+    a declined one ahead, a retro twenty days back with a point still open, and one forty days back with none, which
+    the window leaves out; and an item whose title is longer than a list shows."""
+    return [
+        meeting("standup", "Morning stand-up", 0, 9, 15),
+        meeting(
+            "budget",
+            "Budget review",
+            0,
+            11,
+            90,
+            organiser="Ben Sample",
+            event="cal:evt-budget",
+            series="cal:series-budget",
+            response="tentative",
+            attendees=["Ben Sample", "Ada Example", "ben@northwind.example", "Dora Nobody"],
+            where="Room 2",
+            stream="ops",
+        ),
+        {"op": "point", "item": "$budget", "fields": {"text": "Ben: the spring numbers"}},
+        meeting("supplier", "Supplier call", -1, 15, 60, stream="pilot"),
+        {"op": "point", "item": "$supplier", "fields": {"text": "The offer in writing"}},
+        {"op": "material", "item": "$supplier", "ref": RECORDING, "label": "recording"},
+        {"op": "material", "item": "$supplier", "ref": "notes/plan.md", "label": "The plan"},
+        meeting("off", "Cancelled sync", 2, 9, response="cancelled"),
+        meeting("walk", "Venue walk", 3, 14, response="declined"),
+        meeting("retro", "Spring retro", -20, 10),
+        {"op": "point", "item": "$retro", "fields": {"text": "What the pilot taught us"}},
+        meeting("ancient", "Kick-off", -40, 10),
+        {
+            "op": "add",
+            "as": "long",
+            "force": True,
+            "fields": {"kind": "reply", "title": LONG, "who": "Ben Sample", "stream": "ops", "source": "chat:C0TEST/1"},
+        },
     ]
 
 

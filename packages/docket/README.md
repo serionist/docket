@@ -880,10 +880,10 @@ What the service refuses, and what it doesn't:
 ## The web app
 
 `docket open` signs your browser in to the service's own pages. In this version that is the Queue, the Ledger,
-Search, Recording, Briefs, Sync, Staging, Curate and Settings; the navigation shows the pages still to come, with the
+Meetings, Search, Recording, Briefs, Sync, Staging, Curate and Settings; the navigation shows the pages still to come, with the
 phase each arrives in.
 
-The pages are moving, one by one, into a new app built in React; the Queue and the Ledger are its first. Its shell is the sidebar with
+The pages are moving, one by one, into a new app built in React; the Queue, the Ledger and Meetings are its first. Its shell is the sidebar with
 what waits at the gate and whether a sync is due, the theme and keys switches at its foot, the list and the open item
 beside it; `/design` shows its parts on invented data. It comes built with Docket; nothing to install.
 
@@ -958,6 +958,25 @@ due (DR-0666). It is the Ledger page's list, keys, act bar, item panel and new i
 - Its URL holds `open`, `q`, `stream`, `kind`, `who` and `k`, as the Ledger's does; the Ledger's own `state`,
   `group` and `archived` are left out.
 - The sidebar shows how many are untriaged; the page updates in place when the ledger changes, as the Ledger does.
+
+### The Meetings page
+
+`/meetings` lists your meetings by day, from today on, then the earlier days, newest first, each day by start, beside
+the one you open (DR-0666, DR-0667). It reads two weeks either side of today, and an older meeting whose point is
+still open.
+
+| Part | Shows |
+|---|---|
+| A row | its time, now while it is under way, its subject and response, how many of its points and items are open; a cancelled or declined one, or one with nothing on it, dimmed |
+| The meeting | when and where, the organiser and attendees, each linked to their brief when one is kept, your answer, the recording on the Recording page |
+| Its points | each one's mark ticks it answered or open again; Answer, Edit, Drop, Make an item, and Keep or Remove on one Claude proposed, drawn in a dashed rule until kept; a rolled one shows where it went |
+| The rest | Suggest items, each item worth raising added as a point in one click; the outcome and notes, saved as you leave them; the items on it, each opening on the Ledger; its materials and history |
+
+- Its URL holds `open`, `q` (in a meeting's subject, people, points and notes), `stream` and `suggest`.
+- A meeting that is over says its open points move on at the next sync; Claude's sync rolls them, never the page.
+- Copy agenda copies the open points as text.
+- Keys: `j` and `k` move, `Enter` opens, `Esc` closes, `u` or Ctrl+Z undo, `/` the search box, `?` for the rest; the
+  items' keys never act on a meeting.
 
 ### The Ledger page
 

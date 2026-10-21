@@ -2,7 +2,8 @@
  * The day pages' calls to /api/web (DR-0709, DR-0710): each page's list and panel under its own path, and what they
  * share under /api/web/ledger: the viewer's text, the poll, the names the who fields suggest and the writes. A read
  * sends the page's query string as it is, so the server's own parser reads it, and answers the canonical URL with
- * what it read. A write answers its notice; a refusal throws an HttpError whose body is the Refused model.
+ * what it read. A write answers its notice; a refusal throws an HttpError whose body is the Refused model. A save
+ * answers an item's row and panel, or on Meetings the meeting's line and panel (DR-0770).
  */
 import type { components } from "@/api/schema";
 import { api } from "@/lib/api";
@@ -10,7 +11,7 @@ import { HttpError } from "@/lib/query";
 
 type Schemas = components["schemas"];
 /** The day pages built so far, as a write's body and the routes name them. */
-export type DayPageName = "ledger" | "queue";
+export type DayPageName = "ledger" | "queue" | "meetings";
 export type Ledger = Schemas["Ledger"];
 export type Queue = Schemas["Queue"];
 /** A day page's list read: the Queue answers in the Ledger's shape. */
@@ -30,6 +31,19 @@ export type Person = Schemas["Person"];
 export type Body = Partial<Schemas["Body"]> & { op: string };
 export type Wrote = Schemas["Wrote"];
 export type Saved = Schemas["Saved"];
+export type SavedMeeting = Schemas["SavedMeeting"];
+/** What a save answers: an item's row and panel, or a meeting's line and panel. */
+export type SaveAnswer = Saved | SavedMeeting;
+export type Filters = Schemas["Filters"];
+export type Chip = Schemas["Chip"];
+export type Meetings = Schemas["Meetings"];
+export type MeetingRead = Schemas["MeetingRead"];
+export type MeetingLine = Schemas["MeetingLine"];
+export type Day = Schemas["Day"];
+export type MeetingPanel = Schemas["MeetingPanel"];
+export type PointLine = Schemas["PointLine"];
+export type Linked = Schemas["Linked"];
+export type Attendee = Schemas["Attendee"];
 export type Refused = Schemas["Refused"];
 
 /** What a read answered, with the query string it was asked with, so the app writes back only a current canonical. */
@@ -39,7 +53,7 @@ function nothing(what: string): never {
   throw new HttpError(500, `the ${what} answered nothing`);
 }
 
-export async function readList(page: DayPageName, query: string): Promise<Read<DayList>> {
+export async function readList(page: "ledger" | "queue", query: string): Promise<Read<DayList>> {
   const { data } =
     page === "queue"
       ? await api.GET("/api/web/queue", { querySerializer: () => query })
@@ -47,12 +61,22 @@ export async function readList(page: DayPageName, query: string): Promise<Read<D
   return data ? { ...data, asked: query } : nothing("list's read");
 }
 
-export async function readPanel(page: DayPageName, query: string): Promise<Read<PanelRead>> {
+export async function readPanel(page: "ledger" | "queue", query: string): Promise<Read<PanelRead>> {
   const { data } =
     page === "queue"
       ? await api.GET("/api/web/queue/panel", { querySerializer: () => query })
       : await api.GET("/api/web/ledger/panel", { querySerializer: () => query });
   return data ? { ...data, asked: query } : nothing("panel's read");
+}
+
+export async function readMeetings(query: string): Promise<Read<Meetings>> {
+  const { data } = await api.GET("/api/web/meetings", { querySerializer: () => query });
+  return data ? { ...data, asked: query } : nothing("meetings' read");
+}
+
+export async function readMeeting(query: string): Promise<Read<MeetingRead>> {
+  const { data } = await api.GET("/api/web/meetings/panel", { querySerializer: () => query });
+  return data ? { ...data, asked: query } : nothing("meeting's read");
 }
 
 export async function readText(query: string): Promise<Viewer> {
@@ -75,7 +99,7 @@ export async function write(body: Body): Promise<Wrote> {
   return data ?? nothing("write");
 }
 
-export async function save(body: Body): Promise<Saved> {
+export async function save(body: Body): Promise<SaveAnswer> {
   const { data } = await api.POST("/api/web/ledger/save", { body: body as Schemas["Body"] });
   return data ?? nothing("save");
 }

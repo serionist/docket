@@ -87,6 +87,23 @@ describe("the poll", () => {
     expect(changed).toHaveBeenCalledTimes(1);
   });
 
+  it("refetches a read the clock has put out of date without asking, once it doesn't hold", async () => {
+    const ask = vi.fn(async () => ({ changed: false }));
+    const changed = vi.fn();
+    let due = false;
+    let held = false;
+    renderHook(() => usePoll({ version: () => "v1", ask, hold: () => held, changed, stale: () => due }));
+    await vi.advanceTimersByTimeAsync(0);
+    held = true;
+    due = true;
+    await vi.advanceTimersByTimeAsync(POLL_MS * 2);
+    expect(changed).not.toHaveBeenCalled();
+    held = false;
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(ask).toHaveBeenCalledTimes(1);
+  });
+
   it("says nothing changed when an ask fails, asks again when the tab comes back, and stops once unmounted", async () => {
     const ask = vi.fn(async () => {
       throw new TypeError("network");

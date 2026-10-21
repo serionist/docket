@@ -654,7 +654,9 @@ def describe_point(op: Op) -> str:
         if name == "state":
             parts.append(str(value))
         elif name == "proposed":
-            parts.append("kept" if value is None else "proposed")
+            # A drop takes a proposal off with it: the point isn't kept, it's settled.
+            if value is not None or fields.get("state") != "dropped":
+                parts.append("kept" if value is None else "proposed")
         elif name in ("answer", "text"):
             parts.append(f"{name}: {'-' if value is None else value}")
         elif name == "item":

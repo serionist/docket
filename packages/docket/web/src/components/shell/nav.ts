@@ -1,10 +1,11 @@
 /**
  * The sidebar's pages in the maintainer's order (DR-0708): the day pages, then the rest, Settings at the foot. It
  * lists built pages only, each joining in the PR that builds or moves it; a page still on the server's own templates
- * is a plain link that loads it. Today and Meetings join with their pages; Queue carries the untriaged count.
+ * is a plain link that loads it. Today joins with its page; Queue carries the untriaged count.
  */
 import {
   BookOpenTextIcon,
+  CalendarDaysIcon,
   InboxIcon,
   ListChecksIcon,
   ListTodoIcon,
@@ -30,6 +31,7 @@ export interface NavPage {
 export const DAY: NavPage[] = [
   { key: "queue", title: "Queue", href: "/queue", icon: ListTodoIcon, inApp: true, mark: "queue" },
   { key: "ledger", title: "Ledger", href: "/ledger", icon: BookOpenTextIcon, inApp: true },
+  { key: "meetings", title: "Meetings", href: "/meetings", icon: CalendarDaysIcon, inApp: true },
 ];
 
 export const REST: NavPage[] = [

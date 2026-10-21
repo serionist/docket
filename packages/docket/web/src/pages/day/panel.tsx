@@ -1,7 +1,8 @@
 /**
  * The open item's panel (DR-0664): its call, its fields saved on change, the meeting it hangs on with its points,
  * its free text, its materials with the text viewer, where it came from, and its history with Undo and Redo per
- * line. Every value comes ready to show from the server's panel read.
+ * line. Every value comes ready to show from the server's panel read. Its sections, the materials and the history
+ * are the meeting panel's too (pages/meetings), each taking the ref of what it belongs to.
  */
 import { CheckIcon, CopyIcon, ExternalLinkIcon, FileTextIcon, FolderOpenIcon, XIcon } from "lucide-react";
 import * as React from "react";
@@ -33,7 +34,7 @@ export interface ViewerState {
 }
 
 /** A part of the panel: under a visible heading, or named for a screen reader alone. */
-function Section({
+export function Section({
   title,
   label,
   id,
@@ -90,7 +91,7 @@ export function CopyButton({ value, what }: { value: string; what: string }) {
 }
 
 /** A material or a source as it links (DR-0664): a URL in a new tab, a record or a search on its page, else text. */
-function Linked({ link, children }: { link: Link; children: React.ReactNode }) {
+export function Linked({ link, children }: { link: Link; children: React.ReactNode }) {
   if (link.kind === "url") {
     return (
       <a
@@ -296,12 +297,15 @@ function Close({ item, onCall }: { item: ItemPanel; onCall: PanelProps["onCall"]
   );
 }
 
-function Materials({
-  item,
+/** The materials of an item or a meeting, `owner` its ref: each linked, viewed, opened or removed, and one added. */
+export function Materials({
+  owner,
+  materials,
   viewer,
   onView,
 }: {
-  item: ItemPanel;
+  owner: string;
+  materials: Link[];
   viewer: ViewerState | null;
   onView: PanelProps["onView"];
 }) {
@@ -309,9 +313,9 @@ function Materials({
   const [ref, setRef] = React.useState("");
   const [label, setLabel] = React.useState("");
   const [problem, setProblem] = React.useState("");
-  useUnsaved(draftKey(item.ref, "material"), ref.trim() !== "" || label.trim() !== "");
+  useUnsaved(draftKey(owner, "material"), ref.trim() !== "" || label.trim() !== "");
   const add = async () => {
-    const outcome = await write({ op: "material", items: [item.ref], ref, label });
+    const outcome = await write({ op: "material", items: [owner], ref, label });
     setProblem(refusal(outcome));
     if (outcome.ok) {
       setRef("");
@@ -321,15 +325,15 @@ function Materials({
   const act = async (material: string, how: "open" | "show" | "remove") => {
     const outcome =
       how === "remove"
-        ? await write({ op: "material", items: [item.ref], ref: material, remove: true })
-        : await open(item.ref, material, how === "show");
+        ? await write({ op: "material", items: [owner], ref: material, remove: true })
+        : await open(owner, material, how === "show");
     setProblem(refusal(outcome));
   };
   return (
-    <Section title="Materials" id={`materials-${item.ref}`}>
-      {item.materials.length ? (
+    <Section title="Materials" id={`materials-${owner}`}>
+      {materials.length ? (
         <ul className="grid">
-          {item.materials.map((m) => (
+          {materials.map((m) => (
             <li key={m.ref} className="grid gap-1 border-t border-rule py-2 first:border-t-0 first:pt-0">
               <div className="flex min-w-0 items-start gap-2">
                 <span className="min-w-0 flex-1 text-sm break-words">
@@ -390,7 +394,7 @@ function Materials({
       ) : (
         <p className="text-sm text-ink-muted">No materials yet: files, drafts and links this needs or made.</p>
       )}
-      {viewer && !item.materials.some((m) => m.ref === viewer.ref) && (
+      {viewer && !materials.some((m) => m.ref === viewer.ref) && (
         <TextViewer viewer={viewer} onClose={() => onView(undefined)} />
       )}
       <form
@@ -401,11 +405,11 @@ function Materials({
         }}
       >
         <div className="grid gap-1">
-          <label htmlFor={`material-ref-${item.ref}`} className="text-xs font-semibold text-ink-muted">
+          <label htmlFor={`material-ref-${owner}`} className="text-xs font-semibold text-ink-muted">
             Path, URL or locator
           </label>
           <Input
-            id={`material-ref-${item.ref}`}
+            id={`material-ref-${owner}`}
             value={ref}
             autoComplete="off"
             spellCheck={false}
@@ -414,11 +418,11 @@ function Materials({
           />
         </div>
         <div className="grid gap-1">
-          <label htmlFor={`material-label-${item.ref}`} className="text-xs font-semibold text-ink-muted">
+          <label htmlFor={`material-label-${owner}`} className="text-xs font-semibold text-ink-muted">
             Label
           </label>
           <Input
-            id={`material-label-${item.ref}`}
+            id={`material-label-${owner}`}
             value={label}
             autoComplete="off"
             dir="auto"
@@ -478,18 +482,27 @@ function TextViewer({ viewer, onClose }: { viewer: ViewerState; onClose: () => v
   );
 }
 
-function History({ item, onUndo }: { item: ItemPanel; onUndo: PanelProps["onUndo"] }) {
+/** The history of an item or a meeting, `owner` its ref, newest first: Undo and Redo per line, and a line added. */
+export function History({
+  owner,
+  history,
+  onUndo,
+}: {
+  owner: string;
+  history: HistoryLine[];
+  onUndo: PanelProps["onUndo"];
+}) {
   const { write, pending } = useActions();
   const [line, setLine] = React.useState("");
   const [problem, setProblem] = React.useState("");
-  useUnsaved(draftKey(item.ref, "log"), line.trim() !== "");
+  useUnsaved(draftKey(owner, "log"), line.trim() !== "");
   const add = async () => {
-    const outcome = await write({ op: "log", items: [item.ref], note: line });
+    const outcome = await write({ op: "log", items: [owner], note: line });
     setProblem(refusal(outcome));
     if (outcome.ok) setLine("");
   };
   return (
-    <Section title="History, newest first" id={`history-${item.ref}`}>
+    <Section title="History, newest first" id={`history-${owner}`}>
       <form
         className="flex items-end gap-2"
         onSubmit={(event) => {
@@ -498,11 +511,11 @@ function History({ item, onUndo }: { item: ItemPanel; onUndo: PanelProps["onUndo
         }}
       >
         <div className="grid min-w-0 flex-1 gap-1">
-          <label htmlFor={`log-${item.ref}`} className="text-xs font-semibold text-ink-muted">
+          <label htmlFor={`log-${owner}`} className="text-xs font-semibold text-ink-muted">
             Add a line
           </label>
           <Input
-            id={`log-${item.ref}`}
+            id={`log-${owner}`}
             value={line}
             dir="auto"
             autoComplete="off"
@@ -515,8 +528,8 @@ function History({ item, onUndo }: { item: ItemPanel; onUndo: PanelProps["onUndo
         </Button>
       </form>
       {problem && <Refusal>{problem}</Refusal>}
-      <ol className="grid" data-history={item.ref}>
-        {item.history.map((h: HistoryLine) => (
+      <ol className="grid" data-history={owner}>
+        {history.map((h: HistoryLine) => (
           <li key={h.op} className={cn("grid gap-0.5 border-t border-rule py-2", h.undone_by && "text-ink-muted")}>
             <p className="flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
               <time dateTime={h.stamp} className="tabular-nums">
@@ -581,7 +594,7 @@ export function PanelHead({ item }: { item: ItemPanel }) {
   );
 }
 
-function StampSmall({ verdict }: { verdict: "discuss" | "claude" | "me" | "chase" }) {
+export function StampSmall({ verdict }: { verdict: "discuss" | "claude" | "me" | "chase" }) {
   return (
     <span
       className={cn(
@@ -655,7 +668,7 @@ export function ItemPanelBody({ item, ask, drop, callProblem, viewer, onCall, on
         <Field item={item.ref} name="notes" label="Working notes" value={item.notes} rows={4} />
         <Field item={item.ref} name="outcome" label="Outcome" value={item.outcome} rows={2} />
       </Section>
-      <Materials item={item} viewer={viewer} onView={onView} />
+      <Materials owner={item.ref} materials={item.materials} viewer={viewer} onView={onView} />
       <Section title="Where it came from" id={`source-${item.ref}`}>
         <div className="flex min-w-0 flex-wrap items-center gap-1 text-sm">
           <span className="min-w-0 font-mono text-xs break-all">
@@ -665,7 +678,7 @@ export function ItemPanelBody({ item, ask, drop, callProblem, viewer, onCall, on
         </div>
       </Section>
       <p className="text-xs text-ink-muted">{item.facts}</p>
-      <History item={item} onUndo={onUndo} />
+      <History owner={item.ref} history={item.history} onUndo={onUndo} />
     </div>
   );
 }

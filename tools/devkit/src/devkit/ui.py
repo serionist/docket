@@ -3,9 +3,9 @@
 It seeds an invented world into a folder of its own, starts a throwaway service on a free port with config, state and
 models folders of its own, a file token and the failing keyring, and drives the built app in Chrome: each of the
 page's states, light and dark, at 1440x900 and 390x844, with the clock, zone and motion fixed. A state opens a URL,
-then presses keys, clicks or fills a field, and may undo its own write once shot, so the next shot finds the world as
-it was; one may ask for another world, such as the empty one. The shots and the machine checks go to
-`.local/ui/<page>/r<n>/`, a new round each run.
+then presses keys, clicks, fills a field or waits for a part to show, and may undo its own write once shot, so the
+next shot finds the world as it was; one may ask for another world, such as the empty one. The shots and the machine
+checks go to `.local/ui/<page>/r<n>/`, a new round each run.
 
 | Check | Fails on |
 |---|---|
@@ -63,8 +63,9 @@ DROPPED_PREFIXES = ("DOCKET_", "GIT_")
 DROPPED = frozenset({"PYTHON_KEYRING_BACKEND", "PYTHONPATH"})
 
 
-# What a state's step does: press a key, click a selector, or fill a field, `selector|text`.
-VERBS = ("press", "click", "fill")
+# What a state's step does: press a key, click a selector, fill a field, `selector|text`, or wait for a selector to
+# show, such as a write's notice.
+VERBS = ("press", "click", "fill", "wait")
 # What Chrome logs for a refusal's 400, which a state that shows a refusal brings about on purpose.
 REFUSED = "the server responded with a status of 400"
 
@@ -170,6 +171,41 @@ PAGES: dict[str, Page] = {
             State("who", "/queue?open=A-0003", (("fill", "#f-A-0003-who|Ada E"),)),
             State("filtered", "/queue?stream=pilot"),
             State("empty", "/queue", world="empty"),
+        ),
+    ),
+    # ui_world's meetings: M-0001 the Pilot sync tomorrow, M-0003 the budget review under way, M-0004 yesterday's
+    # supplier call with its recording and its point rolled on, M-0008 the retro with no stream.
+    "meetings": Page(
+        world="meetings",
+        states=(
+            State("list", "/meetings"),
+            State("panel", "/meetings?open=M-0003"),
+            State(
+                "editing",
+                "/meetings?open=M-0003",
+                (
+                    ("click", 'role=button[name="Answer: Ben: the spring numbers"]'),
+                    ("fill", 'textarea[id$="-answer"]|By Friday, with both quotes'),
+                ),
+            ),
+            State(
+                "written",
+                "/meetings?open=M-0003",
+                (("click", 'role=button[name="Keep: Ask about the printer budget"]'), ("wait", "role=status")),
+                after=(("press", "u"),),
+            ),
+            State(
+                "refused",
+                "/meetings?open=M-0008",
+                (
+                    ("click", 'role=button[name="Make an item: What the pilot taught us"]'),
+                    ("click", 'role=button[name="Make the item"]'),
+                ),
+                expects=(REFUSED,),
+            ),
+            State("suggest", "/meetings?open=M-0001&suggest=1"),
+            State("over", "/meetings?open=M-0004"),
+            State("empty", "/meetings", world="empty"),
         ),
     ),
 }
@@ -359,6 +395,8 @@ def _steps(page: Any, steps: Sequence[tuple[str, str]]) -> None:
         elif verb == "fill":
             selector, _, text = arg.partition("|")
             page.fill(selector, text)
+        elif verb == "wait":
+            page.wait_for_selector(arg)
         else:
             page.click(arg)
         page.wait_for_timeout(150)
