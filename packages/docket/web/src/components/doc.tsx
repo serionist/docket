@@ -58,12 +58,23 @@ export function Note({
   );
 }
 
-/** A heading over a part of a panel or a column, in the list heads' small muted words. */
-export function PartHead({ id, children, className }: { id: string; children: React.ReactNode; className?: string }) {
+/** A heading over a part of a panel or a column, in the list heads' small muted words; a page's own parts are h2. */
+export function PartHead({
+  id,
+  children,
+  className,
+  level = 3,
+}: {
+  id: string;
+  children: React.ReactNode;
+  className?: string;
+  level?: 2 | 3;
+}) {
+  const Tag = level === 2 ? "h2" : "h3";
   return (
-    <h3 id={id} className={cn("text-xs font-semibold text-ink-muted", className)}>
+    <Tag id={id} className={cn("text-xs font-semibold text-ink-muted", className)}>
       {children}
-    </h3>
+    </Tag>
   );
 }
 
@@ -112,7 +123,7 @@ export function SummaryLines({ lines, citedSays }: { lines: SummaryLine[]; cited
                       key={at}
                       href={anchor.url}
                       title={anchor.title || undefined}
-                      className="tap inline-flex min-h-6 items-center font-mono text-xs break-all text-green underline-offset-4 hover:underline"
+                      className="inline-flex min-h-6 items-center font-mono text-xs break-all text-green underline-offset-4 hover:underline pointer-coarse:min-h-11"
                     >
                       {anchor.text}
                     </AppLink>

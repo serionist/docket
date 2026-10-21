@@ -154,10 +154,20 @@ def with_audio(vault: Vault) -> None:
     vault.write_run("plaud", [whisper])
 
 
+def recording_sources() -> dict[str, SourceConfig]:
+    return {"plaud": SourceConfig(sensitivity="mixed"), "mail": SourceConfig()}
+
+
 def build_recording_vault(root: Path) -> Vault:
     config = make_config()
-    config.sources = {"plaud": SourceConfig(sensitivity="mixed"), "mail": SourceConfig()}
+    config.sources = recording_sources()
     vault = Vault.init(root / "vault", config, "test-box")
+    fill_recording_vault(vault)
+    return vault
+
+
+def fill_recording_vault(vault: Vault) -> None:
+    """The calls, the mail, the docs and the hold above, into a vault with plaud, mixed, and mail as sources."""
     labels = [("Ada Example", "The pallet labels print too small."), ("Ben Sample", "I order a new printer today.")]
     records = [
         *call(CRANE, "Harbour crane check", SAID, 12, "transaction_polish", "transaction"),
@@ -202,7 +212,6 @@ def build_recording_vault(root: Path) -> Vault:
     old = DocMeta(id=LEGACY, type="legacy-note", covers=[OLD], by="claude-test", old_paths=["notes/yard-walk.md"])
     recall.doc_put(vault, ProcessedDoc(old, "# Yard walk\n\nThe labels print too small.\n", 0).render())
     holds.add(vault, "plaud", [HELD.partition(":")[2]])
-    return vault
 
 
 def recording_template(factory: pytest.TempPathFactory) -> Path:

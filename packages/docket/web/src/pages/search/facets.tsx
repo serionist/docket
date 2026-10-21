@@ -36,7 +36,7 @@ function FacetMenu({ facet, candidates }: { facet: Facet; candidates: number }) 
       <PopoverContent className="w-80 p-0" aria-label={facet.title}>
         <p className="border-b border-rule px-3 py-2 text-xs font-semibold text-ink-muted">
           {VERB[facet.key] ?? facet.title}
-          {facet.favours && <span className="font-normal">: it ranks first, nothing is left out</span>}
+          {facet.favours && <span className="font-normal">: ranked higher, nothing left out</span>}
         </p>
         <ul className="max-h-72 overflow-y-auto py-1">
           {facet.items.map((item) => (
@@ -45,7 +45,7 @@ function FacetMenu({ facet, candidates }: { facet: Facet; candidates: number }) 
                 href={item.url}
                 aria-current={item.on ? "true" : undefined}
                 className={cn(
-                  "tap flex min-h-8 items-center gap-2 px-3 text-sm hover:bg-hover",
+                  "flex min-h-8 items-center gap-2 px-3 text-sm hover:bg-hover pointer-coarse:min-h-11",
                   item.on && "font-semibold",
                 )}
               >
@@ -150,7 +150,7 @@ function Chip({ chip }: { chip: Chosen }) {
     <AppLink
       href={chip.url}
       aria-label={`${chip.label}: take it off`}
-      className="tap inline-flex h-7 items-center gap-1 rounded-sm border border-green/60 bg-selection pr-1 pl-2 text-sm hover:border-green"
+      className="tap inline-flex h-7 shrink-0 items-center gap-1 rounded-sm border border-green/60 bg-selection pr-1 pl-2 text-sm whitespace-nowrap hover:border-green"
     >
       <span dir="auto">{chip.label}</span>
       <XIcon aria-hidden className="size-3.5 text-ink-muted" />
@@ -177,13 +177,18 @@ export function FacetBar({
 }) {
   return (
     <div className="grid shrink-0 gap-1.5 border-b border-rule px-3 py-2 sm:px-4">
-      <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Narrow or favour">
+      {/* At phone width one row that scrolls on its own, so the results start high on the screen. */}
+      <div
+        className="-mx-3 flex items-center gap-1.5 overflow-x-auto px-3 max-sm:pb-1 sm:mx-0 sm:flex-wrap sm:px-0"
+        role="group"
+        aria-label="Narrow or favour"
+      >
         {facets.map((facet) => (
           <FacetMenu key={facet.key} facet={facet} candidates={candidates} />
         ))}
         <DatesMenu since={since} until={until} onApply={onDates} />
         {chips.length > 0 && (
-          <ul className="flex flex-wrap gap-1.5" aria-label="Filters and boosts">
+          <ul className="flex shrink-0 gap-1.5 sm:flex-wrap" aria-label="Filters and boosts">
             {chips.map((chip) => (
               <li key={chip.url} className="flex">
                 <Chip chip={chip} />

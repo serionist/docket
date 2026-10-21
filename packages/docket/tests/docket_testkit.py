@@ -719,16 +719,21 @@ def files_in(vault: Vault, folder: str) -> list[str]:
 def build_index_vault(root: Path) -> Vault:
     """The index fixture as a vault: its records written through write_run, its entity files copied in, its docs put
     through doc_put in file-name order. Built under the caller's git settings."""
+    vault = Vault.init(root / "vault", index_config(), "test-box")
+    fill_index_vault(vault)
+    return vault
+
+
+def fill_index_vault(vault: Vault) -> None:
+    """The index fixture's records, entities and docs, into a vault whose sources name cal, calls, chat and mail."""
     from docket import recall
 
-    vault = Vault.init(root / "vault", index_config(), "test-box")
     for source in ("cal", "calls", "chat", "mail"):
         vault.write_run(source, fixture_records(source), datetime(2026, 10, 14, 7, 0, tzinfo=UTC))
     shutil.copytree(INDEX_FIXTURE / "entities", vault.root / "entities", dirs_exist_ok=True)
     vault.commit(files_in(vault, "entities"), "Entities")
     for path in sorted((INDEX_FIXTURE / "docs").glob("*.md")):
         recall.doc_put(vault, path.read_text(encoding="utf-8"))
-    return vault
 
 
 LOGICAL_TABLES = (

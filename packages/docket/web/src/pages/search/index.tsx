@@ -51,10 +51,13 @@ function Start({ indexLine }: { indexLine: string }) {
       <ul className="grid list-disc gap-1 pl-5">
         <li>words and names, in any of your languages: a name finds its aliases too</li>
         <li>"a quoted phrase", word for word</li>
-        <li>a time: last week, yesterday, 2026-10 or 2026-10-07</li>
         <li>
-          a locator from Claude's answer, such as <code className="font-mono text-xs">r:calls:rec-0100@02:30</code>, to
-          open it
+          a time: last week, yesterday, <span className="whitespace-nowrap">2026-10</span> or{" "}
+          <span className="whitespace-nowrap">2026-10-07</span>
+        </li>
+        <li>
+          a locator from Claude's answer, such as{" "}
+          <code className="font-mono text-xs whitespace-nowrap">r:calls:rec-0100@02:30</code>, to open it
         </li>
       </ul>
       {indexLine && <p className="mt-3 text-xs">{indexLine}</p>}

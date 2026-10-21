@@ -394,7 +394,12 @@ def recording_link(hit: Hit) -> str | None:
 
 
 def hit_line(hit: Hit, state: SearchState, tz: ZoneInfo, names: dict[str, EntityLabel], marks: list[str]) -> HitLine:
-    lines = () if hit.lines is None else (f"{hit.lines[0]}-{hit.lines[1]}",)
+    # The lines as the canonical URL writes them, a single line as itself, so the row and the open panel agree.
+    lines = (
+        ()
+        if hit.lines is None
+        else (str(hit.lines[0]) if hit.lines[0] == hit.lines[1] else "-".join(map(str, hit.lines)),)
+    )
     return HitLine(
         locator=hit.locator,
         icon=HIT_ICON.get(hit.kind, "record"),

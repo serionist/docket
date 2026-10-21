@@ -22,14 +22,14 @@ function Tools({ panel }: { panel: HitPanel }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {panel.verify && (
-        <AppLink href={panel.verify} className={buttonVariants({ size: "sm" })}>
+        <AppLink href={panel.verify} className={cn(buttonVariants({ size: "sm" }))}>
           <ListChecksIcon aria-hidden />
           {panel.verify_label}
           <Kbd className={KEY}>v</Kbd>
         </AppLink>
       )}
       {panel.recording && (
-        <AppLink href={panel.recording} className={buttonVariants({ size: "sm" })}>
+        <AppLink href={panel.recording} className={cn(buttonVariants({ size: "sm" }))}>
           <AudioLinesIcon aria-hidden />
           On the Recording page
         </AppLink>

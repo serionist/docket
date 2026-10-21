@@ -98,7 +98,7 @@ function Row({
           event.preventDefault();
           state.onOpen(row);
         }}
-        className="block cursor-default px-3 pt-2 pb-1 text-ink outline-none sm:px-4"
+        className="block cursor-default px-3 pt-2 pb-1 text-ink outline-none pointer-coarse:min-h-11 sm:px-4"
       >
         {children}
       </a>
@@ -133,7 +133,7 @@ function HitBelow({ hit }: { hit: HitLine }) {
       {hit.recording && (
         <AppLink
           href={hit.recording}
-          className="tap inline-flex min-h-6 items-center gap-1 text-green underline-offset-4 hover:underline"
+          className="inline-flex min-h-6 items-center gap-1 text-green underline-offset-4 hover:underline pointer-coarse:min-h-11"
         >
           <AudioLinesIcon aria-hidden className="size-3.5" />
           On the Recording page
@@ -141,7 +141,7 @@ function HitBelow({ hit }: { hit: HitLine }) {
       )}
       {hit.also.length > 0 && (
         <details className="group/also basis-full">
-          <summary className="tap inline-flex min-h-6 cursor-default items-center gap-1 rounded-sm hover:text-ink">
+          <summary className="inline-flex min-h-6 cursor-default items-center gap-1 rounded-sm hover:text-ink pointer-coarse:min-h-11">
             <ChevronRightIcon aria-hidden className="size-3.5 transition-transform group-open/also:rotate-90" />
             and {hit.also.length} more on the same stretch
           </summary>

@@ -121,7 +121,7 @@ function Summary({ view }: { view: RecordingView }) {
   const docs = view.docs;
   return (
     <section aria-labelledby="summary-title" className="grid content-start gap-2 py-3 lg:min-h-0 lg:overflow-y-auto">
-      <PartHead id="summary-title" className="px-3 sm:px-4">
+      <PartHead id="summary-title" level={2} className="px-3 sm:px-4">
         Summary
       </PartHead>
       {(docs.length > 1 || (docs.length === 1 && !docs[0]?.on)) && (
@@ -133,7 +133,7 @@ function Summary({ view }: { view: RecordingView }) {
                   href={doc.url}
                   aria-current={doc.on ? "true" : undefined}
                   className={cn(
-                    "tap inline-flex h-7 items-center rounded-sm border px-2 font-mono text-xs break-all",
+                    "inline-flex min-h-7 items-center rounded-sm border px-2 font-mono text-xs break-all pointer-coarse:min-h-11",
                     doc.on
                       ? "border-green bg-selection font-semibold text-ink"
                       : "border-control text-ink hover:bg-hover",
@@ -171,7 +171,7 @@ function Transcripts({ view, playing }: { view: RecordingView; playing: Playing 
         <AppLink
           key={other.rid}
           href={other.url}
-          className="tap inline-flex min-h-6 items-center font-mono break-all text-green underline-offset-4 hover:underline"
+          className="inline-flex min-h-6 items-center font-mono break-all text-green underline-offset-4 hover:underline pointer-coarse:min-h-11"
         >
           {other.rid}
         </AppLink>
@@ -185,7 +185,7 @@ function Transcripts({ view, playing }: { view: RecordingView; playing: Playing 
       className="grid content-start gap-2 border-t border-rule py-3 lg:min-h-0 lg:overflow-y-auto lg:border-t-0 lg:border-l"
       data-scroll="transcript"
     >
-      <PartHead id="transcript-title" className="px-3 sm:px-4">
+      <PartHead id="transcript-title" level={2} className="px-3 sm:px-4">
         {title}
       </PartHead>
       {others}
@@ -283,18 +283,19 @@ export function RecordingPage() {
     const held = view.mode === "held";
     body = (
       <div className="grid max-w-2xl justify-items-start gap-3 px-4 py-6">
-        <p className="inline-flex items-center gap-1 text-xs text-ink-muted">
+        <p className="inline-flex items-center gap-1.5 text-xs text-ink-muted">
           <AudioLinesIcon aria-hidden className="size-3.5" />
-          recording <Locator value={view.rid} />
+          <Locator value={view.rid} className="text-ink" />
         </p>
         {held ? <Note>{view.message}</Note> : <Refusal>{view.message}</Refusal>}
         {view.link &&
           (held ? (
-            <a href={view.link} className={buttonVariants({ size: "sm" })}>
+            // The Staging page is still the server's own.
+            <a href={view.link} className={cn(buttonVariants({ size: "sm" }))}>
               {view.link_label}
             </a>
           ) : (
-            <AppLink href={view.link} className={buttonVariants({ size: "sm" })}>
+            <AppLink href={view.link} className={cn(buttonVariants({ size: "sm" }))}>
               {view.link_label}
             </AppLink>
           ))}
@@ -318,7 +319,7 @@ export function RecordingPage() {
 
   return (
     <Page>
-      <PageHeader title={view?.title || "Recording"}>
+      <PageHeader title={recording?.title || "Recording"}>
         <Button variant="ghost" size="icon-sm" aria-label="Keys (?)" onClick={showKeys}>
           <KeyboardIcon />
         </Button>

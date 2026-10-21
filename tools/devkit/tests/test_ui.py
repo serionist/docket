@@ -63,14 +63,17 @@ def test_the_shots_and_their_checks_are_named_and_summed() -> None:
     assert ui.summary([good]) == ["1 shots, every check passed"]
 
 
+WORLDS = ("empty", "week", "meetings", "today", "stale", "search", "recording")
+
+
 def test_every_page_s_states_open_a_path_and_fit_a_size() -> None:
     for name, page in ui.PAGES.items():
-        assert page.world in ("empty", "week", "meetings", "today", "stale"), name
+        assert page.world in WORLDS, name
         assert len({s.name for s in page.states}) == len(page.states)
         for state in page.states:
             assert state.url.startswith(f"/{name}"), state.name
             assert state.only in (None, *ui.SIZES), state.name
-            assert state.world in (None, "empty", "week", "meetings", "today", "stale"), state.name
+            assert state.world in (None, *WORLDS), state.name
             assert all(verb in ui.VERBS for verb, _ in (*state.steps, *state.after)), state.name
             assert all("|" in arg for verb, arg in state.steps if verb == "fill"), state.name
 
