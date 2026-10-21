@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from docket_testkit import copy_vault, git, index_template, make_record
+from docket_testkit import copy_vault, git, index_template, indexed, make_record
 from models_kit import FAKE_KEY, MemoryKeyring, choose, with_voyage
 
 from docket import index
@@ -46,14 +46,13 @@ WHEN = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)
 
 @pytest.fixture(scope="module")
 def template(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return index_template(tmp_path_factory)
+    """The index fixture with its index built, once per session; tests copy it."""
+    return indexed(tmp_path_factory, index_template(tmp_path_factory))
 
 
 @pytest.fixture
 def vault(template: Path, tmp_path: Path) -> Vault:
-    copied = copy_vault(template, tmp_path)
-    index.update(copied)
-    return copied
+    return copy_vault(template, tmp_path)
 
 
 def commit_config(vault: Vault, change: Callable[[VaultConfig], None], message: str = "Settings") -> Vault:

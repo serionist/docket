@@ -11,8 +11,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import day_kit
 import pytest
-from day_kit import SAME, ZONE, day, day_vault, signed_in, today
+from day_kit import SAME, ZONE, day, day_template, day_vault, read_today, signed_in, today
 from docket_testkit import empty_vault, make_config
 from ledger_kit import ADD_FIELDS, op, write_ops
 from starlette.testclient import TestClient
@@ -38,6 +39,19 @@ def vault(tmp_path: Path) -> Vault:
 @pytest.fixture
 def client(vault: Vault) -> Iterator[TestClient]:
     with signed_in(vault) as found:
+        yield found
+
+
+@pytest.fixture
+def seen(tmp_path_factory: pytest.TempPathFactory) -> Vault:
+    """The worker's shared copy of today's day vault, its index built, for the tests that only read: a write into it
+    fails the run (DR-0531), and past midnight it is the next day's."""
+    return read_today(tmp_path_factory, day_template(tmp_path_factory))
+
+
+@pytest.fixture
+def reader(seen: Vault) -> Iterator[TestClient]:
+    with signed_in(seen) as found:
         yield found
 
 
@@ -77,13 +91,28 @@ def write(vault: Vault, *changes: dict[str, Any]) -> store.Written:
     return store.write(vault, list(changes), by="user", via="cli")
 
 
+def test_past_midnight_a_reading_test_gets_the_next_day_s_shared_copy(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = read_today(tmp_path_factory, day_template(tmp_path_factory))
+    assert read_today(tmp_path_factory, day_template(tmp_path_factory)).root == first.root
+    after = today() + timedelta(days=1)
+    monkeypatch.setattr(day_kit, "today", lambda: after)
+    later = read_today(tmp_path_factory, day_template(tmp_path_factory))
+    assert later.root != first.root
+    # Its seed is dated from the new day, so the room is due on it, as a copy made that day has it.
+    for vault, on in ((first, after - timedelta(days=1)), (later, after)):
+        [room] = [o for o in ops(vault) if o["op"] == "add" and o["fields"]["title"] == "Book the room"]
+        assert room["fields"]["due"] == on.isoformat()
+
+
 # -- the list --------------------------------------------------------------------------------------------------------
 
 
-def test_the_queue_lists_the_untriaged_first_by_due_then_each_call(client: TestClient, vault: Vault) -> None:
-    found = queued(client)
+def test_the_queue_lists_the_untriaged_first_by_due_then_each_call(reader: TestClient, seen: Vault) -> None:
+    found = queued(reader)
     assert found["canonical"] == "/queue"
-    assert found["version"] == day_routes.version(vault.root)
+    assert found["version"] == day_routes.version(seen.root)
     assert found["today"] == today().isoformat()
     assert groups(found) == ["Untriaged", "Chase"]
     assert rows(found) == [*UNTRIAGED, "A-0001"]
@@ -118,10 +147,10 @@ def test_the_calls_follow_the_views_order_each_by_due_with_none_last(client: Tes
     assert found["list"]["counts"] == "5 open: 0 untriaged, 1 discuss, 1 claude, 2 me, 1 chase; 1 overdue"
 
 
-def test_a_snooze_whose_day_has_come_leads_the_untriaged(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_snooze_whose_day_has_come_leads_the_untriaged(reader: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     later = datetime.combine(today() + timedelta(days=6), datetime.min.time(), ZONE).replace(hour=12)
     monkeypatch.setattr(views, "now", lambda: later.astimezone(UTC))
-    found = queued(client)
+    found = queued(reader)
     assert groups(found) == ["Snooze ended", "Untriaged", "Chase"]
     assert found["list"]["groups"][0]["tone"] == "today"
     assert rows(found)[:2] == ["A-0007", "A-0002"]
@@ -141,8 +170,8 @@ def test_a_snooze_whose_day_has_come_leads_the_untriaged(client: TestClient, mon
         ("q=zeppelin", []),
     ],
 )
-def test_q_and_the_filters_narrow_the_queue(client: TestClient, query: str, shown: list[str]) -> None:
-    found = queued(client, query)
+def test_q_and_the_filters_narrow_the_queue(reader: TestClient, query: str, shown: list[str]) -> None:
+    found = queued(reader, query)
     assert rows(found) == shown
     assert found["canonical"] == f"/queue?{query}"
     if not shown:
@@ -157,23 +186,23 @@ def test_an_empty_queue_says_so(tmp_path: Path) -> None:
     assert found["list"]["empty"] == "Nothing is open: the queue is empty."
 
 
-def test_the_ledger_s_own_parameters_are_left_out_and_never_refused(client: TestClient) -> None:
-    found = queued(client, "state=bogus&group=nope&archived=yes&open=A-0003&k=2")
+def test_the_ledger_s_own_parameters_are_left_out_and_never_refused(reader: TestClient) -> None:
+    found = queued(reader, "state=bogus&group=nope&archived=yes&open=A-0003&k=2")
     assert found["canonical"] == "/queue?open=A-0003&k=2"
     filters = found["filters"]
     assert (filters["state"], filters["group"], filters["archived"]) == ("open", "due", False)
     # k cuts across the groups, and Show more asks for the next hundred.
     assert rows(found) == ["A-0002", "A-0003"]
     assert (found["list"]["shown"], found["list"]["total"], found["list"]["more"]) == (2, 5, 102)
-    assert queued(client, "k=0", status=400)["error"].startswith("k is a whole number")
+    assert queued(reader, "k=0", status=400)["error"].startswith("k is a whole number")
 
 
-def test_the_queue_s_panel_answers_its_own_canonical_url(client: TestClient) -> None:
-    found = read(client, f"{API}/panel?open=A-0002&state=closed&drop=1")
+def test_the_queue_s_panel_answers_its_own_canonical_url(reader: TestClient) -> None:
+    found = read(reader, f"{API}/panel?open=A-0002&state=closed&drop=1")
     assert found["canonical"] == "/queue?open=A-0002&drop=1"
     assert found["panel"]["ref"] == "A-0002"
     assert found["panel"]["meeting"]["ref"] == "M-0001"
-    assert read(client, f"{API}/panel?open=M-0001")["missing"].startswith("M-0001 is a meeting")
+    assert read(reader, f"{API}/panel?open=M-0001")["missing"].startswith("M-0001 is a meeting")
 
 
 # -- the writes, as page queue ---------------------------------------------------------------------------------------

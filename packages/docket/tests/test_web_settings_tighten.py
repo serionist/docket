@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from docket_testkit import cant_place, git, make_record, sh
+from docket_testkit import cant_place, digest, git, make_record, sh, shared
 from docket_webkit import OURS, a11y_problems, html_problems, parse
 from httpx2 import Response
 from settings_kit import edit_config, settings_template, settings_vault
@@ -31,15 +31,21 @@ SOURCE = "/settings/source"
 
 @pytest.fixture(scope="module")
 def template(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return settings_template(tmp_path_factory)
+    """The Settings test vault with two memos waiting at the gate, ready, since memo is a work source: built once per
+    session, its project returned; tests copy it."""
+    settings = settings_template(tmp_path_factory)
+
+    def build(folder: Path) -> Path:
+        found = settings_vault(settings, folder)
+        Gate(found).stage([memo(1, "Day rates."), memo(2, "Lunch on Friday.")])
+        return found.root.parent
+
+    return shared(build, "settings-tighten-" + digest(str(settings.resolve())), tmp_path_factory)
 
 
 @pytest.fixture
 def vault(template: Path, tmp_path: Path) -> Vault:
-    """The Settings test vault with two memos waiting at the gate, ready, since memo is a work source."""
-    found = settings_vault(template, tmp_path)
-    Gate(found).stage([memo(1, "Day rates."), memo(2, "Lunch on Friday.")])
-    return found
+    return settings_vault(template, tmp_path)
 
 
 @pytest.fixture

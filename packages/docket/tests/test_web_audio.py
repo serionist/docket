@@ -17,8 +17,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
-from docket_testkit import make_record
-from docket_webkit import TOKEN, signed_in
+from docket_testkit import copied_with_seals, copy_vault, digest, make_record
+from docket_webkit import TOKEN, serving, signed_in
 from recording_kit import TOUR, TOUR_POLISHED, WHISPER, recording_template, with_audio
 from starlette.datastructures import QueryParams
 from starlette.testclient import TestClient
@@ -49,11 +49,23 @@ def client(template: Path, tmp_path: Path) -> Iterator[TestClient]:
 
 
 @pytest.fixture
-def stored(client: TestClient, tmp_path: Path) -> Vault:
-    """The tour's audio stored and Whisper's transcript in raw, in the vault the client's service reads."""
-    vault = Vault.open(tmp_path / "vault")
-    with_audio(vault)
-    return vault
+def stored(template: Path, tmp_path: Path) -> Vault:
+    """The tour's audio stored and Whisper's transcript in raw: a copy of a vault built so once per session, its key
+    store's seal where this test's Docket reads it."""
+
+    def build(folder: Path) -> Path:
+        vault = copy_vault(template, folder)
+        with_audio(vault)
+        return vault.root
+
+    return Vault.open(copied_with_seals(tmp_path, build, "audio-" + digest(str(template.resolve()))))
+
+
+@pytest.fixture
+def played(stored: Vault) -> Iterator[TestClient]:
+    """A client of the service on the vault with the audio stored."""
+    with serving(stored.root) as found:
+        yield found
 
 
 def view(client: TestClient, query: str) -> dict[str, Any]:
@@ -90,10 +102,10 @@ def test_a_range_is_read_as_the_rfc_reads_it(header: str | None, size: int, want
     assert audio.span(header, size) == wanted
 
 
-def test_the_audio_is_served_by_exact_byte_ranges_and_never_cached(client: TestClient, stored: Vault) -> None:
+def test_the_audio_is_served_by_exact_byte_ranges_and_never_cached(played: TestClient, stored: Vault) -> None:
     data = reader.read(stored, TOUR).data
     assert data is not None and len(data) > 200
-    whole = client.get(AUDIO)
+    whole = played.get(AUDIO)
     assert whole.status_code == 200 and whole.content == data
     assert whole.headers["Content-Type"] == "audio/webm" and whole.headers["Accept-Ranges"] == "bytes"
     assert whole.headers["Cache-Control"] == "no-store" and whole.headers["X-Content-Type-Options"] == "nosniff"
@@ -103,16 +115,16 @@ def test_the_audio_is_served_by_exact_byte_ranges_and_never_cached(client: TestC
         ("bytes=100-", 100, size - 1),
         ("bytes=-50", size - 50, size - 1),
     ):
-        part = client.get(AUDIO, headers={"Range": header})
+        part = played.get(AUDIO, headers={"Range": header})
         assert part.status_code == 206, header
         assert part.content == data[start : end + 1] and part.headers["Content-Length"] == str(end - start + 1)
         assert part.headers["Content-Range"] == f"bytes {start}-{end}/{size}"
         assert part.headers["Cache-Control"] == "no-store"
-    huge = client.get(AUDIO, headers={"Range": "bytes=" + "9" * 5000 + "-"})
+    huge = played.get(AUDIO, headers={"Range": "bytes=" + "9" * 5000 + "-"})
     assert huge.status_code == 200 and huge.content == data, (
         "a field past Python's digits is a Range that doesn't parse"
     )
-    past = client.get(AUDIO, headers={"Range": f"bytes={size}-"})
+    past = played.get(AUDIO, headers={"Range": f"bytes={size}-"})
     assert past.status_code == 416 and past.headers["Content-Range"] == f"bytes */{size}" and past.content == b""
 
 
@@ -158,23 +170,23 @@ def test_a_rid_a_file_that_isn_t_audio_and_a_reader_s_refusal_are_named(
 
 
 def test_a_file_that_stops_reading_ok_between_the_reader_s_two_looks_plays_nothing(
-    client: TestClient, stored: Vault, monkeypatch: pytest.MonkeyPatch
+    played: TestClient, stored: Vault, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(reader, "read", lambda *a, **k: reader.Media("held"))
-    assert client.get(AUDIO).text == "no audio: it no longer reads ok"
+    assert played.get(AUDIO).text == "no audio: it no longer reads ok"
 
 
-def test_the_token_never_fetches_the_audio(client: TestClient, stored: Vault) -> None:
+def test_the_token_never_fetches_the_audio(played: TestClient, stored: Vault) -> None:
     bearer = {"Authorization": f"Bearer {TOKEN}"}
-    assert client.get(AUDIO, headers=bearer).status_code == 403, "with the session too"
-    client.cookies.clear()
-    refused = client.get(AUDIO, headers=bearer)
+    assert played.get(AUDIO, headers=bearer).status_code == 403, "with the session too"
+    played.cookies.clear()
+    refused = played.get(AUDIO, headers=bearer)
     assert refused.status_code == 403
     assert refused.json() == {"detail": "the web app's routes take the browser's session only"}
 
 
 def test_one_file_is_decrypted_once_for_its_ranges_and_its_state_is_read_every_time(
-    client: TestClient, stored: Vault, monkeypatch: pytest.MonkeyPatch
+    played: TestClient, stored: Vault, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     real = crypto.decrypt
     opened: list[int] = []
@@ -184,16 +196,16 @@ def test_one_file_is_decrypted_once_for_its_ranges_and_its_state_is_read_every_t
         return real(data, identity)
 
     monkeypatch.setattr(crypto, "decrypt", counted)
-    first = client.get(AUDIO, headers={"Range": "bytes=0-99"})
-    second = client.get(AUDIO, headers={"Range": "bytes=100-199"})
+    first = played.get(AUDIO, headers={"Range": "bytes=0-99"})
+    second = played.get(AUDIO, headers={"Range": "bytes=100-199"})
     assert (first.status_code, second.status_code) == (206, 206)
     size = int(first.headers["Content-Range"].rpartition("/")[2])
     # The stored file is larger than what it decrypts to; a key file is a few hundred bytes.
     assert len([n for n in opened if n > size]) == 1, "the file decrypted once for both ranges"
-    head = client.head(AUDIO)
+    head = played.head(AUDIO)
     assert head.status_code == 200 and head.headers["Content-Length"] == str(size) and head.content == b""
     holds.add(stored, "plaud", ["rec-tour"])
-    assert client.get(AUDIO, headers={"Range": "bytes=200-299"}).text == "no audio: held", "kept bytes never outlive it"
+    assert played.get(AUDIO, headers={"Range": "bytes=200-299"}).text == "no audio: held", "kept bytes never outlive it"
 
 
 def test_kept_bytes_go_with_their_file_s_change_and_after_their_time(tmp_path: Path) -> None:
@@ -229,45 +241,45 @@ def test_a_file_s_size_is_read_from_its_age_framing(tmp_path: Path, size: int) -
 
 
 def test_the_audio_needs_the_session_and_leaves_nothing_in_the_log(
-    client: TestClient, stored: Vault, caplog: pytest.LogCaptureFixture
+    played: TestClient, stored: Vault, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.DEBUG)
-    assert client.get(AUDIO, headers={"Range": "bytes=0-9"}).status_code == 206
+    assert played.get(AUDIO, headers={"Range": "bytes=0-9"}).status_code == 206
     said = [r.getMessage() for r in caplog.records if r.name.startswith("docket")]
     # The request's line names the route's template and its status, never the rid, the range or a byte.
     audio_lines = [m for m in said if "audio" in m]
     assert audio_lines == [m for m in said if re.fullmatch(r"GET /recording/audio 206 \d+ ms", m)]
     assert not [m for m in said if "tour" in m or "rid" in m or "bytes" in m], said
-    client.cookies.clear()
-    assert client.get(AUDIO).status_code != 200
+    played.cookies.clear()
+    assert played.get(AUDIO).status_code != 200
 
 
-def test_withheld_audio_doesn_t_play_and_the_page_says_why(client: TestClient, stored: Vault) -> None:
+def test_withheld_audio_doesn_t_play_and_the_page_says_why(played: TestClient, stored: Vault) -> None:
     path = stored.root / CONFIG_FILE
     config = VaultConfig.load(path)
     config.never_store.keywords.append("yard tour")
     path.write_text(config.dump(), encoding="utf-8", newline="\n")
-    assert client.get(AUDIO).text == "no audio: withheld"
-    shown = view(client, f"rid={TOUR}")
+    assert played.get(AUDIO).text == "no audio: withheld"
+    shown = view(played, f"rid={TOUR}")
     assert shown["audio"]["why"] == "withheld" and shown["audio"]["message"] == NO_AUDIO["withheld"]
     assert shown["player"] is None
 
 
-def test_the_player_starts_at_the_line_at_marks_and_every_spoken_line_plays(client: TestClient, stored: Vault) -> None:
-    page = view(client, f"rid={TOUR}&at=00:20")
+def test_the_player_starts_at_the_line_at_marks_and_every_spoken_line_plays(played: TestClient, stored: Vault) -> None:
+    page = view(played, f"rid={TOUR}&at=00:20")
     assert page["player"] == f"{AUDIO}#t=20.000"
     assert page["audio"]["message"] == NO_AUDIO["stored"]
     lines = [line for row in page["pair"]["rows"] for side in (row["left"], row["right"]) for line in side]
     spoken = [line for line in lines if not line["cut"]]
     assert spoken and all(line["start"] is not None for line in spoken)
     assert all(line["start"] is None for line in lines if line["cut"])
-    assert view(client, f"rid={TOUR}")["player"] == AUDIO
+    assert view(played, f"rid={TOUR}")["player"] == AUDIO
 
 
 def test_the_two_transcripts_sit_side_by_side_by_time_and_a_cut_is_cut_in_both(
-    client: TestClient, stored: Vault
+    played: TestClient, stored: Vault
 ) -> None:
-    pair = view(client, f"rid={TOUR}")["pair"]
+    pair = view(played, f"rid={TOUR}")["pair"]
     assert pair is not None
     assert pair["left"]["meta"].startswith(TOUR_POLISHED) and WHISPER in pair["right"]["meta"]
     rows = [(row["left"], row["right"]) for row in pair["rows"]]

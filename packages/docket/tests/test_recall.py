@@ -10,8 +10,10 @@ from docket_testkit import (
     THREAD,
     at,
     copy_vault,
+    indexed,
     make_record,
     note,
+    read_only,
     read_route,
     shared,
     template_vault,
@@ -49,6 +51,26 @@ def vault(template: Path, tmp_path: Path, request: pytest.FixtureRequest, monkey
     return v
 
 
+@pytest.fixture(scope="module")
+def parsed(template: Path) -> Path:
+    """One copy for the reads on the parse route, which finds no index: a write into it fails the run (DR-0531)."""
+    return read_only(template)
+
+
+@pytest.fixture(scope="module")
+def through_index(tmp_path_factory: pytest.TempPathFactory, template: Path) -> Path:
+    """One copy, its index built, for the reads on the index route: a write into it fails the run (DR-0531)."""
+    return read_only(indexed(tmp_path_factory, template))
+
+
+@pytest.fixture(params=READ_ROUTES)
+def seen(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Vault:
+    """The vault for a test that only reads, on each route."""
+    root = request.getfixturevalue("parsed" if request.param == "parse" else "through_index")
+    read_route(request.param, monkeypatch)
+    return Vault.open(root)
+
+
 def on_disk(vault: Vault, doc_id: str, text: str) -> None:
     """A doc written straight to disk, as a hand edit or an older Docket might leave it."""
     path = vault.root / doc_path(doc_id)
@@ -59,22 +81,22 @@ def on_disk(vault: Vault, doc_id: str, text: str) -> None:
 # -- read: docs -----------------------------------------------------------------------------------------------------
 
 
-def test_a_doc_s_summary_is_the_doc_with_numbered_lines(vault: Vault) -> None:
-    got = recall.read(vault, NOTE_ID)
+def test_a_doc_s_summary_is_the_doc_with_numbered_lines(seen: Vault) -> None:
+    got = recall.read(seen, NOTE_ID)
     assert got.doc is not None
     assert (got.doc.id, got.doc.rev, got.doc.path, got.doc.covers, got.spans) == (NOTE_ID, 1, NOTE_PATH, [REC], [])
     assert got.doc.lines[0].text == "---"
     assert got.doc.lines[13].n == 14
     assert got.doc.lines[13].anchors == ["@12:08"]
-    assert got.doc.text == (vault.root / NOTE_PATH).read_text(encoding="utf-8")
+    assert got.doc.text == (seen.root / NOTE_PATH).read_text(encoding="utf-8")
     assert got.doc.superseded_by == []
 
 
-def test_a_doc_s_raw_is_its_records_and_both_is_both(vault: Vault) -> None:
-    raw = recall.read(vault, NOTE_ID, view="raw")
+def test_a_doc_s_raw_is_its_records_and_both_is_both(seen: Vault) -> None:
+    raw = recall.read(seen, NOTE_ID, view="raw")
     assert raw.doc is None
     assert [len(s.segments) for s in raw.spans] == [7]
-    both = recall.read(vault, NOTE_ID, view="both")
+    both = recall.read(seen, NOTE_ID, view="both")
     assert both.doc is not None
     assert len(both.spans) == 1
 
@@ -133,15 +155,15 @@ def test_a_superseded_doc_names_its_successor_and_drops_out_of_a_record_s_summar
 # -- read: records --------------------------------------------------------------------------------------------------
 
 
-def test_a_record_s_summary_is_the_doc_lines_near_the_position(vault: Vault) -> None:
-    near = recall.read(vault, "r:calls:rec-0042@12:08").lines
+def test_a_record_s_summary_is_the_doc_lines_near_the_position(seen: Vault) -> None:
+    near = recall.read(seen, "r:calls:rec-0042@12:08").lines
     assert [(c.doc, c.rev, c.n, c.anchors) for c in near] == [(NOTE_ID, 1, 14, ["@12:08"])]
-    wider = recall.read(vault, "[r:calls:rec-0042@12:08]", around=2).lines
+    wider = recall.read(seen, "[r:calls:rec-0042@12:08]", around=2).lines
     assert [c.n for c in wider] == [14, 15]
-    stretch = recall.read(vault, "r:calls:rec-0042@14:40-15:00").lines
+    stretch = recall.read(seen, "r:calls:rec-0042@14:40-15:00").lines
     assert [c.n for c in stretch] == [15]
-    assert [c.n for c in recall.read(vault, REC).lines] == [14, 15]
-    assert recall.read(vault, "r:calls:rec-0042@30:00").lines == []
+    assert [c.n for c in recall.read(seen, REC).lines] == [14, 15]
+    assert recall.read(seen, "r:calls:rec-0042@30:00").lines == []
 
 
 def test_a_record_s_summary_across_records_and_parts(vault: Vault) -> None:
@@ -164,23 +186,23 @@ def test_a_record_s_summary_across_records_and_parts(vault: Vault) -> None:
     assert sorted(c.doc for c in on_call) == [NOTE_ID, "thread-summary:2026-10-14-offer"]
 
 
-def test_a_record_s_raw_is_its_span(vault: Vault) -> None:
-    point = recall.read(vault, "r:calls:rec-0042@12:08", view="raw")
+def test_a_record_s_raw_is_its_span(seen: Vault) -> None:
+    point = recall.read(seen, "r:calls:rec-0042@12:08", view="raw")
     assert point.lines == []
     assert [s.text for s in point.spans[0].segments] == ["So ten million, for the whole quarter."]
-    wider = recall.read(vault, "r:calls:rec-0042@12:08", view="both", around=2)
+    wider = recall.read(seen, "r:calls:rec-0042@12:08", view="both", around=2)
     assert len(wider.spans[0].segments) == 2
     assert len(wider.lines) == 2
-    paragraph = recall.read(vault, format_anchor(MAIL, "part", 2), view="raw", around=1).spans[0]
+    paragraph = recall.read(seen, format_anchor(MAIL, "part", 2), view="raw", around=1).spans[0]
     assert paragraph.paragraphs == (1, 3)
-    assert len(recall.read(vault, REC, view="raw", around=3).spans) == 1
+    assert len(recall.read(seen, REC, view="raw", around=3).spans) == 1
 
 
-def test_around_counts_messages_in_a_thread(vault: Vault) -> None:
-    spans = recall.read(vault, THREAD[1], view="raw", around=1).spans
+def test_around_counts_messages_in_a_thread(seen: Vault) -> None:
+    spans = recall.read(seen, THREAD[1], view="raw", around=1).spans
     assert [s.rid for s in spans] == THREAD
     assert spans[2].versions == 2
-    assert [s.rid for s in recall.read(vault, THREAD[1], view="raw").spans] == [THREAD[1]]
+    assert [s.rid for s in recall.read(seen, THREAD[1], view="raw").spans] == [THREAD[1]]
 
 
 @pytest.mark.parametrize(
@@ -196,27 +218,27 @@ def test_around_counts_messages_in_a_thread(vault: Vault) -> None:
     ],
 )
 def test_a_read_that_can_t_be_answered_says_why(
-    vault: Vault, locator: str, kwargs: dict[str, object], says: str
+    seen: Vault, locator: str, kwargs: dict[str, object], says: str
 ) -> None:
     with pytest.raises(DocketError, match=says):
-        recall.read(vault, locator, **kwargs)  # type: ignore[arg-type]
+        recall.read(seen, locator, **kwargs)  # type: ignore[arg-type]
 
 
 # -- several in one read (DR-0725) ----------------------------------------------------------------------------------
 
 
-def test_read_many_reads_each_as_read_does_in_order_a_locator_given_twice_once(vault: Vault) -> None:
+def test_read_many_reads_each_as_read_does_in_order_a_locator_given_twice_once(seen: Vault) -> None:
     point = "r:calls:rec-0042@12:08"
-    got = recall.read_many(vault, NOTE_ID, [point, NOTE_PATH, point, NOTE_ID], view="both")
+    got = recall.read_many(seen, NOTE_ID, [point, NOTE_PATH, point, NOTE_ID], view="both")
     assert [one.locator for one in (got, *got.more)] == [NOTE_ID, point, NOTE_PATH]
     assert got.later == []
-    alone = [recall.read(vault, locator, view="both") for locator in (NOTE_ID, point, NOTE_PATH)]
+    alone = [recall.read(seen, locator, view="both") for locator in (NOTE_ID, point, NOTE_PATH)]
     assert got.model_dump(exclude={"more"}) == alone[0].model_dump(exclude={"more"})
     assert [one.model_dump() for one in got.more] == [one.model_dump(exclude={"more", "later"}) for one in alone[1:]]
 
 
-def test_read_many_gives_a_locator_that_doesn_t_open_a_problem_of_its_own(vault: Vault) -> None:
-    got = recall.read_many(vault, "calls:nothing", ["nonsense", "r:calls:rec-0042@2:00:00", REC], view="raw")
+def test_read_many_gives_a_locator_that_doesn_t_open_a_problem_of_its_own(seen: Vault) -> None:
+    got = recall.read_many(seen, "calls:nothing", ["nonsense", "r:calls:rec-0042@2:00:00", REC], view="raw")
     assert (got.locator, got.doc, got.spans, got.problems) == (
         "calls:nothing", None, [], ["no record calls:nothing in the raw log"],
     )  # fmt: skip
@@ -226,34 +248,34 @@ def test_read_many_gives_a_locator_that_doesn_t_open_a_problem_of_its_own(vault:
     assert (whole.problems, [s.rid for s in whole.spans]) == ([], [REC])
 
 
-def test_read_many_keeps_each_further_read_only_while_the_result_fits(vault: Vault) -> None:
+def test_read_many_keeps_each_further_read_only_while_the_result_fits(seen: Vault) -> None:
     """The first read always; then each while `fits` takes the result with it, the rest in later, unread and in
     order, the first refused among them."""
     asked = [REC, "r:calls:rec-0042@12:08", "calls:nothing", "nonsense"]
-    seen: list[list[str]] = []
+    offered: list[list[str]] = []
 
     def two_more(result: recall.ReadResult) -> bool:
-        seen.append(result.later)
+        offered.append(result.later)
         return len(result.more) <= 2
 
-    got = recall.read_many(vault, NOTE_ID, asked, fits=two_more)
+    got = recall.read_many(seen, NOTE_ID, asked, fits=two_more)
     assert ([one.locator for one in got.more], got.later) == (asked[:2], asked[2:])
-    assert seen == [asked[1:], asked[2:], asked[3:]]
-    none = recall.read_many(vault, NOTE_ID, asked, fits=lambda _: False)
+    assert offered == [asked[1:], asked[2:], asked[3:]]
+    none = recall.read_many(seen, NOTE_ID, asked, fits=lambda _: False)
     assert (none.locator, none.doc is not None, none.more, none.later) == (NOTE_ID, True, [], asked)
 
 
 @pytest.mark.parametrize(("kwargs", "says"), [({"view": "all"}, "view is one of"), ({"around": -2}, "negative")])
-def test_read_many_refuses_what_read_refuses_of_the_call(vault: Vault, kwargs: dict[str, object], says: str) -> None:
+def test_read_many_refuses_what_read_refuses_of_the_call(seen: Vault, kwargs: dict[str, object], says: str) -> None:
     with pytest.raises(DocketError, match=says):
-        recall.read_many(vault, NOTE_ID, [REC], **kwargs)  # type: ignore[arg-type]
+        recall.read_many(seen, NOTE_ID, [REC], **kwargs)  # type: ignore[arg-type]
 
 
 # -- verify ---------------------------------------------------------------------------------------------------------
 
 
-def test_verify_puts_each_line_next_to_its_raw(vault: Vault) -> None:
-    got = recall.verify(vault, NOTE_ID)
+def test_verify_puts_each_line_next_to_its_raw(seen: Vault) -> None:
+    got = recall.verify(seen, NOTE_ID)
     assert (got.doc, got.rev) == (NOTE_ID, 1)
     assert [(line.n, line.anchors, line.problems) for line in got.lines] == [
         (14, ["@12:08"], []),
@@ -261,12 +283,12 @@ def test_verify_puts_each_line_next_to_its_raw(vault: Vault) -> None:
     ]
     assert [s.text for s in got.lines[0].spans[0].segments] == ["So ten million, for the whole quarter."]
     assert [s.speaker for s in got.lines[1].spans[0].segments] == ["Cleo Test"]
-    short = recall.verify(vault, NOTE_PATH, window=1)
+    short = recall.verify(seen, NOTE_PATH, window=1)
     assert short.lines[0].spans[0].end_ms == 729_000
 
 
-def test_verify_chosen_lines(vault: Vault) -> None:
-    got = recall.verify(vault, NOTE_ID, lines=[15, 11, 1, 99])
+def test_verify_chosen_lines(seen: Vault) -> None:
+    got = recall.verify(seen, NOTE_ID, lines=[15, 11, 1, 99])
     assert [(line.n, line.anchors, line.problems) for line in got.lines] == [
         (11, [], []),
         (15, ["@14:30-14:52"], []),
@@ -300,9 +322,9 @@ def test_verify_a_legacy_note_has_nothing_to_check(vault: Vault) -> None:
 
 
 @pytest.mark.parametrize(("doc", "says"), [(REC, "is a record; verify takes a doc"), ("nonsense", "neither")])
-def test_verify_takes_a_doc(vault: Vault, doc: str, says: str) -> None:
+def test_verify_takes_a_doc(seen: Vault, doc: str, says: str) -> None:
     with pytest.raises(DocketError, match=says):
-        recall.verify(vault, doc)
+        recall.verify(seen, doc)
 
 
 @pytest.mark.parametrize("doc_id", ["brief:../../../elsewhere", "brief:..\\..\\..\\elsewhere"])

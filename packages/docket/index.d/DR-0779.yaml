@@ -1,0 +1,18 @@
+decisions:
+  - id: DR-0779
+    title: The tests that only read a vault share one checked copy per module, a setup every test repeats is built once per session, and the kit's setup commits run no hooks
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#266", DR-0753, DR-0531]
+    description: "How the test kit cuts fixture setup, under DR-0531, for #266 (DR-0753). Three parts. First, a module's tests that only read a vault share one copy, read_only(template): made once per module and worker beside the templates, with a manifest taken as a template's is, so the controller's check at the end of the run fails it when a test wrote into it, as it fails a write into a template; a test that writes keeps a copy of its own. The day pages' readers ask for theirs per test with the day's template (read_today), one copy per day and worker, so a run that crosses midnight reads the next day's, as their own copies do. A vault whose first read builds the index is shared from indexed(factory, template), a template of its own with the index built once per session after every file is older than the ledger's racy window, so a copy's index is current and a read writes nothing; the manifest leaves out lock files, *.lock, since a reader takes one, as the index's, whose file filelock truncates at each take on Linux and macOS. Second, a setup that every test of a file repeated (the day vaults the day pages copy, dated by the day so a run that crosses midnight builds the next day's; the stored tour audio, its key store's seal written where each test's Docket reads it; the rendered people and STATUS.md; the rerank's planted messages and vectors; an index each test built) is a template built once per session and copied; devkit's throwaway repo is made once per worker and copied. Third, the kit's own git setup commands, sh() and git() running commit, merge, pull, checkout, switch, rebase, cherry-pick, revert or am, pass -c core.hooksPath=<a file under DOCKET_TEST_HOME>, as Docket's own commits do (DR-0260): a test repo's git-lfs hooks, a process each and about a second on Windows, don't run for setup. A push keeps its hooks, since git-lfs's pre-push is what sends media to a remote; a test about the user's own hooks passes hooks=True; outside a test session, with no DOCKET_TEST_HOME, the hooks run as before."
+    binds:
+      - A module's tests that only read a vault share one read_only copy, and a write into it fails the run as one into a template does.
+      - A setup every test of a file repeats is built once per session and copied.
+      - The kit's setup commits, merges and checkouts run no hooks; its pushes, and a test about the user's own hooks, keep them.
+    not_chosen:
+      - "Reading the session's template itself: two workers' first reads would build an index in one folder at once, and one stray write would fail every module that reads it."
+      - "A module copy no check holds, as test_search.py had: a write into it would go unseen and change what the module's later tests read."
+      - "core.hooksPath in TEST_GITCONFIG: git lfs install --local fails on it."
+      - "Hooks off for the kit's pushes too: git-lfs's pre-push is what sends a test's media to its remote."

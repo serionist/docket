@@ -148,13 +148,13 @@ jobs:
   # calls costs about 40 ms. The first share runs the types too. A share keeps its test files whole, so its timed tests
   # run alone after its own parallel run. The smoke set's pages load in the runner's own Chrome.
   windows-shares:
-    name: Tests (Windows, ${{ matrix.share }} of 4)
+    name: Tests (Windows, ${{ matrix.share }} of 3)
     runs-on: windows-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        share: [1, 2, 3, 4]
+        share: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -181,7 +181,7 @@ jobs:
       - name: Types and tests
         env:
           DOCKET_TEST_BROWSER: chrome
-        run: uv run gate os ${{ matrix.share != 1 && '--only tests' || '' }} --shard ${{ matrix.share }}/4
+        run: uv run gate os ${{ matrix.share != 1 && '--only tests' || '' }} --shard ${{ matrix.share }}/3
       - name: Keep the times
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

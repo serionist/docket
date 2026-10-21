@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import gc
 import hashlib
+import itertools
 import json
 import os
 import random
@@ -105,7 +106,37 @@ class FakePrompt:
         return self.answers.pop(0) if self.answers else osprompt.Refused("the script ran out")
 
 
-def sh(cwd: Path, *args: str, check: bool = True) -> str:
+# The git commands whose hooks a test repo's git-lfs installs (post-commit, post-checkout, post-merge), each a process
+# of its own, about a second on Windows. Not push: git-lfs's pre-push is what sends media to a remote.
+HOOKED = frozenset({"commit", "merge", "pull", "checkout", "switch", "rebase", "cherry-pick", "revert", "am"})
+HOOKS_OFF = "hooks-off"
+
+
+def hooks_off() -> Path | None:
+    """The file the kit points core.hooksPath at for its own setup commits, as Docket does for its own: a file, since
+    git-lfs writes its hooks into any folder there. None outside a test session, where the hooks run as before."""
+    home = os.environ.get(HOME_VAR)
+    if not home:
+        return None
+    path = Path(home) / HOOKS_OFF
+    if not path.is_file():
+        path.write_text("The test kit's setup commits run no hooks from here.\n", encoding="utf-8")
+    return path
+
+
+def git_verb(args: tuple[str, ...]) -> str:
+    """The git command a call list runs: what follows git's own options, `-c` and `-C` with their values."""
+    rest = list(args[1:])
+    while rest and rest[0].startswith("-"):
+        del rest[: 2 if rest[0] in ("-c", "-C") else 1]
+    return rest[0] if rest else ""
+
+
+def sh(cwd: Path, *args: str, check: bool = True, hooks: bool = False) -> str:
+    """A command in cwd, its output; a failure fails the test unless check is off. The kit's own commits, merges and
+    checkouts run no hooks, as Docket's own don't: a test about the user's own hooks passes hooks=True."""
+    if not hooks and args[:1] == ("git",) and git_verb(args) in HOOKED and (off := hooks_off()) is not None:
+        args = ("git", "-c", f"core.hooksPath={off.as_posix()}", *args[1:])
     proc = subprocess.run(list(args), cwd=cwd, capture_output=True, text=True, encoding="utf-8", check=False)
     if check and proc.returncode != 0:
         raise AssertionError(f"{args}: {proc.stderr or proc.stdout}")
@@ -283,8 +314,9 @@ def fixture_vault(tmp_path: Path) -> Vault:
 
 # -- templates built once per session ---------------------------------------------------------------------------------
 
-# Copies of a template are what tests write; a reader's caches in a template are not a write.
-_CACHES = re.compile(r"(-wal|-shm|-journal|\.pyc)$")
+# Copies of a template are what tests write; a reader's caches in a template are not a write, nor is a lock a reader
+# takes, as the index's: on Linux and macOS filelock truncates its file at each take and leaves it.
+_CACHES = re.compile(r"(-wal|-shm|-journal|\.pyc|\.lock)$")
 _FACTORY: list[pytest.TempPathFactory] = []
 # The folder the gate names for both pytest runs of a lane without coverage, so the timed run finds the templates the
 # parallel run built and only times (DR-0492). The gate makes it empty for each run, so no template outlives the code
@@ -357,6 +389,36 @@ def copied(tmp_path: Path, build: Callable[[Path], Path], key: str) -> Path:
     for repo in _repos(folder):
         _fit(folder, tmp_path / repo.relative_to(folder), tmp_path)
     return tmp_path / rel
+
+
+_READ_ONLY = itertools.count()
+
+
+def read_only(made: Path) -> Path:
+    """A copy of a template for the tests of a module that only read it: made once per module and worker, beside the
+    templates, and held to a manifest as they are, so a run whose test wrote into it fails (DR-0531). A test that
+    writes takes a copy of its own; a vault whose first read builds the index is shared from `indexed`."""
+    templates = templates_folder(_FACTORY[0])
+    name = f"{_holding(made).name}.read-{os.getpid()}-{next(_READ_ONLY)}"
+    found = _copy_into(made, templates / name)
+    (templates / f"{name}.manifest.json").write_text(json.dumps(manifest(templates / name)), encoding="utf-8")
+    return found
+
+
+def _holding(made: Path) -> Path:
+    """The template folder a path a builder returned lies in."""
+    templates = templates_folder(_FACTORY[0])
+    return templates / made.resolve().relative_to(templates.resolve()).parts[0]
+
+
+def _copy_into(made: Path, target: Path) -> Path:
+    """The whole template `made` lies in copied to target, ready as a fresh build would be, as `copied` makes one:
+    `made`'s place in the copy."""
+    folder = _holding(made)
+    shutil.copytree(folder, target, dirs_exist_ok=True)
+    for repo in _repos(folder):
+        _fit(folder, target / repo.relative_to(folder), target)
+    return target / made.resolve().relative_to(folder.resolve())
 
 
 # Where a file media key store keeps its seal: Docket's state folder, outside the vault (KeyStore._seal_file).
@@ -551,9 +613,10 @@ def copy_project(template: Path, tmp_path: Path) -> Vault:
     return Vault.open(target / "vault")
 
 
-def git(cwd: Path, *args: str) -> str:
-    """git as the user of a host repo: an invented identity, the user's own commits."""
-    return sh(cwd, "git", "-c", "user.name=Ada Example", "-c", "user.email=ada@example.invalid", *args)
+def git(cwd: Path, *args: str, hooks: bool = False) -> str:
+    """git as the user of a host repo: an invented identity, the user's own commits; their hooks only with hooks=True,
+    for a test about them."""
+    return sh(cwd, "git", "-c", "user.name=Ada Example", "-c", "user.email=ada@example.invalid", *args, hooks=hooks)
 
 
 def commit_config(root: Path) -> None:
@@ -772,6 +835,27 @@ def template_with(factory: pytest.TempPathFactory, make: Callable[[Path], Vault]
 def index_template(factory: pytest.TempPathFactory) -> Path:
     """The index fixture, built once per session; tests copy it."""
     return template_with(factory, build_index_vault)
+
+
+def indexed(factory: pytest.TempPathFactory, vault_in: Path) -> Path:
+    """The template a vault lies in, a project or a host around it included, with the vault's index built from
+    scratch, once per session; returns the vault in it. A copy's index is current, since a copy keeps each file's size
+    and time, which is all the index checks of a run file. The build waits until every file is older than the index's
+    racy window, so no op file is kept as one to hash again, which a reader of a read-only copy would write."""
+    from docket import index
+    from docket.index.ledger import RACY_NS
+
+    def build(base: Path) -> Path:
+        vault = Vault.open(_copy_into(vault_in, base))
+        files = [p for p in vault.root.rglob("*") if ".git" not in p.parts and p.is_file()]
+        newest = max((p.stat().st_mtime_ns for p in files), default=0)
+        wait = (newest + RACY_NS - time.time_ns()) / 1e9
+        if wait > 0:
+            time.sleep(wait + 0.05)
+        index.rebuild(vault)
+        return vault.root
+
+    return shared(build, "indexed-" + digest(str(vault_in.resolve())), factory)
 
 
 # The name vault: a vault about one customer, where two invented names are in most chunks. Acme's stems differ from it

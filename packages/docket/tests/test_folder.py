@@ -143,7 +143,7 @@ def test_the_host_s_hooks_never_run_for_docket_s_commits(tmp_path: Path) -> None
     assert files_in(top) == [f"notes/vault/{run.relative_to(vault.root).as_posix()}"]
     # The user's own commit still runs them.
     with pytest.raises(AssertionError):
-        git(top, "commit", "-qm", "mine")
+        git(top, "commit", "-qm", "mine", hooks=True)
 
 
 @pytest.mark.parametrize("state", ["MERGE_HEAD", "rebase-merge", "detached"])

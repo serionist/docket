@@ -21,14 +21,15 @@ from docket_testkit import (
     PARENT,
     compound_chat,
     compound_template,
-    copy_vault,
     empty_vault,
     fts_and_check,
     index_config,
     index_template,
+    indexed,
     make_record,
     name_template,
     query_words,
+    read_only,
     stem_every_word,
 )
 
@@ -51,9 +52,8 @@ LATER = datetime(2026, 10, 14, 9, 0, tzinfo=UTC)
 
 @pytest.fixture(scope="module")
 def vault(tmp_path_factory: pytest.TempPathFactory) -> Vault:
-    v = copy_vault(index_template(tmp_path_factory), tmp_path_factory.mktemp("search"))
-    rebuild(v)
-    return v
+    """One copy, its index built, for the searches, which only read: a write into it fails the run (DR-0531)."""
+    return Vault.open(read_only(indexed(tmp_path_factory, index_template(tmp_path_factory))))
 
 
 def find(vault: Vault, query: str, **kwargs: Any) -> SearchResult:
@@ -335,9 +335,8 @@ NOTE = "recording-note:2026-10-12-acme-kick-off"
 
 @pytest.fixture(scope="module")
 def names(tmp_path_factory: pytest.TempPathFactory) -> Vault:
-    v = copy_vault(name_template(tmp_path_factory), tmp_path_factory.mktemp("names"))
-    rebuild(v)
-    return v
+    """One copy, its index built, for the searches, which only read: a write into it fails the run (DR-0531)."""
+    return Vault.open(read_only(indexed(tmp_path_factory, name_template(tmp_path_factory))))
 
 
 def ranked(result: SearchResult) -> list[Hit]:
@@ -551,9 +550,8 @@ AGREEMENT = [
 
 @pytest.fixture(scope="module")
 def compounds(tmp_path_factory: pytest.TempPathFactory) -> Vault:
-    v = copy_vault(compound_template(tmp_path_factory), tmp_path_factory.mktemp("compounds"))
-    rebuild(v)
-    return v
+    """One copy, its index built, for the searches, which only read: a write into it fails the run (DR-0531)."""
+    return Vault.open(read_only(indexed(tmp_path_factory, compound_template(tmp_path_factory))))
 
 
 def rids(result: SearchResult) -> set[str | None]:

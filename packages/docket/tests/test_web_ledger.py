@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from day_kit import CHAT, LINK, PLAN, SAME, ZONE, add, day, day_vault, signed_in, today
+from day_kit import CHAT, LINK, PLAN, SAME, ZONE, add, day, day_template, day_vault, read_today, signed_in, today
 from docket_testkit import AtConsole, commit_config, empty_vault, make_config, make_record
 from docket_webkit import OURS, PORT, TOKEN
 from ledger_kit import ADD_FIELDS, op, ulid, write_ops
@@ -50,6 +50,19 @@ def vault(tmp_path: Path) -> Vault:
 @pytest.fixture
 def client(vault: Vault) -> Iterator[TestClient]:
     with signed_in(vault) as found:
+        yield found
+
+
+@pytest.fixture
+def seen(tmp_path_factory: pytest.TempPathFactory) -> Vault:
+    """The worker's shared copy of today's day vault, its index built, for the tests that only read: a write into it
+    fails the run (DR-0531), and past midnight it is the next day's."""
+    return read_today(tmp_path_factory, day_template(tmp_path_factory))
+
+
+@pytest.fixture
+def reader(seen: Vault) -> Iterator[TestClient]:
+    with signed_in(seen) as found:
         yield found
 
 
@@ -128,10 +141,10 @@ def link_dir(link: Path, target: Path) -> None:
 # -- the list --------------------------------------------------------------------------------------------------------
 
 
-def test_the_ledger_lists_the_open_items_by_due_and_counts_every_state(client: TestClient, vault: Vault) -> None:
-    found = listed(client)
+def test_the_ledger_lists_the_open_items_by_due_and_counts_every_state(reader: TestClient, seen: Vault) -> None:
+    found = listed(reader)
     assert found["canonical"] == "/ledger"
-    assert found["version"] == day_routes.version(vault.root)
+    assert found["version"] == day_routes.version(seen.root)
     assert found["today"] == today().isoformat()
     assert groups(found) == DUE
     assert [g["tone"] for g in found["list"]["groups"]] == ["late", "today", "", "", ""]
@@ -178,9 +191,9 @@ def test_the_ledger_lists_the_open_items_by_due_and_counts_every_state(client: T
     ],
 )  # fmt: skip
 def test_each_state_and_grouping_lists_in_its_order(
-    client: TestClient, query: str, named: list[str], shown: list[str]
+    reader: TestClient, query: str, named: list[str], shown: list[str]
 ) -> None:
-    found = listed(client, query)
+    found = listed(reader, query)
     assert [g.split()[0] if g.startswith("Back") else g for g in groups(found)] == named
     assert rows(found) == shown
 
@@ -201,22 +214,22 @@ def test_each_state_and_grouping_lists_in_its_order(
         ("q=%21%21", []),
     ],
 )
-def test_q_and_the_filters_narrow_the_list(client: TestClient, query: str, shown: list[str]) -> None:
-    found = listed(client, query)
+def test_q_and_the_filters_narrow_the_list(reader: TestClient, query: str, shown: list[str]) -> None:
+    found = listed(reader, query)
     assert rows(found) == shown
     if not shown:
         assert found["list"]["empty"] == "Nothing here matches."
 
 
-def test_a_snooze_whose_day_has_come_leads_the_open_items(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_snooze_whose_day_has_come_leads_the_open_items(reader: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     later = datetime.combine(today() + timedelta(days=6), datetime.min.time(), ZONE).replace(hour=12)
     monkeypatch.setattr(views, "now", lambda: later.astimezone(UTC))
-    found = listed(client)
+    found = listed(reader)
     assert groups(found)[0] == "Snooze ended"
     assert rows(found)[0] == "A-0007"
     assert row(found, "A-0007")["due"] == {"text": "snooze ended", "title": f"back since {day(5)}", "tone": "today"}
     assert found["list"]["counts"] == "6 open (1 with their snooze ended), 0 snoozed, 1 closed; 3 overdue"
-    assert listed(client, "state=snoozed")["list"]["empty"] == "Nothing is snoozed."
+    assert listed(reader, "state=snoozed")["list"]["empty"] == "Nothing is snoozed."
 
 
 def test_an_archived_item_shows_only_when_asked(client: TestClient, vault: Vault) -> None:
@@ -276,12 +289,12 @@ def test_an_empty_ledger_says_how_items_come(tmp_path: Path) -> None:
         ("done=nothing&said=nope", "said is undo or redo"),
     ],
 )
-def test_a_value_the_url_can_t_hold_is_refused_with_its_words(client: TestClient, query: str, said: str) -> None:
-    assert listed(client, query, status=400)["error"].startswith(said)
-    assert panel(client, query, status=400)["error"].startswith(said)
+def test_a_value_the_url_can_t_hold_is_refused_with_its_words(reader: TestClient, query: str, said: str) -> None:
+    assert listed(reader, query, status=400)["error"].startswith(said)
+    assert panel(reader, query, status=400)["error"].startswith(said)
 
 
-def test_the_state_reads_into_one_canonical_url(client: TestClient) -> None:
+def test_the_state_reads_into_one_canonical_url(reader: TestClient) -> None:
     state = DayState.read({"open": "a-12", "at": "A-0001", "k": "100", "q": "  two   words ", "drop": "1"})
     assert state.url() == "/ledger?open=A-0012&q=two+words&drop=1"
     assert DayState.read({"open": "M-7", "drop": "1", "text": "a.md"}).url() == "/ledger?open=M-0007"
@@ -289,8 +302,8 @@ def test_the_state_reads_into_one_canonical_url(client: TestClient) -> None:
     assert DayState.read({"at": "A-0002", "done": "nothing", "said": "undo", "skipped": "A-1"}).url() == (
         "/ledger?at=A-0002"
     )
-    assert listed(client, "open=a-1&q=+Ada++dates+&drop=1&x=y")["canonical"] == "/ledger?open=A-0001&q=Ada+dates&drop=1"
-    assert panel(client, "open=a-1&state=all")["canonical"] == "/ledger?open=A-0001&state=all"
+    assert listed(reader, "open=a-1&q=+Ada++dates+&drop=1&x=y")["canonical"] == "/ledger?open=A-0001&q=Ada+dates&drop=1"
+    assert panel(reader, "open=a-1&state=all")["canonical"] == "/ledger?open=A-0001&state=all"
     with pytest.raises(DayStateError, match="page is one of"):
         day_routes.page_of("nope")
 
@@ -309,8 +322,8 @@ def test_a_url_that_still_names_a_write_shows_its_notice(client: TestClient, vau
 # -- the item panel ----------------------------------------------------------------------------------------------------
 
 
-def test_an_item_opens_beside_the_list_with_its_call_fields_materials_source_and_history(client: TestClient) -> None:
-    found = panel(client, "open=A-0005")
+def test_an_item_opens_beside_the_list_with_its_call_fields_materials_source_and_history(reader: TestClient) -> None:
+    found = panel(reader, "open=A-0005")
     assert found["canonical"] == "/ledger?open=A-0005"
     item = found["panel"]
     assert (item["ref"], item["title"], item["kind"], item["stream"]) == ("A-0005", "Quote from the caterer",
@@ -361,30 +374,30 @@ def test_an_item_on_a_meeting_shows_the_meeting_with_its_points(client: TestClie
         ("M-0001", "M-0001 is a meeting; its panel is on the Meetings page."),
     ],
 )
-def test_a_panel_that_can_t_open_says_why(client: TestClient, ref: str, said: str) -> None:
-    found = panel(client, f"open={ref}")
+def test_a_panel_that_can_t_open_says_why(reader: TestClient, ref: str, said: str) -> None:
+    found = panel(reader, f"open={ref}")
     assert (found["panel"], found["missing"]) == (None, said)
 
 
-def test_a_meeting_s_id_opens_no_item_panel(client: TestClient, vault: Vault) -> None:
-    meeting = next(o for o in ops(vault) if o["op"] == "meeting")["id"]
-    found = panel(client, f"open={meeting}")
+def test_a_meeting_s_id_opens_no_item_panel(reader: TestClient, seen: Vault) -> None:
+    meeting = next(o for o in ops(seen) if o["op"] == "meeting")["id"]
+    found = panel(reader, f"open={meeting}")
     assert found["missing"] == f"{meeting} is a meeting; its panel is on the Meetings page."
 
 
-def test_a_panel_with_nothing_open_has_nothing_to_say(client: TestClient) -> None:
-    assert read(client, f"{API}/panel") == {"canonical": "/ledger", "panel": None, "missing": ""}
+def test_a_panel_with_nothing_open_has_nothing_to_say(reader: TestClient) -> None:
+    assert read(reader, f"{API}/panel") == {"canonical": "/ledger", "panel": None, "missing": ""}
     # The drop form's flag stays with an open item only.
-    assert panel(client, "open=A-0001&drop=1")["canonical"] == "/ledger?open=A-0001&drop=1"
-    assert panel(client, "drop=1")["canonical"] == "/ledger"
+    assert panel(reader, "open=A-0001&drop=1")["canonical"] == "/ledger?open=A-0001&drop=1"
+    assert panel(reader, "drop=1")["canonical"] == "/ledger"
 
 
-def test_a_closed_item_reopens_and_a_snoozed_one_wakes(client: TestClient) -> None:
-    closed = panel(client, "open=A-0006&state=closed")["panel"]
+def test_a_closed_item_reopens_and_a_snoozed_one_wakes(reader: TestClient) -> None:
+    closed = panel(reader, "open=A-0006&state=closed")["panel"]
     assert (closed["callable"], closed["closed"], closed["verdicts"]) == (False, True, [])
     assert closed["state_line"].startswith("done ")
     assert closed["facts"].endswith("done after 0 days")
-    snoozed = panel(client, "open=A-0007&state=snoozed")["panel"]
+    snoozed = panel(reader, "open=A-0007&state=snoozed")["panel"]
     assert (snoozed["callable"], snoozed["state"]) == (True, "snoozed")
     assert snoozed["state_line"].startswith("snoozed to")
 
@@ -769,12 +782,12 @@ def test_a_text_material_that_can_t_show_says_why(client: TestClient, vault: Vau
     assert read(client, f"{API}/text?open=A-0005&text={ref}", status=400)["error"] == said
 
 
-def test_a_viewer_url_that_can_t_read_says_why(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert read(client, f"{API}/text?open=A-0005", status=400)["error"].startswith("text names")
-    assert read(client, f"{API}/text?open=nope&text=x", status=400)["error"].startswith("open is an")
+def test_a_viewer_url_that_can_t_read_says_why(reader: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert read(reader, f"{API}/text?open=A-0005", status=400)["error"].startswith("text names")
+    assert read(reader, f"{API}/text?open=nope&text=x", status=400)["error"].startswith("open is an")
     # A meeting's materials show too, and only those it names.
-    assert read(client, f"{API}/text?open=M-0001&text=x", status=400)["error"] == "M-0001 has no material x"
-    assert read(client, f"{API}/text?open=A-0099&text=x", status=400)["error"] == "no item A-0099"
+    assert read(reader, f"{API}/text?open=M-0001&text=x", status=400)["error"] == "M-0001 has no material x"
+    assert read(reader, f"{API}/text?open=A-0099&text=x", status=400)["error"] == "no item A-0099"
     real = Path.open
 
     def locked(self: Path, *args: Any, **keys: Any) -> Any:
@@ -783,7 +796,7 @@ def test_a_viewer_url_that_can_t_read_says_why(client: TestClient, monkeypatch: 
         return real(self, *args, **keys)
 
     monkeypatch.setattr(Path, "open", locked)
-    assert read(client, f"{API}/text?open=A-0005&text={PLAN}", status=400)["error"] == (
+    assert read(reader, f"{API}/text?open=A-0005&text={PLAN}", status=400)["error"] == (
         f"{PLAN} doesn't read: Permission denied"
     )
 
@@ -1012,12 +1025,12 @@ def test_a_failure_answers_500_and_says_no_words(
     assert "Send Ada the dates" not in answer.text
 
 
-def test_a_poll_that_fails_says_nothing_changed(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_poll_that_fails_says_nothing_changed(reader: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def broken(root: Path) -> str:
         raise OSError(5, "Access is denied")
 
     monkeypatch.setattr(day_routes, "version", broken)
-    assert read(client, f"{API}/changed?v=x") == {"changed": False, "version": "x"}
+    assert read(reader, f"{API}/changed?v=x") == {"changed": False, "version": "x"}
 
 
 def test_a_look_alike_gone_by_the_page_s_read_is_left_out(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

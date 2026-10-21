@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 from briefs_kit import brief
-from day_kit import LONG, RECORDING, SAME, at, day_vault, meeting, meetings_week, signed_in, today
+from day_kit import LONG, RECORDING, SAME, OnTheDay, at, meeting, meetings_week, read_today, signed_in, today
 from docket_testkit import empty_vault, make_config, make_record
 from starlette.testclient import TestClient
 
@@ -34,10 +34,16 @@ SAVE = "/api/web/ledger/save"
 BEN = "entities/person/ben-sample.yaml"
 
 
+def _meetings(vault: Vault) -> None:
+    store.write(vault, meetings_week(), by="claude", via="cli")
+
+
+MEETINGS = OnTheDay("meetings", _meetings)
+
+
 @pytest.fixture
 def vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Vault:
-    found = day_vault(tmp_path)
-    store.write(found, meetings_week(), by="claude", via="cli")
+    found = MEETINGS.copy(tmp_path)
     monkeypatch.setattr(views, "now", lambda: at(0, 12).astimezone(UTC))
     return found
 
@@ -45,6 +51,20 @@ def vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Vault:
 @pytest.fixture
 def client(vault: Vault) -> Iterator[TestClient]:
     with signed_in(vault) as found:
+        yield found
+
+
+@pytest.fixture
+def seen(tmp_path_factory: pytest.TempPathFactory) -> Vault:
+    """The worker's shared copy of today's Meetings vault, its index built, for the tests that only read: a write into
+    it fails the run (DR-0531), and past midnight it is the next day's."""
+    return read_today(tmp_path_factory, MEETINGS.template(tmp_path_factory))
+
+
+@pytest.fixture
+def reader(seen: Vault, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    monkeypatch.setattr(views, "now", lambda: at(0, 12).astimezone(UTC))
+    with signed_in(seen) as found:
         yield found
 
 
@@ -97,8 +117,8 @@ def ref_of(found: Any, subject: str) -> str:
 # -- the list --------------------------------------------------------------------------------------------------------
 
 
-def test_meetings_go_by_day_from_today_then_the_earlier_days_newest_first(client: TestClient) -> None:
-    found = meetings(client)
+def test_meetings_go_by_day_from_today_then_the_earlier_days_newest_first(reader: TestClient) -> None:
+    found = meetings(reader)
     assert found["canonical"] == "/meetings"
     labels = [d["label"] for d in found["list"]["days"]]
     assert labels[:2] == [f"Today, {at(0, 9):%a} {today().day} {at(0, 9):%b}", labels[1]]
@@ -133,11 +153,11 @@ def test_meetings_go_by_day_from_today_then_the_earlier_days_newest_first(client
 
 
 def test_the_list_s_time_runs_to_the_next_start_or_end_or_to_midnight(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    reader: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(views, "now", lambda: at(0, 13).astimezone(UTC))
     # Nothing starts or ends before tomorrow's Pilot sync: the day turns first, which renames Today and Tomorrow.
-    assert meetings(client)["list"]["until"] == at(1, 0).isoformat()
+    assert meetings(reader)["list"]["until"] == at(1, 0).isoformat()
 
 
 def test_a_meeting_set_in_another_offset_goes_by_the_owner_s_day(client: TestClient, vault: Vault) -> None:
@@ -164,9 +184,9 @@ def test_a_meeting_set_in_another_offset_goes_by_the_owner_s_day(client: TestCli
         "zzz=1",
     ],
 )
-def test_the_items_parameters_and_unknown_ones_are_left_out_of_meetings_url(client: TestClient, query: str) -> None:
+def test_the_items_parameters_and_unknown_ones_are_left_out_of_meetings_url(reader: TestClient, query: str) -> None:
     # Meetings takes q, stream and suggest with a meeting open; the rest is never refused there (DR-0768).
-    assert meetings(client, query)["canonical"] == "/meetings"
+    assert meetings(reader, query)["canonical"] == "/meetings"
 
 
 @pytest.mark.parametrize(
@@ -181,9 +201,9 @@ def test_the_items_parameters_and_unknown_ones_are_left_out_of_meetings_url(clie
     ],
 )
 def test_q_and_stream_narrow_the_meetings(
-    client: TestClient, query: str, shown: list[list[str]] | None, canonical: str
+    reader: TestClient, query: str, shown: list[list[str]] | None, canonical: str
 ) -> None:
-    found = meetings(client, query)
+    found = meetings(reader, query)
     assert found["canonical"] == canonical
     if shown is not None:
         assert subjects(found) == shown
@@ -330,15 +350,15 @@ def test_a_rolled_point_takes_no_button_and_each_end_of_the_roll_links_the_other
     assert panel(client, "open=M-0004")["rolls"] == ""
 
 
-def test_the_panel_lists_its_items_and_once_asked_the_items_worth_raising(client: TestClient) -> None:
-    plain = panel(client, "open=M-0001")
+def test_the_panel_lists_its_items_and_once_asked_the_items_worth_raising(reader: TestClient) -> None:
+    plain = panel(reader, "open=M-0001")
     assert plain["suggestions"] is None
     assert [(i["row"]["ref"], i["href"]) for i in plain["items"]] == [("A-0002", "/ledger?open=A-0002")]
-    asked = read(client, f"{API}/panel?open=M-0001&suggest=1")
+    asked = read(reader, f"{API}/panel?open=M-0001&suggest=1")
     assert asked["canonical"] == "/meetings?open=M-0001&suggest=1"
     assert [(s["row"]["ref"], s["why"]) for s in asked["panel"]["suggestions"]] == [("A-0002", "linked to the meeting")]
     # Suggest goes with an open meeting only.
-    assert meetings(client, "suggest=1")["canonical"] == "/meetings"
+    assert meetings(reader, "suggest=1")["canonical"] == "/meetings"
 
 
 @pytest.mark.parametrize(
@@ -348,15 +368,15 @@ def test_the_panel_lists_its_items_and_once_asked_the_items_worth_raising(client
         ("open=M-0099", "no meeting M-0099"),
     ],
 )
-def test_a_panel_that_can_t_open_says_why(client: TestClient, query: str, said: str) -> None:
-    found = read(client, f"{API}/panel?{query}")
+def test_a_panel_that_can_t_open_says_why(reader: TestClient, query: str, said: str) -> None:
+    found = read(reader, f"{API}/panel?{query}")
     assert (found["panel"], found["missing"]) == (None, said)
 
 
-def test_a_stream_s_id_opens_no_panel_on_any_day_page(client: TestClient, vault: Vault) -> None:
-    stream = next(o for o in ops(vault) if o["op"] == "stream")["id"]
+def test_a_stream_s_id_opens_no_panel_on_any_day_page(reader: TestClient, seen: Vault) -> None:
+    stream = next(o for o in ops(seen) if o["op"] == "stream")["id"]
     for path in (f"{API}/panel", "/api/web/ledger/panel"):
-        assert read(client, f"{path}?open={stream}")["missing"] == f"{stream} is a stream; a stream has no panel yet."
+        assert read(reader, f"{path}?open={stream}")["missing"] == f"{stream} is a stream; a stream has no panel yet."
 
 
 # -- the points' buttons (DR-0667) ----------------------------------------------------------------------------------

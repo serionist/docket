@@ -57,6 +57,16 @@ everywhere (DR-0758). A new command group or MCP tool fails `test_smoke.py` unti
 Tests never touch the real Docket folders or the keychain, not even to read them: `conftest.py` points the config,
 state and models folders at a temp folder of the session's before any fixture runs, and each test at its own.
 
+Three more of the kit's rules save setup without changing what a test sees (DR-0779):
+
+- A setup every test of a file repeats is a template too, built once per session and copied.
+- Tests that only read a vault share one copy in a module-scoped fixture, `read_only(template)`, or
+  `read_only(indexed(factory, template))` where the first read would build the index; a write into it fails the run,
+  as a write into a template does. A vault dated from today is shared per test through `read_today` in `day_kit.py`,
+  so a run past midnight reads the next day's.
+- The kit's own `sh()` and `git()` commit, merge and check out with the hooks off, as Docket's own commits do; a
+  push keeps them, since git-lfs's pre-push sends the media, and a test about the user's hooks passes `hooks=True`.
+
 ## The web app's front end
 
 Only a change under `packages/docket/web/` needs Node: the version in its `.nvmrc`, with the npm it brings.

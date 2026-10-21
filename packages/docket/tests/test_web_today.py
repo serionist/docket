@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 import ui_world
-from day_kit import SAME, add, at, day, day_vault, meeting, meetings_week, signed_in, today
+from day_kit import SAME, OnTheDay, add, at, day, meeting, meetings_week, read_today, signed_in, today
 from docket_testkit import empty_vault, make_config
 from starlette.testclient import TestClient
 
@@ -69,13 +69,19 @@ def the_day() -> list[dict[str, Any]]:
     ]
 
 
+def _today(vault: Vault) -> None:
+    store.write(vault, meetings_week(), by="claude", via="cli")
+    store.write(vault, the_day(), by="claude", via="cli")
+    ui_world.woke(vault)
+    cursors.save(vault, "chat", cursors.Cursor(mark=at(0, 11, 20).astimezone(UTC)))
+
+
+TODAY = OnTheDay("today", _today, live_config)
+
+
 @pytest.fixture
 def vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Vault:
-    found = day_vault(tmp_path, live_config())
-    store.write(found, meetings_week(), by="claude", via="cli")
-    store.write(found, the_day(), by="claude", via="cli")
-    ui_world.woke(found)
-    cursors.save(found, "chat", cursors.Cursor(mark=at(0, 11, 20).astimezone(UTC)))
+    found = TODAY.copy(tmp_path)
     monkeypatch.setattr(views, "now", lambda: at(0, 12).astimezone(UTC))
     return found
 
@@ -83,6 +89,20 @@ def vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Vault:
 @pytest.fixture
 def client(vault: Vault) -> Iterator[TestClient]:
     with signed_in(vault) as found:
+        yield found
+
+
+@pytest.fixture
+def seen(tmp_path_factory: pytest.TempPathFactory) -> Vault:
+    """The worker's shared copy of today's Today vault, its index built, for the tests that only read: a write into it
+    fails the run (DR-0531), and past midnight it is the next day's."""
+    return read_today(tmp_path_factory, TODAY.template(tmp_path_factory))
+
+
+@pytest.fixture
+def reader(seen: Vault, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    monkeypatch.setattr(views, "now", lambda: at(0, 12).astimezone(UTC))
+    with signed_in(seen) as found:
         yield found
 
 
@@ -113,12 +133,12 @@ def refs(group: Any) -> list[str]:
 # -- the way in -------------------------------------------------------------------------------------------------------
 
 
-def test_slash_goes_to_today_and_the_old_ways_in_still_open(client: TestClient) -> None:
-    start = client.get("/")
+def test_slash_goes_to_today_and_the_old_ways_in_still_open(reader: TestClient) -> None:
+    start = reader.get("/")
     assert (start.status_code, start.headers["location"]) == (303, "/today")
-    assert client.get("/today").status_code == 200
+    assert reader.get("/today").status_code == 200
     for page in ("/search", "/queue", "/ledger", "/meetings", "/today?open=A-0001"):
-        assert client.get(page).status_code == 200, page
+        assert reader.get(page).status_code == 200, page
     # docket open with no page lands on Today; a sign-in page for Search names Search.
     assert open_command("/") == open_command("/today") == "docket open"
     assert open_command("/search") == 'docket open "/search"'
@@ -127,8 +147,8 @@ def test_slash_goes_to_today_and_the_old_ways_in_still_open(client: TestClient) 
 # -- the list ---------------------------------------------------------------------------------------------------------
 
 
-def test_the_meeting_under_way_leads_with_its_prep(client: TestClient) -> None:
-    found = read(client, API)
+def test_the_meeting_under_way_leads_with_its_prep(reader: TestClient) -> None:
+    found = read(reader, API)
     assert found["canonical"] == "/today"
     assert found["list"]["day"] == f"{at(0, 9):%A} {today().day} {at(0, 9):%B}"
     lead = found["list"]["lead"]
@@ -148,10 +168,10 @@ def test_the_meeting_under_way_leads_with_its_prep(client: TestClient) -> None:
 
 
 def test_with_no_meeting_left_today_the_next_working_day_s_first_leads(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    reader: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(views, "now", lambda: at(0, 18).astimezone(UTC))
-    found = read(client, API)["list"]
+    found = read(reader, API)["list"]
     near = (
         "tomorrow" if next_day() == 1 else f"on {at(next_day(), 9):%a} {at(next_day(), 9).day} {at(next_day(), 9):%b}"
     )
@@ -163,17 +183,17 @@ def test_with_no_meeting_left_today_the_next_working_day_s_first_leads(
 
 
 def test_once_the_meeting_under_way_ends_the_next_one_today_leads_alone_on_its_day(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    reader: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(views, "now", lambda: at(0, 13).astimezone(UTC))
-    found = read(client, API)["list"]
+    found = read(reader, API)["list"]
     assert (found["lead"]["label"], found["lead"]["meeting"]["line"]["subject"]) == ("Next", "Supplier follow-up")
     # It was today's last, so no Later today: the next working day's meetings come next.
     assert [g["key"] for g in found["meetings"]] == [(today() + timedelta(days=next_day())).isoformat()]
 
 
-def test_the_items_due_go_overdue_then_today_then_back_from_a_snooze(client: TestClient) -> None:
-    due = read(client, API)["list"]["due"]
+def test_the_items_due_go_overdue_then_today_then_back_from_a_snooze(reader: TestClient) -> None:
+    due = read(reader, API)["list"]["due"]
     assert [(g["key"], g["label"], g["tone"]) for g in due] == [
         ("overdue", "Overdue", "late"),
         ("today", "Due today", "today"),
@@ -188,16 +208,16 @@ def test_the_items_due_go_overdue_then_today_then_back_from_a_snooze(client: Tes
 
 
 def test_the_due_rows_stop_at_the_ledger_s_first_page_and_count_all(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    reader: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(today_view, "DUE_SHOWN", 2)
-    due = read(client, API)["list"]["due"]
+    due = read(reader, API)["list"]["due"]
     assert [(g["key"], len(g["rows"]), g["total"]) for g in due] == [("overdue", 1, 1), ("today", 1, 1), ("woke", 0, 1)]
     assert not due[2]["selectable"], "no row drawn, nothing to tick"
 
 
-def test_the_rest_is_later_today_then_the_next_working_day_without_cancelled_or_declined(client: TestClient) -> None:
-    found = read(client, API)["list"]
+def test_the_rest_is_later_today_then_the_next_working_day_without_cancelled_or_declined(reader: TestClient) -> None:
+    found = read(reader, API)["list"]
     groups = found["meetings"]
     assert groups[0]["label"] == "Later today"
     later = groups[0]["meetings"]
@@ -221,8 +241,8 @@ def test_the_rest_is_later_today_then_the_next_working_day_without_cancelled_or_
     assert "Morning stand-up" not in every and "Supplier call" not in every
 
 
-def test_closed_today_lists_what_was_done_or_dropped_today(client: TestClient) -> None:
-    closed = read(client, API)["list"]["closed"]
+def test_closed_today_lists_what_was_done_or_dropped_today(reader: TestClient) -> None:
+    closed = read(reader, API)["list"]["closed"]
     assert closed["label"] == "Closed today" and not closed["selectable"]
     assert sorted((r["title"], r["state"]) for r in closed["rows"]) == [
         ("Print the old badges", "dropped"),
@@ -230,8 +250,8 @@ def test_closed_today_lists_what_was_done_or_dropped_today(client: TestClient) -
     ]
 
 
-def test_the_counts_say_the_day_in_one_line(client: TestClient) -> None:
-    counts = read(client, API)["list"]["counts"]
+def test_the_counts_say_the_day_in_one_line(reader: TestClient) -> None:
+    counts = read(reader, API)["list"]["counts"]
     assert counts.startswith("1 overdue, 1 due today; 2 meetings left today, ")
     assert counts.endswith("; 1 snooze ended")
 
@@ -250,21 +270,21 @@ def test_an_item_back_from_a_snooze_counts_as_ended_not_overdue(client: TestClie
 # -- the syncs --------------------------------------------------------------------------------------------------------
 
 
-def test_each_live_source_says_its_last_sync_and_its_due_mark_is_the_sidebar_s(client: TestClient) -> None:
-    syncs = read(client, API)["list"]["syncs"]
+def test_each_live_source_says_its_last_sync_and_its_due_mark_is_the_sidebar_s(reader: TestClient) -> None:
+    syncs = read(reader, API)["list"]["syncs"]
     assert [(s["source"], s["said"], s["due"], s["href"]) for s in syncs] == [
         ("chat", "synced 11:20", False, "/sync?source=chat"),
         ("mail", "never synced", True, "/sync?source=mail"),
     ]
     assert syncs[0]["title"] == f"Synced on test-box, {at(0, 9):%a} {today().day} {at(0, 9):%b} 11:20"
-    assert read(client, "/api/web/shell")["sync_due"] == [s["source"] for s in syncs if s["due"]]
+    assert read(reader, "/api/web/shell")["sync_due"] == [s["source"] for s in syncs if s["due"]]
 
 
-def test_a_source_with_a_run_open_is_syncing_never_due(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_source_with_a_run_open_is_syncing_never_due(reader: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Runs, "snapshot", lambda _self: [SimpleNamespace(source="mail")])
-    syncs = {s["source"]: s for s in read(client, API)["list"]["syncs"]}
+    syncs = {s["source"]: s for s in read(reader, API)["list"]["syncs"]}
     assert (syncs["mail"]["said"], syncs["mail"]["due"], syncs["mail"]["running"]) == ("syncing now", False, True)
-    assert read(client, "/api/web/shell")["sync_due"] == []
+    assert read(reader, "/api/web/shell")["sync_due"] == []
 
 
 def test_yesterday_s_and_older_marks_say_their_day(vault: Vault, client: TestClient) -> None:
@@ -318,25 +338,25 @@ def test_a_vault_with_no_state_folder_reads_and_polls(client: TestClient, vault:
 # -- the URL and the panel --------------------------------------------------------------------------------------------
 
 
-def test_today_takes_no_filter_and_keeps_its_own_parameters(client: TestClient) -> None:
+def test_today_takes_no_filter_and_keeps_its_own_parameters(reader: TestClient) -> None:
     given = "q=room&stream=pilot&kind=task&who=Ada&k=200&state=closed&group=who&archived=1"
-    assert read(client, f"{API}?{given}")["canonical"] == "/today"
-    assert read(client, f"{API}/panel?open=A-0001&drop=1&suggest=1")["canonical"] == "/today?open=A-0001&drop=1"
-    assert read(client, f"{API}/panel?open=M-0003&drop=1&suggest=1")["canonical"] == "/today?open=M-0003&suggest=1"
-    assert read(client, f"{API}?at=A-0002&done=nothing")["canonical"] == "/today?at=A-0002"
+    assert read(reader, f"{API}?{given}")["canonical"] == "/today"
+    assert read(reader, f"{API}/panel?open=A-0001&drop=1&suggest=1")["canonical"] == "/today?open=A-0001&drop=1"
+    assert read(reader, f"{API}/panel?open=M-0003&drop=1&suggest=1")["canonical"] == "/today?open=M-0003&suggest=1"
+    assert read(reader, f"{API}?at=A-0002&done=nothing")["canonical"] == "/today?at=A-0002"
     assert DayState(page="today", open="M-0003", text="notes/plan.md").url() == "/today?open=M-0003&text=notes/plan.md"
-    assert read(client, f"{API}?open=nope", 400)["error"].startswith("open is an A- or M- number")
+    assert read(reader, f"{API}?open=nope", 400)["error"].startswith("open is an A- or M- number")
 
 
-def test_the_panel_is_an_item_s_or_a_meeting_s(client: TestClient) -> None:
-    item = read(client, f"{API}/panel?open=A-0002")
+def test_the_panel_is_an_item_s_or_a_meeting_s(reader: TestClient) -> None:
+    item = read(reader, f"{API}/panel?open=A-0002")
     assert (item["item"]["ref"], item["meeting"], item["missing"]) == ("A-0002", None, "")
     assert item["item"]["meeting"]["ref"] == "M-0001", "the meeting it hangs on, as on the Ledger"
-    meeting = read(client, f"{API}/panel?open=M-0003&suggest=1")
+    meeting = read(reader, f"{API}/panel?open=M-0003&suggest=1")
     assert (meeting["item"], meeting["meeting"]["ref"]) == (None, "M-0003")
     assert meeting["meeting"]["suggestions"] is not None, "suggest=1 reads them, as on Meetings"
     assert [p["text"] for p in meeting["meeting"]["points"]] == ["Ben: the spring numbers"]
-    gone = read(client, f"{API}/panel?open=A-0999")
+    gone = read(reader, f"{API}/panel?open=A-0999")
     assert (gone["item"], gone["meeting"]) == (None, None) and gone["missing"]
 
 

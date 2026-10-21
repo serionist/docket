@@ -4,8 +4,8 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from docket_testkit import index_template
-from docket_webkit import a11y_problems, html_problems, parse, signed_in
+from docket_testkit import index_template, indexed, read_only
+from docket_webkit import a11y_problems, html_problems, parse, serving
 from starlette.testclient import TestClient
 
 from docket.web import assets, pages
@@ -47,9 +47,16 @@ def template(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return index_template(tmp_path_factory)
 
 
+@pytest.fixture(scope="module")
+def seen(tmp_path_factory: pytest.TempPathFactory, template: Path) -> Path:
+    """One copy, its index built, for the module's tests, which only read: a write into it fails the run
+    (DR-0531)."""
+    return read_only(indexed(tmp_path_factory, template))
+
+
 @pytest.fixture
-def client(template: Path, tmp_path: Path) -> Iterator[TestClient]:
-    with signed_in(template, tmp_path) as found:
+def client(seen: Path) -> Iterator[TestClient]:
+    with serving(seen) as found:
         yield found
 
 

@@ -184,8 +184,16 @@ def a11y_problems(html: str, *, whole: bool = True) -> list[str]:
 def signed_in(template: Path, tmp_path: Path, sessions: Sessions | None = None) -> Iterator[TestClient]:
     """A client of the service on a copy of the fixture vault, holding a session cookie."""
     shutil.copytree(template, tmp_path / "vault")
+    with serving(tmp_path / "vault", sessions) as client:
+        yield client
+
+
+@contextmanager
+def serving(root: Path, sessions: Sessions | None = None) -> Iterator[TestClient]:
+    """A client of the service on the vault at root as it stands, holding a session cookie: a module's read-only copy
+    (`read_only`), which its tests share."""
     sessions = sessions or Sessions()
-    app = create_app(Settings(port=PORT, vault=tmp_path / "vault", token=lambda: TOKEN), sessions=sessions)
+    app = create_app(Settings(port=PORT, vault=root, token=lambda: TOKEN), sessions=sessions)
     with TestClient(app, base_url=OURS, follow_redirects=False) as client:
         started = sessions.redeem(sessions.new_code())
         assert started is not None

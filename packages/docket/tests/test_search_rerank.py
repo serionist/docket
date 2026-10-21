@@ -13,7 +13,7 @@ from typing import Any
 
 import models_kit
 import pytest
-from docket_testkit import copy_vault, index_template, make_record
+from docket_testkit import copy_vault, digest, index_template, make_record, shared
 from models_kit import FAKE, FAKE_RERANKER, fake_command, fake_models, needs_vectors
 from test_index_vectors import choose
 
@@ -40,21 +40,30 @@ PLANTED = [ALL_LOW, ANY_HIGH, VECTOR_TOP, BOOSTED]
 
 @pytest.fixture(scope="module")
 def template(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return index_template(tmp_path_factory)
+    """The index fixture with the planted messages, its index and the fake embedder's vectors built, once per
+    session; tests copy it."""
+    fixture = index_template(tmp_path_factory)
+
+    def build(folder: Path) -> Path:
+        with pytest.MonkeyPatch.context() as mp:
+            choose(mp)
+            v = copy_vault(fixture, folder)
+            records = [
+                make_record(n, rid=rid, container="chat:C0RR", text=text, ts=AT.replace(minute=n))
+                for n, (rid, text) in enumerate(PLANTED)
+            ]
+            v.write_run("chat", records, AT)
+            rebuild(v)
+            fill(v, fake_models()[0])
+        return v.root
+
+    return shared(build, "rerank-planted-" + digest(str(fixture.resolve())), tmp_path_factory)
 
 
 @pytest.fixture
 def vault(template: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Vault:
     choose(monkeypatch)
-    v = copy_vault(template, tmp_path)
-    records = [
-        make_record(n, rid=rid, container="chat:C0RR", text=text, ts=AT.replace(minute=n))
-        for n, (rid, text) in enumerate(PLANTED)
-    ]
-    v.write_run("chat", records, AT)
-    rebuild(v)
-    fill(v, fake_models()[0])
-    return v
+    return copy_vault(template, tmp_path)
 
 
 def hits(result: query.SearchResult) -> list[query.Hit]:
