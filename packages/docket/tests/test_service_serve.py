@@ -13,6 +13,7 @@ import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import httpx2
 import pytest
@@ -200,6 +201,115 @@ def test_serve_runs_until_stopped_and_cleans_up(vault: Path, token: str) -> None
         runner.join(30)
     assert not runner.is_alive()
     assert client.recorded() is None
+
+
+# -- the self-check ----------------------------------------------------------------------------------------------------
+
+
+def a_check(port: int, stopped: list[str], ended: list[int], **given: Any) -> server.SelfCheck:
+    settings: dict[str, Any] = {"every": 0.01, "timeout": 0.5, "misses": 2, "stop_seconds": 0.05}
+    return server.SelfCheck(port, stop=lambda: stopped.append("stop"), end=ended.append, **{**settings, **given})
+
+
+def test_the_self_check_stops_the_service_and_ends_it_when_nothing_listens_on_its_port(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING)
+    port = free_port()
+    stopped: list[str] = []
+    ended: list[int] = []
+    check = a_check(port, stopped, ended)
+    check.start()
+    check.thread.join(30)
+    assert not check.thread.is_alive()
+    assert check.failed
+    assert stopped == ["stop"]
+    # The server didn't stop in its time here, so the process ends, non-zero for the registration to start it again.
+    assert ended == [server.UNREACHABLE_EXIT]
+    assert server.UNREACHABLE_EXIT != 0
+    lines = [r.getMessage() for r in caplog.records if r.name == "docket.service"]
+    assert lines == [
+        f"the service couldn't reach its own port {port}; it tries again in 0 s",
+        f"the service can't reach its own port {port}; it stops, for its registration to start it again",
+        "the service didn't stop in 0 s; it ends now",
+    ]
+
+
+def test_a_service_that_stops_in_time_is_not_ended() -> None:
+    stopped: list[str] = []
+    ended: list[int] = []
+    check = a_check(free_port(), stopped, ended, stop_seconds=30)
+    check.stop = check.close
+    check.start()
+    check.thread.join(30)
+    assert check.failed
+    assert ended == []
+
+
+def test_the_self_check_leaves_a_port_that_answers_and_forgives_one_miss() -> None:
+    answers = iter([True, False, True, False, True, True])
+    asked: list[int] = []
+
+    def reach(port: int, _timeout: float) -> bool:
+        asked.append(port)
+        found = next(answers, None)
+        if found is None:
+            check.close()
+            return True
+        return found
+
+    stopped: list[str] = []
+    ended: list[int] = []
+    check = a_check(4321, stopped, ended, reach=reach)
+    check.start()
+    check.thread.join(30)
+    assert len(asked) == 7
+    assert set(asked) == {4321}
+    assert (check.failed, stopped, ended) == (False, [], [])
+
+
+def test_the_self_check_reaches_a_listening_port_and_misses_a_closed_one() -> None:
+    with socket.socket() as listening:
+        listening.bind(("127.0.0.1", 0))
+        listening.listen(1)
+        assert server.reachable(listening.getsockname()[1], 5)
+    assert not server.reachable(free_port(), 0.5)
+
+
+def test_serve_exits_with_an_error_when_its_port_stops_listening(vault: Path, token: str) -> None:
+    servers: list[uvicorn.Server] = []
+    raised: list[DocketError] = []
+
+    def run() -> None:
+        try:
+            server.serve(vault, 0, running=servers.append)
+        except DocketError as e:
+            raised.append(e)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(server, "CHECK_SECONDS", 0.05)
+        patch.setattr(server, "CHECK_TIMEOUT", 0.5)
+        runner = threading.Thread(target=run)
+        runner.start()
+        try:
+            port = _wait_for_port()
+            # What asyncio's proactor did on Windows after a failed accept: the listening socket closed under a
+            # process that went on running.
+            listening = servers[0].servers[0]
+            listening.get_loop().call_soon_threadsafe(listening.close)
+            runner.join(30)
+        finally:
+            if runner.is_alive():
+                servers[0].should_exit = True
+                runner.join(30)
+    assert not runner.is_alive()
+    assert [str(e) for e in raised] == [
+        f"the service stopped: it couldn't reach its own port {port}; see {userconfig.log_dir() / 'service.log'}"
+    ]
+    assert client.recorded() is None
+    written = (userconfig.log_dir() / "service.log").read_text(encoding="utf-8")
+    assert f"the service can't reach its own port {port}; it stops, for its registration to start it again" in written
+    assert "it ends now" not in written
 
 
 def _wait_for_port(other_process: bool = False) -> int:

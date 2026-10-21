@@ -87,6 +87,7 @@
     "packages/docket/tests/test_scaffold_templates.py": {"kind": "git, files, paths", "why": "templates byte for byte, line endings"},
     "packages/docket/tests/test_search.py": {"kind": "the index's freshness, FTS5", "why": "Python's folding against each build's own SQLite FTS5"},
     "packages/docket/tests/test_service_api_runs.py": {"kind": "git, files, paths", "why": "a consuming project, links"},
+    "packages/docket/tests/test_service_accepts.py": {"kind": "the system's own calls", "why": "Windows' proactor accept, skipped elsewhere"},
     "packages/docket/tests/test_service_history.py": {"kind": "git, files, paths", "why": "the history file, a lock"},
     "packages/docket/tests/test_service_install.py": {"kind": "the system's own calls", "why": "logon task, LaunchAgent, systemd unit"},
     "packages/docket/tests/test_service_install_live.py": {"kind": "the system's own calls", "why": "registers the real service (system job)"},
