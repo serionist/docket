@@ -47,10 +47,10 @@ sync folder, then writes what they found into the ledger in one `ledger_batch` b
 | Part | What |
 |---|---|
 | the sync folder | `docket sync start` writes it in Docket's state folder, never in the vault: `context.md`, the ledger as the agents read it, an item a line, and each agent's prompt; it goes 7 days after its start, or once a forget made after it is applied |
-| the agents | one per source, side by side, each from its prompt file: it opens a run, follows the source's `SKILL.md` and its `sync.md`, classifies the plainly work or plainly private records of a mixed source from what it fetched, promotes its own, checks every locator it reports in one `read`, and writes a block of what you owe and await, what closed, invites and meetings to the sync folder |
+| the agents | one per source, side by side, each started fresh from its prompt file, with none of the session's context: it opens a run, follows the source's `SKILL.md` and its `sync.md`, classifies the plainly work or plainly private records of a mixed source from what it fetched, promotes its own, checks every locator it reports in one `read`, and writes a block of what you owe and await, what closed, invites and meetings to the sync folder |
 | the recordings | as each agent is back, `docket sync recordings` writes each of its source's recordings with no note from raw into the sync folder; an agent each, on Sonnet as a trial, reads it once, writes its block of asks, closes, minutes and outcome, and puts its note. The reconcile waits for them |
-| the reconcile | `docket sync reconcile` drafts the batch into the sync folder by fixed rules: closes on a locator that shows it, asks logged on the item they continue or added (new ones untriaged), meetings set and linked, minutes, rollover, streams, archive; what the rules can't settle is marked unsure, with its line and its choices. Claude settles those, adds proposed points for the coming week's meetings from one `suggest` for all of them, and writes the file with one `ledger_batch`, dry run first |
-| the list | in chat: meetings and prep, today, this week, whenever, invites, waiting on others; then what changed, the sources that didn't run, what waits on the Staging page, and the batch, to undo whole |
+| the reconcile | `docket sync reconcile` drafts the batch into the sync folder by fixed rules: closes on a locator that shows it, asks logged on the item they continue or added (new ones untriaged), meetings set and linked, minutes, rollover, streams, archive; what the rules can't settle is marked unsure, with its line, what settling it needs and its choices. Claude settles those in one `docket sync settle`, adds proposed points for the coming week's meetings from one `suggest` for all of them, and writes the file with one `ledger_batch`, dry run first |
+| the list | `docket sync summary` prints it from the ledger, and Claude says it in chat: the batch, to undo whole, what it closed and added, meetings and prep, today, this week, whenever, invites, waiting on others, the meetings left over, the sources that didn't run, each recording's note, what waits on the Staging page |
 
 - Nothing is drafted or sent before you have gone through the list, and then only drafts: a chat's draft tool, a mail
   left as a draft unless you say send for that mail.
@@ -62,7 +62,7 @@ sync folder, then writes what they found into the ledger in one `ledger_batch` b
   people, which stream a topic goes to, how to tell apart meetings that share a slot.
 - The agents' runs, classifies, promotions and notes and the batch ask unless your permission rules allow them. The
   skill pre-approves only reads, `ledger`, `search`, `read`, `verify`, `briefs`, `decisions`, `docket ledger day`,
-  `docket staging list` and `show`, and `docket sync start`, `recordings` and `reconcile`, which write only the sync folder.
+  `docket staging list` and `show`, `docket sync start`, `recordings`, `reconcile` and `settle`, which write only the sync folder, and `docket sync summary`, which reads.
   The batch's permission prompt shows the draft's path, not its ops: its dry run lists every change in chat first.
 - The sync folder is outside your project, so each agent's read and write there, and Claude's edits of the draft,
   ask unless you allow them, and the recording agents run in the background, where a prompt waits for nobody. Claude Code checks a file's write against

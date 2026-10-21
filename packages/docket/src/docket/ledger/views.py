@@ -31,7 +31,7 @@ import sqlite3
 import statistics
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal, cast, get_args
 from zoneinfo import ZoneInfo
@@ -142,11 +142,12 @@ MATCH_ITEMS = (
     "SELECT id, number, title, who, stream, kind, source, description, notes, outcome, materials, meeting FROM items"
 )
 MATCH_LOG = "SELECT item, group_concat(line, ' ') FROM item_log WHERE line IS NOT NULL GROUP BY item"
-# A write's lines in a log table; a stream's ref is its name, or its add's id once it is undone.
-BATCH_LINES = "SELECT id, version, item, kind, line FROM {table} WHERE batch = ? AND line IS NOT NULL"
+# A write's lines in a log table; a stream's ref is its name, or its add's id once it is undone. A batch is its first
+# op's id and the rest are minted after it (DR-0612), so the id's index bounds the read to the ops from it on.
+BATCH_LINES = "SELECT id, version, item, kind, line FROM {table} WHERE id >= ? AND batch = ? AND line IS NOT NULL"
 BATCH_STREAM_LINES = (
     "SELECT l.id, l.version, coalesce(s.name, l.item), l.kind, l.line FROM stream_log l "
-    "LEFT JOIN streams s ON s.id = l.stream WHERE l.batch = ? AND l.line IS NOT NULL"
+    "LEFT JOIN streams s ON s.id = l.stream WHERE l.id >= ? AND l.batch = ? AND l.line IS NOT NULL"
 )
 # An open item's trail: its source and materials, then the notes of its ops that stand, which only an op with a note
 # holds as a key.
@@ -442,18 +443,18 @@ def batch_lines(conn: sqlite3.Connection, batch: str) -> list[BatchLine]:
     and its log line; an op that shows no line, such as a renumber, is left out. The pages' notice after a write
     (DR-0710), off the tool."""
     reader = _Reader(conn, ZoneInfo("UTC"), now())
-    items = conn.execute(BATCH_LINES.format(table="item_log"), (batch,)).fetchall()
-    meetings = conn.execute(BATCH_LINES.format(table="meeting_log"), (batch,)).fetchall()
+    items = conn.execute(BATCH_LINES.format(table="item_log"), (batch, batch)).fetchall()
+    meetings = conn.execute(BATCH_LINES.format(table="meeting_log"), (batch, batch)).fetchall()
     item_refs = reader.item_refs(row[2] for row in items)
     meeting_refs = reader.meetings_of(row[2] for row in meetings)
     rows = [(i, v, item_refs[add], kind, line) for i, v, add, kind, line in items]
     rows += [(i, v, meeting_refs[add], kind, line) for i, v, add, kind, line in meetings]
-    rows += conn.execute(BATCH_STREAM_LINES, (batch,)).fetchall()
+    rows += conn.execute(BATCH_STREAM_LINES, (batch, batch)).fetchall()
     rows.sort(key=lambda row: (row[0], row[1]))
     return [BatchLine(ref=ref, kind=kind, line=line) for _, _, ref, kind, line in rows]
 
 
-# -- the sync's reconcile (DR-0749) ------------------------------------------------------------------------------------
+# -- the sync's reconcile (DR-0760) ------------------------------------------------------------------------------------
 
 
 def trails(conn: sqlite3.Connection) -> dict[str, list[str]]:
@@ -491,9 +492,10 @@ class MeetingFacts(BaseModel):
 
 @dataclass(frozen=True)
 class SyncRead:
-    """What the sync's reconcile reads of the ledger in one go: every item, any state; the open ones' trails; the
-    meetings overlapping its window and those its lines name, by start; each name given (an M- ref, an id or an event)
-    with the id of the meeting it names; the standing points its lines name, whole; the streams."""
+    """What the sync's reconcile reads of the ledger in one go: every item, any state; the open ones' trails and their
+    latest log lines, by id, each with its day; the meetings overlapping its window and those its lines name, by start;
+    each name given (an M- ref, an id or an event) with the id of the meeting it names; the standing points of those
+    meetings and those its lines name, whole; the streams, whole."""
 
     items: list[ItemRow]
     trails: dict[str, list[str]]
@@ -501,6 +503,15 @@ class SyncRead:
     named: dict[str, str]
     points: list[PointRow]
     streams: list[StreamRow]
+    logs: dict[str, tuple[date, str]] = field(default_factory=dict[str, tuple[date, str]])
+
+
+# Each open or snoozed item's latest log line that stands, and its day: what was last said on it.
+LATEST_LOGS = (
+    "SELECT item, day, line FROM (SELECT l.item, l.day, l.line, row_number() OVER (PARTITION BY l.item ORDER BY l.id "
+    "DESC, l.version DESC) AS k FROM item_log l JOIN items i ON i.id = l.item WHERE i.state IN ('open', 'snoozed') AND "
+    "l.kind = 'log' AND l.fate = 'applied' AND l.undone_by IS NULL AND l.line IS NOT NULL) WHERE k = 1"
+)
 
 
 def sync_read(
@@ -529,10 +540,13 @@ def sync_read(
     ]  # fmt: skip
     facts.sort(key=lambda f: (f.row.start, f.row.id))
     standing = dict(reader.select("SELECT id, meeting FROM points WHERE id IN ({marks}) AND n IS NOT NULL", points))
-    holders = reader.meeting_rows(reader.select(MEETINGS + " WHERE id IN ({marks})", set(standing.values())))
+    read = {m.row.id for m in facts}
+    holders = [m.row for m in facts]
+    holders += reader.meeting_rows(reader.select(MEETINGS + " WHERE id IN ({marks})", set(standing.values()) - read))
+    logs = {item: (date.fromisoformat(day), line) for item, day, line in conn.execute(LATEST_LOGS)}
     return SyncRead(
         items=reader.items(whole=True), trails=trails(conn), meetings=facts, named=named,
-        points=[p for p in reader.point_rows(holders, whole=True) if p.id in standing], streams=reader.stream_rows(),
+        points=reader.point_rows(holders, whole=True), streams=reader.stream_rows(whole=True), logs=logs,
     )  # fmt: skip
 
 
@@ -1140,7 +1154,7 @@ def _n(count: int, noun: str) -> str:
     return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
 
-def _date(day: date, today: date) -> str:
+def short_day(day: date, today: date) -> str:
     """A day as a line says it: MM-DD in today's year, the whole date in another."""
     # By hand, not strftime: a snapshot says thousands.
     return f"{day.month:02d}-{day.day:02d}" if day.year == today.year else day.isoformat()
@@ -1151,7 +1165,8 @@ def _window(found: LedgerRead) -> str:
     since, until = cast(datetime, found.since), cast(datetime, found.until)
     midnight = since.timetz().replace(tzinfo=None) == until.timetz().replace(tzinfo=None) == datetime.min.time()
     if midnight:
-        return f"{_date(since.date(), found.today)} to {_date((until - timedelta(days=1)).date(), found.today)}"
+        last = (until - timedelta(days=1)).date()
+        return f"{short_day(since.date(), found.today)} to {short_day(last, found.today)}"
     return f"{since:%Y-%m-%d %H:%M} to {until:%Y-%m-%d %H:%M}"
 
 
@@ -1160,13 +1175,13 @@ def item_line(item: ItemRow, today: date, *, source: bool = False) -> str:
     snapshot."""
     facts = [f"{item.days}d"]
     if item.due is not None:
-        facts.append(f"due {_date(item.due, today)}")
+        facts.append(f"due {short_day(item.due, today)}")
     if item.late is not None:
         facts.append(f"{item.late}d late")
     if item.state == "snoozed" and item.until is not None:
-        facts.append(f"{'snooze ended' if item.woke else 'snoozed to'} {_date(item.until, today)}")
+        facts.append(f"{'snooze ended' if item.woke else 'snoozed to'} {short_day(item.until, today)}")
     if item.state in CLOSED and item.closed is not None:
-        facts.append(f"{item.state} {_date(item.closed, today)}")
+        facts.append(f"{item.state} {short_day(item.closed, today)}")
     if item.archived:
         facts.append("archived")
     text = f"{item.ref} [{item.kind}] {item.who}: {item.title} ({', '.join(facts)}) [{item.stream}]"
@@ -1179,8 +1194,8 @@ def item_line(item: ItemRow, today: date, *, source: bool = False) -> str:
 def meeting_line(meeting: MeetingRow, today: date) -> str:
     """`M-0040 10-20 10:00-10:30 Pilot sync, Ada Example; 2 open; items A-0012 A-0015`."""
     start, end = meeting.start, meeting.end
-    until = f"{end:%H:%M}" if end.date() == start.date() else f"{_date(end.date(), today)} {end:%H:%M}"
-    text = f"{meeting.ref} {_date(start.date(), today)} {start:%H:%M}-{until} {meeting.subject}"
+    until = f"{end:%H:%M}" if end.date() == start.date() else f"{short_day(end.date(), today)} {end:%H:%M}"
+    text = f"{meeting.ref} {short_day(start.date(), today)} {start:%H:%M}-{until} {meeting.subject}"
     text += f", {meeting.organiser}" if meeting.organiser else ""
     text += f" [{meeting.stream}]" if meeting.stream else ""
     text += f" ({meeting.response})" if meeting.response in SAID else ""
@@ -1206,7 +1221,7 @@ def stream_line(stream: StreamRow, today: date) -> str:
     text = f"{stream.name} {stream.status}"
     text += f"; where: {stream.where}" if stream.where else ""
     text += f"; next: {stream.next}" if stream.next else ""
-    return text + (f"; deadline {_date(stream.deadline, today)}" if stream.deadline else "")
+    return text + (f"; deadline {short_day(stream.deadline, today)}" if stream.deadline else "")
 
 
 def _points_by_meeting(found: LedgerRead) -> dict[str, list[PointRow]]:
@@ -1238,7 +1253,7 @@ def context_lines(found: LedgerRead) -> list[str]:
     asleep = [i for i in found.items if i.state == "snoozed" and not i.woke]
     out = [f"open items ({len(awake)})", *(short_item(i) for i in awake)]
     out.append(f"snoozed ({len(asleep)})")
-    out += [short_item(i) + (f" | until {_date(i.until, today)}" if i.until else "") for i in asleep]
+    out += [short_item(i) + (f" | until {short_day(i.until, today)}" if i.until else "") for i in asleep]
     points = _points_by_meeting(found)
     out.append(f"meetings {_window(found)}, or with an open point ({len(found.meetings)})")
     for m in found.meetings:
@@ -1248,10 +1263,15 @@ def context_lines(found: LedgerRead) -> list[str]:
             for p in points.get(m.ref, [])
         ]
     out.append(f"streams ({len(found.streams)})")
-    for s in found.streams:
-        text = f"{s.name} | {s.status} | {as_field(s.where or '-')} | {as_field(s.next or '-')}"
-        out.append(text + (f" | deadline {_date(s.deadline, today)}" if s.deadline else ""))
+    out += [short_stream(s, today) for s in found.streams]
     return out
+
+
+def short_stream(stream: StreamRow, today: date) -> str:
+    """`pilot | active | Waiting on the venue | Book the room | deadline 10-30`, its where and next as the row holds
+    them."""
+    text = f"{stream.name} | {stream.status} | {as_field(stream.where or '-')} | {as_field(stream.next or '-')}"
+    return text + (f" | deadline {short_day(stream.deadline, today)}" if stream.deadline else "")
 
 
 def as_field(text: str) -> str:
@@ -1270,8 +1290,8 @@ def short_meeting(meeting: MeetingRow, today: date) -> str:
     """`M-0040 | 10-20 10:00-10:30 | Pilot sync | Ada Example`, then `stream pilot` and a response that changes
     whether the owner goes, each a field of its own when there is one."""
     start, end = meeting.start, meeting.end
-    until = f"{end:%H:%M}" if end.date() == start.date() else f"{_date(end.date(), today)} {end:%H:%M}"
-    fields = [meeting.ref, f"{_date(start.date(), today)} {start:%H:%M}-{until}", as_field(meeting.subject),
+    until = f"{end:%H:%M}" if end.date() == start.date() else f"{short_day(end.date(), today)} {end:%H:%M}"
+    fields = [meeting.ref, f"{short_day(start.date(), today)} {start:%H:%M}-{until}", as_field(meeting.subject),
               as_field(meeting.organiser or "-")]  # fmt: skip
     fields += [f"stream {meeting.stream}"] if meeting.stream else []
     fields += [meeting.response] if meeting.response is not None and meeting.response in SAID else []

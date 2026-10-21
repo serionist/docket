@@ -175,6 +175,25 @@ def find(sync: str, vault_root: Path) -> tuple[Path, Info]:
     return folder, info
 
 
+def next_start(info: Info) -> datetime | None:
+    """When the next sync of the same vault on this machine started, after this one, if one did: where this sync's
+    writes end. A folder that doesn't read, or is another vault's, is passed over."""
+    top = root()
+    if _linked(top) or not top.is_dir():
+        return None
+    later: list[datetime] = []
+    for path in top.iterdir():
+        if ID.match(path.name) is None or path.name == info.sync or _linked(path) or not (path / INFO).is_file():
+            continue
+        try:
+            other = Info.model_validate_json((path / INFO).read_bytes())
+        except ValidationError:
+            continue
+        if other.made > info.made and _same(Path(other.vault), Path(info.vault)):
+            later.append(other.made)
+    return min(later, default=None)
+
+
 def batch_file(given: str, vault_root: Path) -> str:
     """The text of the batch file `ledger_batch` takes by `file` (DR-0724): an absolute path to a file in a sync folder
     of this machine whose `sync.json` names this vault, where it resolves, links followed, and at most 4 MB of UTF-8.

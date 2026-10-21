@@ -41,7 +41,7 @@ from docket.vault import cursors
 from docket.vault.vault import Vault
 
 THE_WINDOW = "the run's window"
-# While the ledger holds no item, what is owed is looked for this many working days back (DR-0747).
+# While the ledger holds no item, what is owed is looked for this many working days back (DR-0759).
 FIRST_DAYS = 40
 # The meetings run to this many working days after today: the prep week.
 PREP_DAYS = 5
@@ -59,6 +59,13 @@ def template(name: str) -> str:
     """A prompt as the package ships it: what is below its first `---` line, whatever line ends a checkout gave it."""
     text = resources.files("docket.sync").joinpath(name).read_text(encoding="utf-8").replace("\r\n", "\n")
     return text.split("\n---\n", 1)[1].lstrip("\n")
+
+
+def owner(vault: Vault) -> str:
+    """The owner as an agent's prompt names them: their name and their addresses, from `vault.yaml`, so an agent with
+    none of the session's context knows whose asks to find (#272)."""
+    found = vault.config.owner
+    return f"{found.name} ({', '.join(found.emails)})" if found.emails else found.name
 
 
 def fill(text: str, values: dict[str, str]) -> str:
@@ -129,9 +136,10 @@ def start(vault: Vault, named: Sequence[str], at: datetime) -> Started:
     context = path / folder.CONTEXT
     _write(context, "\n".join(_context(info, snapshot, tz)) + "\n")
     prompt = template("agent.md")
+    who = owner(vault)
     for source in info.sources:
         values = {"SOURCE": source.source, "VAULT": str(vault.root), "TODAY": today.isoformat(), "ZONE": info.zone,
-                  "OWED_SINCE": owed, "CONTEXT": str(context), "BLOCK": source.block}  # fmt: skip
+                  "OWED_SINCE": owed, "CONTEXT": str(context), "BLOCK": source.block, "OWNER": who}  # fmt: skip
         _write(Path(source.prompt), fill(prompt, values))
     # Last, so a folder with its sync.json is whole.
     _write(path / folder.INFO, info.model_dump_json(indent=2) + "\n")

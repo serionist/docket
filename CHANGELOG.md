@@ -293,6 +293,14 @@ Unreleased in the same PR.
 
 ### Changed
 
+- `/docket:sync` spends less after its agents. Each source's agent starts fresh from its prompt, which now names you,
+  instead of carrying the session into every turn. The draft quotes what settling each unsure line needs, an item's
+  due and what was last said on it, an outcome or an answer already there, a meeting's points, a stream, so Claude
+  settles them all in one `docket sync settle <sync> 7=alt 12=keep 15=drop --rev 1` with no lookups, and writes
+  nothing out again; a settle given numbers from before another settle changes nothing. A recording's notes line
+  that leaves out the note's id still links the recording to its meeting. `docket sync summary <sync>` prints the
+  list from the ledger after the write: the sync's batch and its undo, what closed and was added, meetings and prep,
+  what is due, invites, waits, runs that stopped short, the recordings' notes.
 - `/docket:sync` reads each recording once. The recorder's agent classifies from the pages it fetched, fetching
   them side by side, and reads no recording; as each source's agent is back, `docket sync recordings` writes each
   recording with no note from raw into the sync folder, and an agent each, on Sonnet as a trial, reads it whole in a

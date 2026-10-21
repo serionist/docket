@@ -126,7 +126,7 @@ def recordings(vault: Vault, sync: str, source: str, at: datetime) -> Wave:
                 "START": f"{local:%Y-%m-%d %H:%M}", "DAY": f"{local:%Y-%m-%d}",
                 "FILES": "\n".join(f"- {file}" for file in files),
                 "MEETINGS": _meetings_line(reconcile.recorded_in(meetings, unnoted.ts, owner), info),
-                "LAYOUT": layout, "SYNC_AT": f"{info.made.astimezone(tz):%Y-%m-%dT%H:%M}",
+                "LAYOUT": layout, "SYNC_AT": f"{info.made.astimezone(tz):%Y-%m-%dT%H:%M}", "OWNER": start.owner(vault),
             }  # fmt: skip
             _write(agent, start.fill(prompt, values))
             made = folder.Recording(

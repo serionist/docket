@@ -7,8 +7,8 @@ meeting planned in a tenth of a second, reading only its part (DR-0616, DR-0628,
 it, every item open, read from the tables with its lines in a fifth of a second (DR-0638), and a suggest for ten
 of its meetings in half a second (DR-0725); the day's route on a vault holding it in half a second (DR-0672); all of
 it as `docket ledger show --all --json` gives it, stamped, with its JSON, in under two seconds (DR-0659); a sync
-folder written from it, every open item a line, in under a second (DR-0746); and a sync's batch drafted against it
-from 200 block lines in under three (DR-0749).
+folder written from it, every open item a line, in under a second (DR-0746); a sync's batch drafted against it
+from 200 block lines in under three (DR-0760); and a sync's summary of it in under a second (#272).
 
 The ops are written as the writer writes them, a month file per machine, each item an add and nine changes, each
 meeting four points answered and a point rolled from the meeting before it in its weekly series of fifty. Wall time
@@ -49,6 +49,7 @@ from docket.service.app import create_app
 from docket.service.state import Settings
 from docket.sync import reconcile as sync_reconcile
 from docket.sync import start as sync_start
+from docket.sync import summary as sync_summary
 from docket.vault import forgotten
 from docket.vault.anchors import DocRef
 from docket.vault.config import SourceConfig
@@ -69,6 +70,7 @@ DAY_SECONDS = 0.5
 SHOW_ALL_SECONDS = 2.0
 SYNC_START_SECONDS = 1.0
 SYNC_RECONCILE_SECONDS = 3.0
+SYNC_SUMMARY_SECONDS = 1.0
 
 
 def one_more(root: Path, last: Op, kind: str, **keys: object) -> Op:
@@ -504,7 +506,7 @@ def perf_block(start: datetime) -> list[str]:
 def test_a_sync_reconcile_over_that_ledger_drafts_200_block_lines_in_under_three_seconds(sync_vault: Vault) -> None:
     """docket sync reconcile on a vault holding it, its index built, with a block of 200 lines over 200 records in raw:
     every locator resolved through the index, the ledger read with the open items' trails and threads, each ask matched
-    against the 5,000 open items, the draft written. Run once before the clock starts (DR-0749)."""
+    against the 5,000 open items, the draft written. Run once before the clock starts (DR-0760)."""
     vault = sync_vault
     at = datetime(2026, 6, 1, 8, tzinfo=UTC)
     started = sync_start.start(vault, [], at)
@@ -520,4 +522,27 @@ def test_a_sync_reconcile_over_that_ledger_drafts_200_block_lines_in_under_three
     if not traced():
         assert run.seconds < SYNC_RECONCILE_SECONDS, (
             f"a sync reconcile took {run.seconds:.2f} s, over {SYNC_RECONCILE_SECONDS} s"
+        )
+
+
+@pytest.mark.perf
+def test_a_sync_summary_over_that_ledger_reads_in_under_a_second(sync_vault: Vault) -> None:
+    """docket sync summary on a vault holding it, its index built, a sync started after its last op and its batch of
+    40 logs written: the snapshot of 5,000 open items and the prep week, the sync's batch found and read, its block and
+    its notes read, the whole cut to the room. Run once before the clock starts (#272)."""
+    vault = sync_vault
+    at = datetime(2026, 12, 1, 8, tzinfo=UTC)
+    started = sync_start.start(vault, [], at)
+    logs = [{"op": "log", "item": f"A-{n + 1:04d}", "note": "Ada asked again in the thread"} for n in range(40)]
+    store.write(vault, logs, by="sync", now=at + timedelta(minutes=5))
+    later = at + timedelta(minutes=6)
+    sync_summary.summary(vault, started.info.sync, later)
+    run = best_of(3, lambda: sync_summary.lines(sync_summary.summary(vault, started.info.sync, later)))
+    size = sum(len(line) + 1 for line in run.result)
+    print(f"docket sync summary: {run.seconds * 1000:.0f} ms ({run.runs('ms')}), {size:,} characters")
+    assert size <= sync_summary.ROOM and any(line.startswith("logged 40 on 40 item(s)") for line in run.result)
+    assert any(line.endswith(" more: docket ledger list gives them") for line in run.result)
+    if not traced():
+        assert run.seconds < SYNC_SUMMARY_SECONDS, (
+            f"a sync summary took {run.seconds:.2f} s, over {SYNC_SUMMARY_SECONDS} s"
         )

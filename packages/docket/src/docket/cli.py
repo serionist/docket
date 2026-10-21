@@ -288,7 +288,8 @@ def init(
 @sync_app.callback()
 def sync(ctx: typer.Context, vault: VaultOption = None) -> None:
     """Alone, move the vault with its remote: in a repo of its own, fetch and rebase; in a folder, your own git does
-    it. `docket sync start`, `recordings` and `reconcile` write the sync folder /docket:sync runs from instead."""
+    it. `docket sync start`, `recordings`, `reconcile` and `settle` write the sync folder /docket:sync runs from
+    instead, and `summary` reads the ledger after its batch."""
     if ctx.invoked_subcommand is not None:
         # `docket sync --vault <vault> start` names the vault for the subcommand.
         ctx.obj = vault
@@ -346,6 +347,52 @@ def sync_reconcile(
 
     found = find_vault(vault if vault is not None else ctx.obj)
     say_all(reconcile.lines(reconcile.reconcile(found, sync, ledger_views.now())))
+
+
+@sync_app.command("settle")
+def sync_settle(
+    ctx: typer.Context,
+    sync: Annotated[str, typer.Argument(help="The sync: its id, or its folder, as docket sync start printed it.")],
+    choices: Annotated[
+        list[str],
+        typer.Argument(
+            help="<line>=<choice> for each unsure line of the draft, by its number: keep, alt (alt2, ...) for an "
+            "alternative in its place, keep+alt2 for both, or drop.",
+            show_default=False,
+        ),
+    ],
+    rev: Annotated[
+        int,
+        typer.Option(
+            "--rev", help="The draft's rev, on its head line, that the line numbers were read at.", show_default=False
+        ),
+    ],
+    vault: VaultOption = None,
+) -> None:
+    """Settle the draft's unsure lines in one call and rewrite draft.jsonl at its next rev: each named line kept with
+    its unsure taken out, swapped for an alternative, or dropped, and what goes with it after it. Every choice is
+    checked first, and the rev: a draft at another rev, or a choice that doesn't apply, changes nothing. Prints the new
+    rev, the unsure lines left and the # prep line, by their new numbers."""
+    from docket.sync import settle  # noqa: PLC0415
+
+    found = find_vault(vault if vault is not None else ctx.obj)
+    say_all(settle.lines(settle.settle(found, sync, choices, rev=rev)))
+
+
+@sync_app.command("summary")
+def sync_summary(
+    ctx: typer.Context,
+    sync: Annotated[str, typer.Argument(help="The sync: its id, or its folder, as docket sync start printed it.")],
+    vault: VaultOption = None,
+) -> None:
+    """Print the sync's summary from the ledger after its batch, a line per item: the batch and its undo, what it
+    closed and added, the meetings and their prep, what is due today, this week and whenever, invites, waits, the
+    meetings left over, the runs that stopped short, the recordings' notes and staging. Reads only; at most 30,000
+    characters."""
+    from docket.sync import summary  # noqa: PLC0415
+
+    found = find_vault(vault if vault is not None else ctx.obj)
+    say_all(summary.lines(summary.summary(found, sync, ledger_views.now())))
 
 
 @vault_app.command("status")

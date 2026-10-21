@@ -212,6 +212,8 @@
     "packages/docket/tests/test_speech_prompt.py",
     "packages/docket/tests/test_sync_reconcile.py",
     "packages/docket/tests/test_sync_recordings.py",
+    "packages/docket/tests/test_sync_settle.py",
+    "packages/docket/tests/test_sync_summary.py",
     "packages/docket/tests/test_timewords.py",
     "packages/docket/tests/test_vault_check_ledger.py",
     "packages/docket/tests/test_vault_settings.py",
@@ -250,6 +252,7 @@
   ],
   "signals": {
     "packages/docket/tests/test_ledger_perf.py": "ages the op files an hour so the index takes them as settled, as on every system; its budgets run nightly on all three",
+    "packages/docket/tests/test_sync_summary.py": "sets a draft's time to a minute of its fixtures, minutes from the batches it tells apart, as on every system",
     "packages/docket/tests/test_web_browser_ledger.py": "ages the perf ledger's op files an hour, as on every system; the browser smoke loads its page on all three every PR",
     "packages/docket/tests/test_web_browser_queue.py": "ages the perf ledger's op files an hour, as on every system; the browser smoke loads its page on all three every PR",
     "packages/docket/tests/test_web_day_perf.py": "ages the op files an hour so the index takes them as settled, as on every system; its budgets run nightly on all three"

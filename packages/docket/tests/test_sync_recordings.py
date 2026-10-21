@@ -21,6 +21,7 @@ from test_sync_folder import NOW, POINT, WEEKLY, build_pilot
 from docket.cli import main
 from docket.errors import DocketError
 from docket.index import build as index_build
+from docket.ledger import views
 from docket.sync import folder, reconcile, recordings, start
 from docket.vault import cursors
 from docket.vault.cuts import CUT_MARKER
@@ -84,6 +85,7 @@ def test_a_recording_with_no_note_gets_its_files_its_prompt_and_its_line_in_the_
     assert "id `recording-note:2026-10-19-<slug>`" in prompt and "`by: claude, sync 2026-10-20T09:15`" in prompt
     assert f"--vault {vault.root}" in prompt and "| owed since | the run's window |" in prompt
     assert f"| the note's layout | {recordings.LAYOUT} |" in prompt
+    assert "| the owner | Ada Example (ada@example.invalid): whose asks and waits you find |" in prompt
     listed = json.loads(read(sync / "recordings" / "plaud.json"))
     assert listed["source"] == "plaud" and [r["rid"] for r in listed["recordings"]] == [WEEKLY]
     # sync.json stays as the start wrote it; a source with no recording writes no list.
@@ -236,7 +238,33 @@ def test_a_recording_whose_agent_wrote_no_block_is_said_by_the_reconcile(vault: 
     assert done.said == [f"blocks/plaud/{given.key}.txt isn't there: no block from {WEEKLY}'s agent"]
 
 
-def test_the_command_prints_a_line_per_recording(vault: Vault, capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.parametrize("written", [f"{WEEKLY} | 10:30 | 11:53 | M-0001", f"{WEEKLY} | 10:30 | 11:53", "- | 10:30"])
+def test_a_recording_s_notes_line_with_no_note_id_still_links_the_recording_to_its_meeting(
+    vault: Vault, written: str
+) -> None:
+    """The third rehearsal's recording agent wrote its NOTES line with the rid first and no note id, and the reconcile
+    dropped it, the recording's link with it. The block's file names the recording, and its time or the line's M- ref
+    the meeting, so the link is drafted and the missing id said (#272)."""
+    started = start.start(vault, [], NOW)
+    for source in ("plaud", "slack"):
+        (started.folder / "blocks" / f"{source}.txt").write_text(f"RUN:      {source} | none | -\n", encoding="utf-8")
+    (given,) = recordings.recordings(vault, started.info.sync, "plaud", AT).given
+    Path(given.block).write_text(f"NOTES:    {written}\n", encoding="utf-8")
+    done = reconcile.reconcile(vault, started.info.sync, NOW)
+    ops = [json.loads(line) for line in done.path.read_text(encoding="utf-8").splitlines() if line.startswith("{")]
+    assert {"op": "material", "item": "M-0001", "ref": WEEKLY, "label": "recording"} in ops
+    assert done.dropped == [] and done.unsure == []
+    assert done.said == [
+        f"blocks/plaud/{given.key}.txt:1 NOTES: {written}: no note id, so the link is drafted from {WEEKLY}, the "
+        "block's recording; the note's id is missing from the line"
+    ]
+
+
+def test_the_command_prints_a_line_per_recording(
+    vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The command reads the clock: held at the fixtures' day.
+    monkeypatch.setattr(views, "now", lambda: AT)
     started = start.start(vault, [], NOW)
     assert main(["sync", "--vault", str(vault.root), "recordings", started.info.sync, "plaud"]) == 0
     (line,) = capsys.readouterr().out.splitlines()
