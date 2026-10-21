@@ -158,16 +158,12 @@ def test_doc_read_says_what_an_old_path_led_to(vault: Vault, folder: Path, capsy
     assert not capsys.readouterr().out.startswith("read as")
 
 
-def test_the_import_speaks_utf8_through_a_pipe(vault: Vault, folder: Path) -> None:
+def test_the_import_speaks_utf8_through_a_pipe(vault: Vault, folder: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # The import is setup, so it runs in process; the read through a pipe, its argument not ASCII, is the process
+    # under test (DR-0756).
+    assert main(["import", "notes", str(folder), "--as", "régi"]) == 0
+    assert "prefix   régi  (old paths look like régi/calls/" in capsys.readouterr().out
     env = {**os.environ, "PYTHONUTF8": "0", "PYTHONIOENCODING": ""}
-    done = subprocess.run(
-        [sys.executable, "-m", "docket", "import", "notes", str(folder), "--as", "régi"],
-        capture_output=True,
-        env=env,
-        check=False,
-    )
-    assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
-    assert "prefix   régi  (old paths look like régi/calls/" in done.stdout.decode("utf-8")
     read = subprocess.run(
         [sys.executable, "-m", "docket", "doc", "read", "régi/árvíztűrő-jegyzet.md"],
         capture_output=True,

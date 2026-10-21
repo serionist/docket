@@ -316,10 +316,9 @@ def test_the_console_speaks_utf8_through_a_pipe(tmp_path: Path) -> None:
     import subprocess
 
     path = tmp_path / "Árvíztűrő vault"
+    # The init is setup, so it runs in process; the status through a pipe is the process under test (DR-0756).
+    assert main(["init", "--yes", "--path", str(path), "--remote", "none", *FLAGS]) == 0
     env = {**os.environ, "PYTHONUTF8": "0", "PYTHONIOENCODING": ""}
-    flags = ["init", "--yes", "--path", str(path), "--remote", "none", *FLAGS]
-    init = subprocess.run([sys.executable, "-m", "docket", *flags], capture_output=True, env=env, check=False)
-    assert init.returncode == 0, init.stderr.decode("utf-8", "replace")
     proc = subprocess.run(
         [sys.executable, "-m", "docket", "vault", "status", "--vault", str(path)],
         capture_output=True,
