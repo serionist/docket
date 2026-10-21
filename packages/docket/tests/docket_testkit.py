@@ -399,14 +399,26 @@ def read_only(made: Path) -> Path:
     templates, and held to a manifest as they are, so a run whose test wrote into it fails (DR-0531). A test that
     writes takes a copy of its own; a vault whose first read builds the index is shared from `indexed`."""
     templates = templates_folder(_FACTORY[0])
-    folder = templates / made.resolve().relative_to(templates.resolve()).parts[0]
-    name = f"{folder.name}.read-{os.getpid()}-{next(_READ_ONLY)}"
-    copy = templates / name
-    shutil.copytree(folder, copy)
+    name = f"{_holding(made).name}.read-{os.getpid()}-{next(_READ_ONLY)}"
+    found = _copy_into(made, templates / name)
+    (templates / f"{name}.manifest.json").write_text(json.dumps(manifest(templates / name)), encoding="utf-8")
+    return found
+
+
+def _holding(made: Path) -> Path:
+    """The template folder a path a builder returned lies in."""
+    templates = templates_folder(_FACTORY[0])
+    return templates / made.resolve().relative_to(templates.resolve()).parts[0]
+
+
+def _copy_into(made: Path, target: Path) -> Path:
+    """The whole template `made` lies in copied to target, ready as a fresh build would be, as `copied` makes one:
+    `made`'s place in the copy."""
+    folder = _holding(made)
+    shutil.copytree(folder, target, dirs_exist_ok=True)
     for repo in _repos(folder):
-        _fit(folder, copy / repo.relative_to(folder), copy)
-    (templates / f"{name}.manifest.json").write_text(json.dumps(manifest(copy)), encoding="utf-8")
-    return copy / made.resolve().relative_to(folder.resolve())
+        _fit(folder, target / repo.relative_to(folder), target)
+    return target / made.resolve().relative_to(folder.resolve())
 
 
 # Where a file media key store keeps its seal: Docket's state folder, outside the vault (KeyStore._seal_file).
@@ -825,16 +837,16 @@ def index_template(factory: pytest.TempPathFactory) -> Path:
     return template_with(factory, build_index_vault)
 
 
-def indexed(factory: pytest.TempPathFactory, template: Path) -> Path:
-    """A template's vault with its index built from scratch, once per session: a copy's index is current, since a
-    copy keeps each file's size and time, which is all the index checks of a run file. The build waits until every
-    file is older than the index's racy window, so no op file is kept as one to hash again, which a reader of a
-    read-only copy would write."""
+def indexed(factory: pytest.TempPathFactory, vault_in: Path) -> Path:
+    """The template a vault lies in, a project or a host around it included, with the vault's index built from
+    scratch, once per session; returns the vault in it. A copy's index is current, since a copy keeps each file's size
+    and time, which is all the index checks of a run file. The build waits until every file is older than the index's
+    racy window, so no op file is kept as one to hash again, which a reader of a read-only copy would write."""
     from docket import index
     from docket.index.ledger import RACY_NS
 
     def build(base: Path) -> Path:
-        vault = copy_vault(template, base)
+        vault = Vault.open(_copy_into(vault_in, base))
         files = [p for p in vault.root.rglob("*") if ".git" not in p.parts and p.is_file()]
         newest = max((p.stat().st_mtime_ns for p in files), default=0)
         wait = (newest + RACY_NS - time.time_ns()) / 1e9
@@ -843,7 +855,7 @@ def indexed(factory: pytest.TempPathFactory, template: Path) -> Path:
         index.rebuild(vault)
         return vault.root
 
-    return shared(build, "indexed-" + digest(str(template.resolve())), factory)
+    return shared(build, "indexed-" + digest(str(vault_in.resolve())), factory)
 
 
 # The name vault: a vault about one customer, where two invented names are in most chunks. Acme's stems differ from it

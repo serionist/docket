@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from docket_testkit import sh
+from docket_testkit import indexed, read_only, sh
 from docket_webkit import Element, a11y_problems, html_problems, parse
 from settings_kit import edit_config, settings_template, settings_vault
 from staging_kit import signed_in
@@ -42,6 +42,19 @@ def client(vault: Vault) -> Iterator[TestClient]:
         yield found
 
 
+@pytest.fixture(scope="module")
+def seen(tmp_path_factory: pytest.TempPathFactory, template: Path) -> Vault:
+    """One copy, its index built as the page's first read would build it, for the tests that only read: a write into
+    it fails the run (DR-0531)."""
+    return Vault.open(read_only(indexed(tmp_path_factory, template / "vault")))
+
+
+@pytest.fixture
+def reader(seen: Vault) -> Iterator[TestClient]:
+    with signed_in(seen) as found:
+        yield found
+
+
 def page(client: TestClient, path: str = "/settings", status: int = 200) -> str:
     answer = client.get(path)
     assert answer.status_code == status, answer.text
@@ -67,10 +80,10 @@ def raw(element: Element) -> str:
     return "".join(c for c in element.children if isinstance(c, str))
 
 
-def test_the_page_names_each_source_with_its_settings_and_writes_nothing(client: TestClient, vault: Vault) -> None:
-    before = (vault.root / "vault.yaml").read_bytes()
-    head = sh(vault.root, "git", "rev-parse", "HEAD")
-    html = page(client)
+def test_the_page_names_each_source_with_its_settings_and_writes_nothing(reader: TestClient, seen: Vault) -> None:
+    before = (seen.root / "vault.yaml").read_bytes()
+    head = sh(seen.root, "git", "rev-parse", "HEAD")
+    html = page(reader)
     lead = parse(html).find("p", class_="lead").text()
     assert lead.startswith("4 sources, 4 on; 4 never-store values; credentials redacted, phone numbers not; models off")
     calls = card(html, "source-calls")
@@ -90,12 +103,12 @@ def test_the_page_names_each_source_with_its_settings_and_writes_nothing(client:
     assert posted == [("post", "/settings/never-store"), ("post", "/settings/redaction"), ("post", "/settings/source")]
     acts = sorted(i.attrs["value"] for f in forms for i in f.find_all("input", name="act"))
     assert set(acts) <= {"work", "mixed", "private", "off", "on"}
-    assert (vault.root / "vault.yaml").read_bytes() == before
-    assert sh(vault.root, "git", "rev-parse", "HEAD") == head
+    assert (seen.root / "vault.yaml").read_bytes() == before
+    assert sh(seen.root, "git", "rev-parse", "HEAD") == head
 
 
-def test_each_change_to_a_source_is_a_button_and_a_looser_one_says_so(client: TestClient) -> None:
-    html = page(client)
+def test_each_change_to_a_source_is_a_button_and_a_looser_one_says_so(reader: TestClient) -> None:
+    html = page(reader)
     changes = parse(html).find("li", id="source-calls").find_all("li", class_="change")
     buttons = [(c.find("input", name="act").attrs["value"], c.find("button").text()) for c in changes]
     assert buttons == [
@@ -113,14 +126,14 @@ def test_each_change_to_a_source_is_a_button_and_a_looser_one_says_so(client: Te
     assert yaml.safe_load(f"sources:\n{entry}")["sources"]["documents"]["folder"] == "docs"
 
 
-def test_the_never_store_values_show_only_when_asked(client: TestClient, vault: Vault) -> None:
-    hidden = page(client)
+def test_the_never_store_values_show_only_when_asked(reader: TestClient, seen: Vault) -> None:
+    hidden = page(reader)
     for value in ("Cleo Test", "Dora #2", "chat:garden", "Project: Phoenix"):
         assert value not in hidden
     assert "2 values" in card(hidden, "list-people")
     toggle = parse(hidden).find("a", class_="show-values")
     assert (toggle.attrs["href"], toggle.text()) == ("/settings?show=lists", "Show the values")
-    shown = page(client, "/settings?show=lists")
+    shown = page(reader, "/settings?show=lists")
     people = parse(shown).find("li", id="list-people")
     values = [v.text() for v in people.find_all("span", class_="value")]
     assert values == ["Cleo Test", "Dora #2"]
@@ -183,17 +196,17 @@ def test_content_in_settings_renders_escaped(client: TestClient, vault: Vault) -
     assert "<img src=x" not in html
 
 
-def test_this_machines_folder_and_models_come_from_its_config(client: TestClient, vault: Vault) -> None:
-    userconfig.set_section("folders", {str(vault.root): {"documents": str(vault.root.parent / "elsewhere")}})
-    html = page(client)
-    assert str(vault.root.parent / "elsewhere") in card(html, "source-documents")
+def test_this_machines_folder_and_models_come_from_its_config(reader: TestClient, seen: Vault) -> None:
+    userconfig.set_section("folders", {str(seen.root): {"documents": str(seen.root.parent / "elsewhere")}})
+    html = page(reader)
+    assert str(seen.root.parent / "elsewhere") in card(html, "source-documents")
     assert "off (docket models install turns them on)" in html
     assert "docket models install --no-reranker" in html
     assert "provider: none" in html
     userconfig.set_section("models", {"provider": "api", "embedder": "large"})
-    assert "names an embedder the api provider doesn't have (voyage-4), so models are off" in said(page(client))
-    userconfig.set_section("folders", {str(vault.root): {"documents": "relative/path"}})
-    assert "must be an absolute folder" in page(client)
+    assert "names an embedder the api provider doesn't have (voyage-4), so models are off" in said(page(reader))
+    userconfig.set_section("folders", {str(seen.root): {"documents": "relative/path"}})
+    assert "must be an absolute folder" in page(reader)
 
 
 def test_a_bad_show_and_a_vault_that_doesnt_load_are_the_page_s_own_errors(client: TestClient, vault: Vault) -> None:
@@ -204,12 +217,12 @@ def test_a_bad_show_and_a_vault_that_doesnt_load_are_the_page_s_own_errors(clien
     assert "not valid YAML" in broken
 
 
-def test_a_failure_answers_the_error_page_naming_no_value(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_failure_answers_the_error_page_naming_no_value(reader: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def broken(*_args: object) -> object:
         raise RuntimeError("Dora #2")
 
     monkeypatch.setattr(settings_view, "build", broken)
-    answer = client.get("/settings?show=lists")
+    answer = reader.get("/settings?show=lists")
     assert answer.status_code == 500
     assert "Something failed in Docket" in said(answer.text)
     assert "Dora #2" not in answer.text

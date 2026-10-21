@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from docket_testkit import cant_place, git, make_record, sh
+from docket_testkit import cant_place, digest, git, make_record, sh, shared
 from docket_webkit import OURS, a11y_problems, html_problems, parse
 from httpx2 import Response
 from settings_kit import settings_template, settings_vault
@@ -38,19 +38,25 @@ SUBJECT = "Config: never-store people, 1 added"
 
 @pytest.fixture(scope="module")
 def template(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return settings_template(tmp_path_factory)
+    """The Settings test vault with a memo by Dora stored and indexed, and another of hers and one by Cleo staged:
+    built once per session, its project returned; tests copy it."""
+    settings = settings_template(tmp_path_factory)
+
+    def build(folder: Path) -> Path:
+        found = settings_vault(settings, folder)
+        run = datetime(2026, 10, 15, 8, 0, tzinfo=UTC)
+        stored = [memo(1, NAME, "Lunch with the supplier on Friday."), memo(2, "Ben Sample", "Lunch menu attached.")]
+        found.write_run("memo", stored, run)
+        index.rebuild(found)
+        Gate(found).stage([memo(3, NAME, "Dinner plans."), memo(4, "Ben Sample", "Day rates.")])
+        return found.root.parent
+
+    return shared(build, "settings-add-" + digest(str(settings.resolve())), tmp_path_factory)
 
 
 @pytest.fixture
 def vault(template: Path, tmp_path: Path) -> Vault:
-    """The Settings test vault with a memo by Dora stored and indexed, and another of hers and one by Cleo staged."""
-    found = settings_vault(template, tmp_path)
-    run = datetime(2026, 10, 15, 8, 0, tzinfo=UTC)
-    stored = [memo(1, NAME, "Lunch with the supplier on Friday."), memo(2, "Ben Sample", "Lunch menu attached.")]
-    found.write_run("memo", stored, run)
-    index.rebuild(found)
-    Gate(found).stage([memo(3, NAME, "Dinner plans."), memo(4, "Ben Sample", "Day rates.")])
-    return found
+    return settings_vault(template, tmp_path)
 
 
 @pytest.fixture
