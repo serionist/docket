@@ -511,8 +511,8 @@
     "tools/devkit/tests/test_yamlio.py": 0.0
   },
   "Linux browser": {
-    "packages/docket/tests/test_web_browser.py": 28.0,
-    "packages/docket/tests/test_web_browser_briefs.py": 30.0,
+    "packages/docket/tests/test_web_browser.py": 37.0,
+    "packages/docket/tests/test_web_browser_briefs.py": 22.0,
     "packages/docket/tests/test_web_browser_design.py": 27.1,
     "packages/docket/tests/test_web_browser_ledger.py": 55.4,
     "packages/docket/tests/test_web_browser_meetings.py": 30.4,

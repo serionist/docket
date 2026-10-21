@@ -25,8 +25,8 @@ from decisions_kit import (
     decisions_template,
     propose,
 )
-from docket_testkit import git
-from docket_webkit import OURS, TOKEN, signed_in
+from docket_testkit import git, indexed, read_only
+from docket_webkit import OURS, TOKEN, serving, signed_in
 from httpx2 import Response
 from starlette.testclient import TestClient
 
@@ -51,6 +51,18 @@ def template(tmp_path_factory: pytest.TempPathFactory) -> Path:
 @pytest.fixture
 def client(template: Path, tmp_path: Path) -> Iterator[TestClient]:
     with signed_in(template, tmp_path) as found:
+        yield found
+
+
+@pytest.fixture(scope="module")
+def seen(tmp_path_factory: pytest.TempPathFactory, template: Path) -> Path:
+    """One copy, its index built, for the tests that only read: a write into it fails the run (DR-0531)."""
+    return read_only(indexed(tmp_path_factory, template))
+
+
+@pytest.fixture
+def reader(seen: Path) -> Iterator[TestClient]:
+    with serving(seen) as found:
         yield found
 
 
@@ -106,8 +118,8 @@ def head(tmp_path: Path) -> str:
 # -- the read ---------------------------------------------------------------------------------------------------------
 
 
-def test_an_entity_with_decisions_and_no_brief_shows_them_waiting_first(client: TestClient) -> None:
-    found = read(client)
+def test_an_entity_with_decisions_and_no_brief_shows_them_waiting_first(reader: TestClient) -> None:
+    found = read(reader)
     view = found["view"]
     assert (view["mode"], view["title"]) == ("entity", "Fleet management")
     assert view["message"].startswith("No brief yet.")
@@ -137,8 +149,8 @@ def test_an_entity_with_decisions_and_no_brief_shows_them_waiting_first(client: 
     assert decided["current"][0]["picks"] == [] and waiting[0]["against"][0]["picks"] == []
 
 
-def test_the_list_names_what_waits_for_the_owner(client: TestClient) -> None:
-    [link] = read(client, "")["view"]["to_decide"]
+def test_the_list_names_what_waits_for_the_owner(reader: TestClient) -> None:
+    [link] = read(reader, "")["view"]["to_decide"]
     assert (link["text"], link["url"]) == ("Fleet management: 2 decisions", f"/briefs?brief={BRIEF}")
 
 
@@ -156,9 +168,9 @@ def test_a_brief_on_the_entity_shows_its_decisions_with_it(client: TestClient, t
     assert titles(found["decisions"]["waiting"])[:1] == ["the pilot comes first after all"]
 
 
-def test_another_entity_s_brief_has_no_decisions_and_one_with_neither_is_missing(client: TestClient) -> None:
-    assert read(client, "brief=brief:ben-sample")["decisions"] is None
-    neither = read(client, "brief=brief:harbour-pilot")
+def test_another_entity_s_brief_has_no_decisions_and_one_with_neither_is_missing(reader: TestClient) -> None:
+    assert read(reader, "brief=brief:ben-sample")["decisions"] is None
+    neither = read(reader, "brief=brief:harbour-pilot")
     assert (neither["view"]["mode"], neither["decisions"]) == ("missing", None)
 
 
@@ -350,9 +362,8 @@ def test_the_part_says_what_a_list_hides_and_when_there_is_nothing() -> None:
     assert card.lines[0].anchors[0].url.startswith("/recording?rid=calls:rec-0101")
 
 
-def test_daily_and_pilot_are_where_the_kit_put_them(client: TestClient, tmp_path: Path) -> None:
-    del client
-    report = decisions.report(vault_of(tmp_path))
+def test_daily_and_pilot_are_where_the_kit_put_them(seen: Path) -> None:
+    report = decisions.report(Vault.open(seen), update=False)
     assert {d.id: (d.status, d.current) for d in report.decisions} == {
         PILOT: ("confirmed", False),
         DASHBOARD: ("confirmed", True),

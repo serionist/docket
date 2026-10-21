@@ -14,8 +14,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from briefs_kit import ABOUT_BEN, BEN, CALL, DORA, HARBOUR, NORTHWIND, NOTE, briefs_template
-from docket_testkit import OFFER, git
-from docket_webkit import TOKEN, signed_in
+from docket_testkit import OFFER, git, indexed, read_only
+from docket_webkit import TOKEN, serving, signed_in
 from starlette.testclient import TestClient
 
 from docket.briefs import BriefsReport, BriefState, NewRecords
@@ -44,6 +44,18 @@ def client(template: Path, tmp_path: Path) -> Iterator[TestClient]:
         yield found
 
 
+@pytest.fixture(scope="module")
+def seen(tmp_path_factory: pytest.TempPathFactory, template: Path) -> Path:
+    """One copy, its index built, for the tests that only read: a write into it fails the run (DR-0531)."""
+    return read_only(indexed(tmp_path_factory, template))
+
+
+@pytest.fixture
+def reader(seen: Path) -> Iterator[TestClient]:
+    with serving(seen) as found:
+        yield found
+
+
 def answer(client: TestClient, query: str = "", status: int = 200) -> dict[str, Any]:
     got = client.get(f"{API}?{query}" if query else API)
     assert got.status_code == status, got.text
@@ -66,8 +78,8 @@ def by_name(found: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {r["name"]: r for g in found["groups"] for r in g["rows"]}
 
 
-def line_of(tmp_path: Path, doc_id: str, start: str) -> int:
-    doc = DocStore(Vault.open(tmp_path / "vault")).get(doc_id)
+def line_of(root: Path, doc_id: str, start: str) -> int:
+    doc = DocStore(Vault.open(root)).get(doc_id)
     assert doc is not None
     return next(n for n, line in doc.lines() if line.startswith(start))
 
@@ -87,9 +99,9 @@ def list_more(tmp_path: Path, **values: list[str]) -> None:
 # -- the list ---------------------------------------------------------------------------------------------------------
 
 
-def test_the_page_is_the_app_s_and_lists_the_briefs_by_entity_type(client: TestClient) -> None:
-    assert '<div id="root">' in client.get("/briefs?brief=brief:ben-sample&line=3").text
-    read = answer(client)
+def test_the_page_is_the_app_s_and_lists_the_briefs_by_entity_type(reader: TestClient) -> None:
+    assert '<div id="root">' in reader.get("/briefs?brief=brief:ben-sample&line=3").text
+    read = answer(reader)
     assert (read["canonical"], read["notice"], read["waiting"], read["decisions"]) == ("/briefs", None, "", None)
     found = read["view"]
     assert found["mode"] == "list"
@@ -109,8 +121,8 @@ def test_the_page_is_the_app_s_and_lists_the_briefs_by_entity_type(client: TestC
     assert named["Dóra Minta"]["orphan"] == "its entity is gone; cleo-test holds its name now"
 
 
-def test_a_type_narrows_the_list_and_its_tabs_say_how_many(client: TestClient) -> None:
-    found = view(client, "type=person")
+def test_a_type_narrows_the_list_and_its_tabs_say_how_many(reader: TestClient) -> None:
+    found = view(reader, "type=person")
     assert rows(found) == {"person": ["Ben Sample"]}
     tabs = {t["name"]: t for t in found["types"]}
     assert [(t["name"], t["count"]) for t in found["types"]] == [
@@ -124,8 +136,8 @@ def test_a_type_narrows_the_list_and_its_tabs_say_how_many(client: TestClient) -
     assert tabs["All"]["url"] == "/briefs"
     # A brief opened from the list keeps the type, so the way back does too.
     assert by_name(found)["Ben Sample"]["url"] == f"/briefs?brief={BEN}&type=person"
-    assert rows(view(client, "type=orphaned")) == {"orphaned": ["Dóra Minta"]}
-    none = view(client, "type=project")
+    assert rows(view(reader, "type=orphaned")) == {"orphaned": ["Dóra Minta"]}
+    none = view(reader, "type=project")
     assert (none["groups"], none["empty"], none["empty_how"]) == ([], "No project briefs.", "")
 
 
@@ -140,19 +152,19 @@ def test_a_vault_with_no_brief_says_how_one_is_written(client: TestClient, tmp_p
 # -- an open brief ----------------------------------------------------------------------------------------------------
 
 
-def test_a_brief_opens_with_its_lines_and_a_line_with_the_raw_it_cites(client: TestClient, tmp_path: Path) -> None:
-    found = view(client, f"brief={NORTHWIND}")
+def test_a_brief_opens_with_its_lines_and_a_line_with_the_raw_it_cites(reader: TestClient, seen: Path) -> None:
+    found = view(reader, f"brief={NORTHWIND}")
     assert (found["mode"], found["title"], found["id"], found["state"]) == ("brief", "Northwind", NORTHWIND, "stale")
     assert found["meta"][:2] == ["customer", "rev 1"]
     assert found["back"] == "/briefs"
     assert found["raw"] is None and found["choose"].startswith("Choose a line")
-    mail = line_of(tmp_path, NORTHWIND, "- The offer comes by mail.")
+    mail = line_of(seen, NORTHWIND, "- The offer comes by mail.")
     line = lines(found)[mail]
     assert line["url"] == f"/briefs?brief={NORTHWIND}&line={mail}#raw"
     assert line["anchors"][0]["url"] == f"/search?hit={quote(f'r:{OFFER}#1', safe=':@/,')}"
     assert not line["open"]
     # The line's own URL, as the app follows it: its query string read, its #raw where the raw is.
-    opened = answer(client, line["url"].partition("?")[2].partition("#")[0])
+    opened = answer(reader, line["url"].partition("?")[2].partition("#")[0])
     assert opened["canonical"] == f"/briefs?brief={NORTHWIND}&line={mail}"
     raw = opened["view"]["raw"]
     assert (raw["n"], raw["body"], raw["close"]) == (mail, "The offer comes by mail.", f"/briefs?brief={NORTHWIND}")
@@ -162,26 +174,26 @@ def test_a_brief_opens_with_its_lines_and_a_line_with_the_raw_it_cites(client: T
     assert lines(opened["view"])[mail]["open"]
 
 
-def test_a_person_s_brief_links_to_their_items_on_the_ledger(client: TestClient) -> None:
+def test_a_person_s_brief_links_to_their_items_on_the_ledger(reader: TestClient) -> None:
     """DR-0669: a person's brief, and only a person's, links to the Ledger narrowed to them."""
-    ben = view(client, f"brief={BEN}")["ledger"]
+    ben = view(reader, f"brief={BEN}")["ledger"]
     assert (ben["url"], ben["text"]) == ("/ledger?who=Ben+Sample", "Ben Sample's items on the Ledger")
-    assert view(client, f"brief={NORTHWIND}")["ledger"] is None
+    assert view(reader, f"brief={NORTHWIND}")["ledger"] is None
 
 
-def test_a_time_anchor_opens_the_recording_page_at_its_time(client: TestClient, tmp_path: Path) -> None:
-    n = line_of(tmp_path, NORTHWIND, "- 7 Oct, supplier call")
-    found = view(client, f"brief={NORTHWIND}&line={n}")
+def test_a_time_anchor_opens_the_recording_page_at_its_time(reader: TestClient, seen: Path) -> None:
+    n = line_of(seen, NORTHWIND, "- 7 Oct, supplier call")
+    found = view(reader, f"brief={NORTHWIND}&line={n}")
     assert lines(found)[n]["anchors"][0]["url"] == f"/recording?rid={CALL}&at=04:00-05:00#at"
     [span] = found["raw"]["spans"]
     assert span["link"]["url"] == f"/recording?rid={CALL}&at=04:00-05:00#at"
     assert "offer in writing" in str(span["span"]["segments"])
 
 
-def test_a_ref_is_followed_one_level_with_its_own_raw(client: TestClient, tmp_path: Path) -> None:
-    n = line_of(tmp_path, BEN, "- Ben wants the deadline")
-    found = view(client, f"brief={BEN}&line={n}")
-    deadline = line_of(tmp_path, NOTE, "- Dóra agrees the deadline")
+def test_a_ref_is_followed_one_level_with_its_own_raw(reader: TestClient, seen: Path) -> None:
+    n = line_of(seen, BEN, "- Ben wants the deadline")
+    found = view(reader, f"brief={BEN}&line={n}")
+    deadline = line_of(seen, NOTE, "- Dóra agrees the deadline")
     assert lines(found)[n]["refs"][0]["url"] == f"/search?hit={NOTE}&lines={deadline}"
     [cited] = found["raw"]["cited"]
     assert cited["link"]["text"] == f"{NOTE}, line {deadline}"
@@ -189,39 +201,39 @@ def test_a_ref_is_followed_one_level_with_its_own_raw(client: TestClient, tmp_pa
     assert cited["spans"][0]["link"]["url"] == f"/recording?rid={CALL}&at=02:30-03:20#at"
 
 
-def test_a_flagged_line_is_marked_and_says_what_changed(client: TestClient, tmp_path: Path) -> None:
-    n = line_of(tmp_path, NORTHWIND, "- The consultant's price")
-    found = view(client, f"brief={NORTHWIND}&line={n}")
+def test_a_flagged_line_is_marked_and_says_what_changed(reader: TestClient, seen: Path) -> None:
+    n = line_of(seen, NORTHWIND, "- The consultant's price")
+    found = view(reader, f"brief={NORTHWIND}&line={n}")
     assert lines(found)[n]["flagged"]
     assert "1 line cites a line that changed since; marked below." in found["notices"]
     assert "reads otherwise" in str(found["raw"])
 
 
-def test_a_stale_brief_lists_its_new_records(client: TestClient) -> None:
-    found = view(client, f"brief={BEN}")
+def test_a_stale_brief_lists_its_new_records(reader: TestClient) -> None:
+    found = view(reader, f"brief={BEN}")
     assert "1 record about Ben Sample since rev 1:" in found["notices"]
     [new] = found["new"]
     assert (new["text"], new["url"]) == (ABOUT_BEN.rid, f"/search?hit={quote(f'r:{ABOUT_BEN.rid}', safe=':@/,')}")
 
 
-def test_an_orphan_names_the_entity_that_holds_its_name(client: TestClient) -> None:
-    found = view(client, f"brief={DORA}")
+def test_an_orphan_names_the_entity_that_holds_its_name(reader: TestClient) -> None:
+    found = view(reader, f"brief={DORA}")
     assert found["meta"][:2] == ["orphaned", "rev 1"]
     assert "Its entity is gone; cleo-test holds its name now." in found["notices"]
 
 
-def test_a_current_brief_has_no_notice_and_its_way_back_keeps_the_type(client: TestClient) -> None:
-    found = view(client, f"brief={HARBOUR}&type=site")
+def test_a_current_brief_has_no_notice_and_its_way_back_keeps_the_type(reader: TestClient) -> None:
+    found = view(reader, f"brief={HARBOUR}&type=site")
     assert (found["notices"], found["back"]) == ([], "/briefs?type=site")
 
 
-def test_a_line_that_cites_nothing_or_isn_t_there_says_so(client: TestClient, tmp_path: Path) -> None:
-    n = line_of(tmp_path, HARBOUR, "## Last conversations")
-    heading = view(client, f"brief={HARBOUR}&line={n}")
+def test_a_line_that_cites_nothing_or_isn_t_there_says_so(reader: TestClient, seen: Path) -> None:
+    n = line_of(seen, HARBOUR, "## Last conversations")
+    heading = view(reader, f"brief={HARBOUR}&line={n}")
     assert lines(heading)[n]["url"] is None
     assert heading["raw"]["empty"] == f"Line {n} cites nothing: it has no anchors or refs."
     for far in (2, 99):
-        assert f"line {far} isn't in the doc's body" in str(view(client, f"brief={HARBOUR}&line={far}")["raw"])
+        assert f"line {far} isn't in the doc's body" in str(view(reader, f"brief={HARBOUR}&line={far}")["raw"])
 
 
 # -- never-store ------------------------------------------------------------------------------------------------------
@@ -244,7 +256,7 @@ def test_a_brief_a_list_now_holds_is_hidden_and_counted(client: TestClient, tmp_
 
 
 def test_a_line_a_list_now_names_is_hidden_and_opens_nothing(client: TestClient, tmp_path: Path) -> None:
-    n = line_of(tmp_path, NORTHWIND, "- 7 Oct, supplier call")
+    n = line_of(tmp_path / "vault", NORTHWIND, "- 7 Oct, supplier call")
     list_more(tmp_path, keywords=["offer in writing"])
     found = view(client, f"brief={NORTHWIND}&line={n}")
     line = lines(found)[n]
@@ -261,7 +273,7 @@ def test_a_line_a_list_now_names_is_hidden_and_opens_nothing(client: TestClient,
 
 
 def test_a_cited_line_a_list_now_names_is_hidden(client: TestClient, tmp_path: Path) -> None:
-    n = line_of(tmp_path, BEN, "- Ben wants the deadline")
+    n = line_of(tmp_path / "vault", BEN, "- Ben wants the deadline")
     list_more(tmp_path, keywords=["agrees the deadline"])
     [cited] = view(client, f"brief={BEN}&line={n}")["raw"]["cited"]
     assert (cited["text"], cited["hidden"], cited["spans"]) == ("a line hidden: it names a never-store value", True, [])
@@ -282,18 +294,18 @@ def test_a_cited_line_a_list_now_names_is_hidden(client: TestClient, tmp_path: P
         ("done=decided", "done is what a click did"),
     ],
 )
-def test_a_value_the_url_can_t_hold_is_refused_in_its_words(client: TestClient, query: str, named: str) -> None:
-    assert named in answer(client, query, status=400)["error"]
+def test_a_value_the_url_can_t_hold_is_refused_in_its_words(reader: TestClient, query: str, named: str) -> None:
+    assert named in answer(reader, query, status=400)["error"]
 
 
-def test_a_brief_that_isn_t_there_says_so(client: TestClient) -> None:
-    found = view(client, "brief=brief:fleet-management")
+def test_a_brief_that_isn_t_there_says_so(reader: TestClient) -> None:
+    found = view(reader, "brief=brief:fleet-management")
     assert found["mode"] == "missing"
     assert found["message"].startswith("No brief brief:fleet-management.")
     assert found["link"] == {"text": "All briefs", "url": "/briefs", "title": ""}
 
 
-def test_the_url_reads_and_writes_one_canonical_form_and_says_a_click_once(client: TestClient) -> None:
+def test_the_url_reads_and_writes_one_canonical_form_and_says_a_click_once(reader: TestClient) -> None:
     state = BriefsState.read({"type": "person", "line": "12", "brief": BEN, "other": "kept out", "done": "reject"})
     assert state == BriefsState(BEN, 12, "person", "reject")
     assert state.url() == f"/briefs?brief={BEN}&line=12&type=person"
@@ -305,25 +317,25 @@ def test_the_url_reads_and_writes_one_canonical_form_and_says_a_click_once(clien
     with pytest.raises(BriefsStateError, match="type is an entity type"):
         BriefsState.read({"type": "Person"})
     # A URL from before the app, naming what a click did: its notice once, and a canonical URL without it.
-    said = answer(client, f"other=1&brief={HARBOUR}&done=confirm")
+    said = answer(reader, f"other=1&brief={HARBOUR}&done=confirm")
     assert (said["canonical"], said["notice"]) == (f"/briefs?brief={HARBOUR}", "Confirmed: it is a decision now.")
 
 
-def test_the_token_never_reads_the_page(client: TestClient) -> None:
-    token = client.get(API, headers={"Authorization": f"Bearer {TOKEN}"})
+def test_the_token_never_reads_the_page(reader: TestClient) -> None:
+    token = reader.get(API, headers={"Authorization": f"Bearer {TOKEN}"})
     assert token.status_code == 403
-    client.cookies.clear()
-    assert client.get(API).status_code == 401
+    reader.cookies.clear()
+    assert reader.get(API).status_code == 401
 
 
 def test_the_index_being_built_waits_and_a_failure_says_no_words(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    reader: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    app = client.app
+    app = reader.app
     assert isinstance(app, ServiceApp)
     updater = app.service.updater
     app.service.updater = IndexUpdater(lambda: time.sleep(0.5), wait_seconds=0.01)
-    waiting = answer(client, f"brief={BEN}")
+    waiting = answer(reader, f"brief={BEN}")
     assert (waiting["view"], waiting["canonical"]) == (None, f"/briefs?brief={BEN}")
     assert "the index is being built" in waiting["waiting"]
     app.service.updater = updater
@@ -335,9 +347,9 @@ def test_the_index_being_built_waits_and_a_failure_says_no_words(
         raise DocketError("the index can't be read")
 
     monkeypatch.setattr(briefs, "gather", refusing)
-    assert answer(client, status=400)["error"] == "the index can't be read"
+    assert answer(reader, status=400)["error"] == "the index can't be read"
     monkeypatch.setattr(briefs, "gather", failing)
-    failed = client.get(API)
+    failed = reader.get(API)
     assert failed.status_code == 500
     assert "words from a record" not in failed.text
 
@@ -384,7 +396,7 @@ def test_a_decisions_line_from_before_the_log_is_marked_and_the_brief_stale(clie
     path.write_text(text + "\n- A new printer was decided. [r:chat:C0OPS/1791400800.000100]\n", encoding="utf-8")
     git(root, "add", "--", str(path))
     git(root, "commit", "-qm", f"Doc: {HARBOUR} rev 2")
-    n = line_of(tmp_path, HARBOUR, "- A new printer was decided.")
+    n = line_of(tmp_path / "vault", HARBOUR, "- A new printer was decided.")
     found = view(client, f"brief={HARBOUR}")
     assert (lines(found)[n]["unconfirmed"], lines(found)[n]["flagged"]) == (True, False)
     assert any("a Decisions line cites no confirmed decision" in notice for notice in found["notices"])
