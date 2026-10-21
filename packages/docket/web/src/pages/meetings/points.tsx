@@ -93,26 +93,23 @@ function Act({
   onClick,
   disabled,
   danger,
-  pressed,
 }: {
   label: string;
   point: PointLine;
   onClick: () => void;
   disabled?: boolean;
   danger?: boolean;
-  pressed?: boolean;
 }) {
   return (
     <Button
       variant="ghost"
       size="sm"
       disabled={disabled}
-      aria-pressed={pressed}
+      aria-label={`${label}: ${point.text}`}
       onClick={onClick}
       className={cn("h-6 px-1.5 text-xs text-ink-muted hover:text-ink", danger && "hover:bg-red-wash hover:text-red")}
     >
       {label}
-      <span className="sr-only">: {point.text}</span>
     </Button>
   );
 }
@@ -257,7 +254,7 @@ function ItemEditor({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={DEFAULT}>as the point reads</SelectItem>
+              <SelectItem value={DEFAULT}>from the point</SelectItem>
               {kinds.map((k) => (
                 <SelectItem key={k} value={k}>
                   {k}
@@ -274,7 +271,7 @@ function ItemEditor({
         <WhoField
           id={`${id}-who`}
           value={who}
-          placeholder="the name before a colon, else the organiser"
+          placeholder="from the point"
           onChange={setWho}
           onPick={setWho}
           onKeyDown={(event) => {

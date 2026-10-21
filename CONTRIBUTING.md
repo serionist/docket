@@ -70,7 +70,7 @@ npm run build
   and fails on any difference. A conflict in the folder is settled by building again.
 - A change to an `/api/web` route's models runs `uv run devkit web-schema` first, which writes `openapi.json`, the
   types' source.
-- `uv run devkit ui <page>`, `design`, `ledger` or `queue`, shoots that page's states on an invented world, in light and dark,
+- `uv run devkit ui <page>`, `design`, `ledger`, `queue` or `meetings`, shoots that page's states on an invented world, in light and dark,
   wide and narrow, with the accessibility, CSP and console checks, into `.local/ui/<page>/r<n>/`. It starts a
   throwaway service with folders of its own, so it never touches yours.
 - `npm run dev` serves the sources on `localhost:5173`, proxying to the service `DOCKET_DEV_TARGET` names: a throwaway

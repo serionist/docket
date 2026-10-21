@@ -34,7 +34,7 @@ RESPONSE_WORDS = {
     "tentative": "tentative",
     "declined": "declined",
     "none": "not answered yet",
-    "organiser": "yours: you organise it",
+    "organiser": "you organise it",
     "cancelled": "cancelled",
 }
 # The label the sync gives a recording it links to its meeting by time (DR-0651).
@@ -306,8 +306,8 @@ def point_line(p: PointRow) -> PointLine:
 def _rolls(over: bool, archived: bool, open_points: int) -> str:
     if not over or archived or not open_points:
         return ""
-    said = _plural(open_points, "open point rolls", "open points roll")
-    return f"It's over: its {said} on to the next meeting of its series at the next sync."
+    said = _plural(open_points, "open point", "open points")
+    return f"It's over: the next sync moves its {said} to the next meeting of its series, if there is one."
 
 
 def build_meeting_panel(

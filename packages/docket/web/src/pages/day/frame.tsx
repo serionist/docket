@@ -9,6 +9,8 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import { useBlocker, useNavigate, useRouter, useRouterState, useSearch } from "@tanstack/react-router";
 import * as React from "react";
 import { SHELL_KEY } from "@/components/shell/app-sidebar";
+import { NoticeBar, Refusal } from "@/components/shell/page";
+import { useBand } from "@/hooks/use-width";
 import { after, step, standIn } from "@/lib/day";
 import { anyUnsaved, mayLeave, saves, settled } from "@/lib/drafts";
 import type { KeyCommand } from "@/lib/keys";
@@ -338,6 +340,25 @@ export function useDayFrame<L extends FrameList, P extends { canonical: string }
     find: { keys: ["/"], what: "to the search box", run: () => document.getElementById(FIND)?.focus() },
   } satisfies Record<string, KeyCommand>;
 
+  // The notice after a write, with its Undo, and a refusal of a row's call or an undo: at the list's foot, or at the
+  // panel's while an open row takes a phone's screen and hides the list.
+  const covered = useBand() === "narrow" && open !== undefined;
+  const foot = (
+    <>
+      {rowProblem && <Refusal className="mx-3 my-2 sm:mx-4">{rowProblem}</Refusal>}
+      {notice && (
+        <NoticeBar
+          text={notice.text}
+          lines={notice.lines}
+          action={notice.button}
+          onAction={undo}
+          disabled={pending}
+          onDismiss={() => setNotice(null)}
+        />
+      )}
+    </>
+  );
+
   const viewer: ViewerState | null =
     open !== undefined && text !== undefined
       ? {
@@ -379,5 +400,8 @@ export function useDayFrame<L extends FrameList, P extends { canonical: string }
     keys,
     viewer,
     client,
+    /** What goes at the list's foot, and where: `listFoot` under the list, `panelFoot` under a panel covering it. */
+    listFoot: covered ? null : foot,
+    panelFoot: covered ? foot : undefined,
   };
 }

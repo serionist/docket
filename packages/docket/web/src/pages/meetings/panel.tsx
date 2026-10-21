@@ -103,12 +103,15 @@ function Facts({ meeting }: { meeting: MeetingPanel }) {
           <span dir="auto">{meeting.where}</span>
         </Fact>
       )}
-      <Fact term="You">{meeting.response_words}</Fact>
+      <Fact term="Your answer">{meeting.response_words}</Fact>
       {meeting.stream && <Fact term="Stream">{meeting.stream}</Fact>}
       {meeting.recordings.map((r) => (
         <Fact key={r.ref} term="Recording">
           <span className="flex min-w-0 flex-wrap items-center gap-x-2">
-            <a href={r.href} className="text-green underline-offset-4 hover:underline">
+            <a
+              href={r.href}
+              className="tap inline-flex h-6 items-center text-green underline-offset-4 hover:underline"
+            >
               Open the recording
             </a>
             <code className="min-w-0 font-mono text-xs break-all text-ink-muted">{r.ref}</code>
@@ -128,7 +131,7 @@ function ItemLine({ linked, action }: { linked: LinkedRow; action?: React.ReactN
     <li className="grid gap-0.5 border-t border-rule py-2 first:border-t-0">
       <div className="flex min-w-0 items-center gap-2">
         <KindTab kind={row.kind} />
-        <InLink href={linked.href} className="shrink-0 font-mono text-xs">
+        <InLink href={linked.href} className="tap inline-flex h-6 shrink-0 items-center font-mono text-xs">
           {row.ref}
         </InLink>
         <span

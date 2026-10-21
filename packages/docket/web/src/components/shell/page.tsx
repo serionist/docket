@@ -59,7 +59,8 @@ export function Workspace({ list, panel }: { list: React.ReactNode; panel?: Reac
 
 /**
  * The open item's panel. It follows the selection; Esc closes it (the page's keys say so). Beside the list from
- * 1024 px, over it below, the whole screen below 768 with a back button.
+ * 1024 px, over it below, the whole screen below 768 with a back button. Its foot holds what the hidden list would,
+ * such as the notice after a write, while it takes the screen.
  */
 export function Panel({
   label,
@@ -104,7 +105,7 @@ export function Panel({
         )}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
-      {footer && <div className="shrink-0 border-t border-rule px-4 py-2">{footer}</div>}
+      {footer && <div className="shrink-0">{footer}</div>}
     </aside>
   );
 }

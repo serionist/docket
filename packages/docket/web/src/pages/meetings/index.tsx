@@ -6,7 +6,7 @@
  */
 import { KeyboardIcon } from "lucide-react";
 import * as React from "react";
-import { NoticeBar, Page, PageHeader, Panel, Refusal, Workspace } from "@/components/shell/page";
+import { Page, PageHeader, Panel, Refusal, Workspace } from "@/components/shell/page";
 import { useShowKeys, useTitle } from "@/components/shell/shell";
 import { Button } from "@/components/ui/button";
 import { useBand } from "@/hooks/use-width";
@@ -36,7 +36,7 @@ export function MeetingsPage() {
     orderOf,
     panelKey: suggestOf,
   });
-  const { path, search, open, data, selected, setSelected, notice, pending, write, go, hrefOf, openRow } = frame;
+  const { path, search, open, data, selected, setSelected, pending, write, go, hrefOf, openRow } = frame;
   const suggest = one(search, "suggest") === "1";
   const [problem, setProblem] = React.useState<{ ref: string; words: string } | null>(null);
 
@@ -119,17 +119,7 @@ export function MeetingsPage() {
       <p className="sr-only" aria-live="polite">
         {data ? `${data.list.shown} meetings` : ""}
       </p>
-      {frame.rowProblem && <Refusal className="mx-3 my-2 sm:mx-4">{frame.rowProblem}</Refusal>}
-      {notice && (
-        <NoticeBar
-          text={notice.text}
-          lines={notice.lines}
-          action={notice.button}
-          onAction={frame.undo}
-          disabled={pending}
-          onDismiss={() => frame.setNotice(null)}
-        />
-      )}
+      {frame.listFoot}
     </>
   );
 
@@ -138,6 +128,7 @@ export function MeetingsPage() {
       <Panel
         label={meeting ? `${meeting.ref}, ${meeting.subject}` : open}
         onClose={() => void frame.closePanel()}
+        footer={frame.panelFoot}
         header={
           meeting ? (
             <MeetingHead meeting={meeting} />

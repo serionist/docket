@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
 import pytest
 from briefs_kit import brief
-from day_kit import SAME, ZONE, day_vault, signed_in, today
+from day_kit import LONG, RECORDING, SAME, at, day_vault, meeting, meetings_week, signed_in, today
 from docket_testkit import empty_vault, make_config, make_record
 from starlette.testclient import TestClient
 
@@ -28,63 +28,13 @@ from docket.web import day as day_routes
 API = "/api/web/meetings"
 WRITE = "/api/web/ledger/write"
 SAVE = "/api/web/ledger/save"
-RECORDING = "calls:rec-0100"
 BEN = "entities/person/ben-sample.yaml"
-LONG = "Ask the venue whether the long hall can hold forty seats with the stage set up at the far end"
-
-
-def at(days: int, hour: int, minute: int = 0) -> datetime:
-    return datetime.combine(today() + timedelta(days=days), datetime.min.time(), ZONE).replace(hour=hour, minute=minute)
-
-
-def meeting(name: str, subject: str, days: int, hour: int, minutes: int = 30, **fields: Any) -> dict[str, Any]:
-    start = at(days, hour)
-    span = {"subject": subject, "start": start.isoformat(), "end": (start + timedelta(minutes=minutes)).isoformat()}
-    return {"op": "meeting", "as": name, "fields": span | fields}
-
-
-def week() -> list[dict[str, Any]]:
-    """Around day_kit's Pilot sync tomorrow: a stand-up this morning with nothing on it, a budget review under way at
-    noon, yesterday's supplier call with its recording and an open point, a cancelled and a declined one ahead, a retro
-    twenty days back with a point still open, and one forty days back with none, which the window leaves out."""
-    return [
-        meeting("standup", "Morning stand-up", 0, 9, 15),
-        meeting(
-            "budget",
-            "Budget review",
-            0,
-            11,
-            90,
-            organiser="Ben Sample",
-            event="cal:evt-budget",
-            response="tentative",
-            attendees=["Ben Sample", "Ada Example", "ben@northwind.example", "Dora Nobody"],
-            where="Room 2",
-            stream="ops",
-        ),
-        {"op": "point", "item": "$budget", "fields": {"text": "Ben: the spring numbers"}},
-        meeting("supplier", "Supplier call", -1, 15, 60, stream="pilot"),
-        {"op": "point", "item": "$supplier", "fields": {"text": "The offer in writing"}},
-        {"op": "material", "item": "$supplier", "ref": RECORDING, "label": "recording"},
-        {"op": "material", "item": "$supplier", "ref": "notes/plan.md", "label": "The plan"},
-        meeting("off", "Cancelled sync", 2, 9, response="cancelled"),
-        meeting("walk", "Venue walk", 3, 14, response="declined"),
-        meeting("retro", "Spring retro", -20, 10),
-        {"op": "point", "item": "$retro", "fields": {"text": "What the pilot taught us"}},
-        meeting("ancient", "Kick-off", -40, 10),
-        {
-            "op": "add",
-            "as": "long",
-            "force": True,
-            "fields": {"kind": "reply", "title": LONG, "who": "Ben Sample", "stream": "ops", "source": "chat:C0TEST/1"},
-        },
-    ]
 
 
 @pytest.fixture
 def vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Vault:
     found = day_vault(tmp_path)
-    store.write(found, week(), by="claude", via="cli")
+    store.write(found, meetings_week(), by="claude", via="cli")
     monkeypatch.setattr(views, "now", lambda: at(0, 12).astimezone(UTC))
     return found
 
@@ -249,11 +199,39 @@ def test_the_panel_links_its_people_to_their_briefs_and_its_recording(client: Te
     assert [m["kind"] for m in supplier["materials"]] == ["recording", "text"]
     assert supplier["keyless"] and supplier["over"]
     assert (
-        supplier["rolls"] == "It's over: its 1 open point rolls on to the next meeting of its series at the next sync."
+        supplier["rolls"]
+        == "It's over: the next sync moves its 1 open point to the next meeting of its series, if there is one."
     )
     assert supplier["agenda"] == f"Supplier call, {supplier['when']}\n- The offer in writing"
-    # The meeting's own add and its first point take no Undo but by their own line; a renumber or the add never.
+    # A meeting's own add takes no Undo, as an item's never does.
     assert [(h["line"], h["button"]) for h in supplier["history"]][-1] == ("added", None)
+
+
+def test_a_rolled_point_takes_no_button_and_each_end_of_the_roll_links_the_other(
+    client: TestClient, vault: Vault
+) -> None:
+    # Yesterday's call gets its outcome and next week's is added, so the sync's rollover rolls its open point on.
+    changes = [
+        meeting("next", "Supplier call", 6, 15),
+        {"op": "set", "item": "M-0004", "fields": {"outcome": "Agreed"}},
+    ]
+    store.write(vault, changes, by="claude", via="cli")
+    store.write(vault, [{"op": "rollover"}], by="sync", via="tool")
+    found = meetings(client)
+    later = [m["ref"] for d in found["list"]["days"] for m in d["meetings"] if m["subject"] == "Supplier call"]
+    gone, copy = panel(client, "open=M-0004")["points"][0], panel(client, f"open={later[0]}")["points"][0]
+    assert (gone["state"], gone["went_to"], gone["came_from"]) == (
+        "rolled",
+        {"ref": later[0], "href": f"/meetings?open={later[0]}"},
+        None,
+    )
+    assert (copy["state"], copy["came_from"]) == ("open", {"ref": "M-0004", "href": "/meetings?open=M-0004"})
+    # A rolled point changes only by an undo, so the page sends no point_set for it: the writer refuses one.
+    refused = post(
+        client, {"op": "point_set", "items": ["M-0004"], "point": gone["id"], "fields": {"state": "open"}}, status=400
+    )
+    assert "rolled on" in refused["error"]
+    assert panel(client, "open=M-0004")["rolls"] == ""
 
 
 def test_the_panel_lists_its_items_and_once_asked_the_items_worth_raising(client: TestClient) -> None:

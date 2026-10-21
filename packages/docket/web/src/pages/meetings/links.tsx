@@ -17,7 +17,7 @@ export function InLink({ href, className, children }: { href: string; className?
         event.preventDefault();
         void navigate({ href });
       }}
-      className={cn("text-green underline-offset-4 hover:underline", className)}
+      className={cn("text-green underline decoration-green/40 underline-offset-2 hover:decoration-green", className)}
     >
       {children}
     </a>

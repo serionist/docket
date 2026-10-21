@@ -6,7 +6,7 @@
  */
 import { KeyboardIcon, PlusIcon } from "lucide-react";
 import * as React from "react";
-import { NoticeBar, Page, PageHeader, Panel, Refusal, Workspace } from "@/components/shell/page";
+import { Page, PageHeader, Panel, Refusal, Workspace } from "@/components/shell/page";
 import { useShowKeys, useTitle } from "@/components/shell/shell";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
@@ -54,7 +54,7 @@ export function DayPage({ page, title }: { page: ItemPage; title: string }) {
     orderOf,
     ticked: () => tickedCount.current,
   });
-  const { path, search, open, data, selected, setSelected, notice, pending, write, go, hrefOf, openRow } = frame;
+  const { path, search, open, data, selected, setSelected, pending, write, go, hrefOf, openRow } = frame;
   const drop = one(search, "drop") === "1";
 
   const rows = React.useMemo(() => (data ? rowsOf(data) : []), [data]);
@@ -293,17 +293,7 @@ export function DayPage({ page, title }: { page: ItemPage; title: string }) {
       <p className="sr-only" aria-live="polite">
         {data ? `${data.list.shown} of ${data.list.total} items` : ""}
       </p>
-      {frame.rowProblem && <Refusal className="mx-3 my-2 sm:mx-4">{frame.rowProblem}</Refusal>}
-      {notice && (
-        <NoticeBar
-          text={notice.text}
-          lines={notice.lines}
-          action={notice.button}
-          onAction={frame.undo}
-          disabled={pending}
-          onDismiss={() => frame.setNotice(null)}
-        />
-      )}
+      {frame.listFoot}
     </>
   );
 
@@ -312,6 +302,7 @@ export function DayPage({ page, title }: { page: ItemPage; title: string }) {
       <Panel
         label={item ? `${item.ref}, ${item.title}` : `${open}`}
         onClose={() => void frame.closePanel()}
+        footer={frame.panelFoot}
         header={
           item ? (
             <PanelHead item={item} />
