@@ -39,8 +39,8 @@ from docket import recall
 from docket.cli import main
 from docket.errors import DocketError
 from docket.ledger import store as ledger_store
+from docket.vault import docstore, gitfiles, host
 from docket.vault import git as git_module
-from docket.vault import gitfiles, host
 from docket.vault.docstore import DocStore
 from docket.vault.gate import Gate
 from docket.vault.git import Git, config_stamp, git_home, toplevel
@@ -269,6 +269,30 @@ def test_a_merge_in_the_folder_s_history_reads_each_doc_s_log(tmp_path: Path, mo
     ]
     assert batched == per_doc(store)
     assert [n for n, _ in batched[DOCS[1]]] == [2, 1]
+
+
+def test_the_histories_at_one_head_are_asked_once_and_a_new_commit_asks_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Git's log at a HEAD never changes, so the same docs' histories at the same HEAD ask git nothing, as the Briefs
+    page's read asks for them on every open; a commit since asks again and finds its rev, and the keep is bounded."""
+    monkeypatch.setattr(docstore, "_HISTORIES", {})
+    vault = fixture_vault(tmp_path)
+    store = put_all(vault)
+    first = store.histories(DOCS)
+    with git_calls(monkeypatch) as calls:
+        assert store.histories(DOCS) == first
+    assert calls == []
+    recall.doc_put(vault, note(DOCS[1], rev="1", lines=["- Ben put it at 12 million. @12:08"]))
+    with git_calls(monkeypatch) as calls:
+        again = store.histories(DOCS)
+    assert calls and [n for n, _ in again[DOCS[1]]] == [2, 1]
+    assert again == per_doc(store)
+    monkeypatch.setattr(docstore, "HISTORIES_KEPT", 1)
+    store.histories(DOCS[:1])
+    with git_calls(monkeypatch) as calls:
+        assert store.histories(DOCS) == again
+    assert calls, "a keep of one holds the last docs asked for only"
 
 
 # -- a ledger write: one status answers for its op files as the diff against HEAD and the status did (DR-0764) --------

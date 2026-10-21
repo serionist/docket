@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from docket_testkit import git, index_template, make_record
+from docket_testkit import git, git_calls, index_template, make_record
 
 from docket import briefs, recall, render
 from docket.cli import main
@@ -296,6 +296,31 @@ def test_one_brief_s_missing_commit_leaves_the_others_as_they_are(
 
     monkeypatch.setattr(DocStore, "histories", lambda _store, _ids: {})
     assert {b.why for b in briefs.report(vault, stale_only=False).briefs} == {briefs.HISTORY_NOT_HERE}
+
+
+def test_a_commit_s_tree_and_time_are_asked_once_a_process_within_the_keep(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A commit's tree and time never change, so the next report asks git for neither, which keeps the Briefs page's
+    read from one git call a brief; a commit since is asked for, and the keep holds at most TREES_KEPT."""
+    monkeypatch.setattr(briefs, "_TREES", {})
+    monkeypatch.setattr(briefs, "_TIMES", {})
+    put_ben(vault)
+    recall.doc_put(vault, brief("northwind", "Northwind", changed=[f"- Above the budget. {cite(vault, TEN)}"]))
+    before = briefs.report(vault, stale_only=False)
+
+    def asked(calls: list[str]) -> list[str]:
+        return [c.split()[0] for c in calls if c.startswith(("ls-tree", "log --no-walk"))]
+
+    with git_calls(monkeypatch) as calls:
+        assert briefs.report(vault, stale_only=False) == before
+    assert asked(calls) == []
+    monkeypatch.setattr(briefs, "TREES_KEPT", 1)
+    put_ben(vault, rev="1", said=[f"- Cleo sends the offer by Friday. {cite(vault, FRIDAY)}"])
+    with git_calls(monkeypatch) as calls:
+        briefs.report(vault, stale_only=False)
+    # Ben's new rev, its time and its tree; then Northwind's tree again, as a keep of one holds only Ben's.
+    assert asked(calls) == ["log", "ls-tree", "ls-tree"]
 
 
 def test_a_merge_in_the_briefs_history_reads_each_brief_s_own_log(vault: Vault) -> None:
