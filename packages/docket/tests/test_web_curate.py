@@ -1,6 +1,7 @@
-"""The Curate page over HTTP, signed in (DR-0473): a round started only by a post, its cards beside the open one with
-snippets cut when shown, accept, edit, reject, undo and lift through form posts on the writer, each logged via the page;
-a stale round and a changed entity file refused; the Guard on every post; and nothing of a never-store value shown."""
+"""The Curate page's JSON routes, signed in (DR-0468, DR-0464, DR-0786): a round started only by a write, its cards
+beside the open one with snippets cut when shown, accept, edit, reject, undo and lift on the writer, each logged via
+the page; a stale round refused and a changed entity file answered 409; the Guard, the session and the body on every
+write; and nothing of a never-store value shown. The page itself is the app's document."""
 
 from __future__ import annotations
 
@@ -9,11 +10,12 @@ from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 import yaml
 from curate_kit import ANN, NORTHWIND, curate_vault, entity, more_recordings
-from docket_webkit import OURS, a11y_problems, html_problems, parse
+from docket_webkit import OURS, TOKEN
 from staging_kit import signed_in
 from starlette.testclient import TestClient
 
@@ -29,10 +31,12 @@ from docket.vault.curatelog import Change, EntityFields, IdFields, Line, NameFie
 from docket.vault.entitystore import EntityStore, Planned
 from docket.vault.vault import Vault
 from docket.web import curate as curate_routes
-from docket.web import curate_view
-from docket.web.templating import PAGE_CSP
+from docket.web import curate_view, display
 
+API = "/api/web/curate"
+ROUND, DECIDE, UNDO, LIFT = (f"{API}/{verb}" for verb in ("round", "decide", "undo", "lift"))
 SAME = {"Origin": OURS, "Sec-Fetch-Site": "same-origin"}
+HIDDEN = "(on a never-store list)"
 
 
 @pytest.fixture
@@ -46,32 +50,36 @@ def client(vault: Vault) -> Iterator[TestClient]:
         yield found
 
 
-def page(client: TestClient, path: str = "/curate", status: int = 200) -> str:
-    answer = client.get(path)
-    assert answer.status_code == status, answer.text
-    assert answer.headers["Content-Security-Policy"] == PAGE_CSP
-    assert answer.headers["Cache-Control"] == "no-store"
-    assert answer.headers["Referrer-Policy"] == "same-origin"
-    assert not html_problems(answer.text), path
-    assert not a11y_problems(answer.text, whole=not path.startswith("/curate/panel")), path
-    return answer.text
+def read(client: TestClient, query: str = "", status: int = 200) -> dict[str, Any]:
+    got = client.get(f"{API}?{query}" if query else API)
+    assert got.status_code == status, got.text
+    assert got.headers["cache-control"] == "no-store"
+    return got.json()
 
 
-def texts(html: str, cls: str) -> list[str]:
-    return [el.text() for el in parse(html).find_all(class_=cls)]
+def card_read(client: TestClient, query: str, status: int = 200) -> dict[str, Any]:
+    got = client.get(f"{API}/panel?{query}")
+    assert got.status_code == status, got.text
+    return got.json()
 
 
-def said(html: str) -> str:
-    """What the page's notices say, as text."""
-    return " ".join(texts(html, "notice"))
+def panel(client: TestClient, query: str) -> dict[str, Any]:
+    found = card_read(client, query)["panel"]
+    assert found is not None
+    return found
+
+
+def post(client: TestClient, path: str, sent: dict[str, Any], status: int = 200) -> dict[str, Any]:
+    got = client.post(path, json=sent, headers=SAME)
+    assert got.status_code == status, got.text
+    return got.json()
 
 
 def started(client: TestClient, vault: Vault) -> Batch:
-    answer = client.post("/curate/round", headers=SAME)
-    assert answer.status_code == 303, answer.text
+    done = post(client, ROUND, {})
     found = batch.load(vault)
     assert found is not None
-    assert answer.headers["location"] == f"/curate?done=round-{len(found.cards)}"
+    assert done["notice"] == f"A new round: {len(found.cards)} cards."
     return found
 
 
@@ -79,15 +87,14 @@ def card(found: Batch, name: str) -> Card:
     return next(c for c in found.cards if c.name == name)
 
 
-def decide(html: str, act: str) -> dict[str, Any]:
-    """The open card's form for an act, as the browser posts it."""
-    for form in parse(html).find_all("form", action="/curate/decide"):
-        if any(b.attrs.get("value") == act for b in form.find_all("button")):
-            fields: dict[str, Any] = {
-                i.attrs["name"]: i.attrs["value"] for i in form.find_all("input") if i.attrs.get("type") == "hidden"
-            }
-            return fields | {"act": act}
-    raise AssertionError(f"no {act} form")
+def decision(shown: dict[str, Any], act: str, edit: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A decision as the page posts it: the act, and the round, card and hash the card was shown with."""
+    sent = {"act": act, "round": shown["round"], "card": shown["id"], "hash": shown["hash"]}
+    return sent | ({"edit": edit} if edit is not None else {})
+
+
+def edited(**fields: Any) -> dict[str, Any]:
+    return {"keep": [], "kinds": {}, "type": "", "id": "", "names": {}, "role": ""} | fields
 
 
 def log(vault: Vault) -> list[Line]:
@@ -115,54 +122,59 @@ def plant(vault: Vault, at: datetime, by: str, key: str, round_: str | None = No
         vault.commit([line.rel], "a planted line")
 
 
+QUESTIONS = (
+    'schema_version: 1\nasked: "2026-10-14T10:00:00+02:00"\nquestions:\n'
+    '  - q: Nortwin pallets\n    want: ["r:plaud:rec-0000/transaction"]\n    kind: typo\n    lang: en\n'
+)
+
+
 # -- a round -----------------------------------------------------------------------------------------------------------
 
 
 def test_the_page_without_a_round_offers_one_and_writes_nothing(client: TestClient, vault: Vault) -> None:
-    html = page(client)
-    assert texts(html, "lead") == ["No round on this machine yet."]
-    assert "Start a round" in parse(html).find("form", action="/curate/round").text()
-    assert "No round yet: start one" in html
+    page = client.get("/curate")
+    assert page.status_code == 200 and 'id="root"' in page.text
+    view = read(client)["view"]
+    assert (view["lead"], view["round"], view["cards"]) == ("No round on this machine yet.", None, [])
+    assert view["due"] == "No round yet: start one when you have a few minutes."
     assert not batch.batch_path(vault).exists()
     assert log(vault) == []
     assert vault.git.run("status", "--porcelain").stdout == ""
 
 
-def test_a_round_starts_on_the_user_s_click_and_lists_its_cards(client: TestClient, vault: Vault) -> None:
+def test_a_round_starts_on_the_owner_s_click_and_lists_its_cards(client: TestClient, vault: Vault) -> None:
     found = started(client, vault)
-    html = page(client, f"/curate?done=round-{len(found.cards)}")
-    assert texts(html, "lead")[0].endswith(f": {len(found.cards)} cards, 0 decided.")
-    assert f"A new round: {len(found.cards)} cards." in html
-    titles = texts(html, "record-title")
-    assert titles[:2] == ["Northwind", "Dóra"]
-    assert "1. New term" in texts(html, "kind")[0]
-    assert "Left out:" in html and "Start a new round" in html
+    view = read(client)["view"]
+    assert view["lead"].endswith(f": {len(found.cards)} cards, 0 decided.")
+    assert [c["title"] for c in view["cards"]][:2] == ["Northwind", "Dóra"]
+    assert view["cards"][0]["kind"] == "New term" and view["cards"][0]["url"] == f"/curate?open={found.cards[0].id}"
+    assert view["left_out"]
     # Snippets are cut only for the open card: none in the list, and none kept in the batch.
-    assert "pallets" not in html
+    assert "pallets" not in json.dumps(view)
     assert "pallets" not in batch.batch_path(vault).read_text(encoding="utf-8")
 
 
 def test_a_card_opens_beside_the_list_with_its_snippets(client: TestClient, vault: Vault) -> None:
     northwind = card(started(client, vault), "Northwind")
-    html = page(client, f"/curate?open={northwind.id}")
-    panel = parse(html).find("section", class_="card-panel")
-    assert panel.find("h2").text() == "1. New term: Northwind"
-    marks = [m.text() for m in panel.find_all("mark")]
-    assert marks[:1] == ["Nortwin"]
-    links = [a.attrs["href"] for a in panel.find_all("a", class_="locator")]
-    assert links and all(link.startswith("/search?hit=r:plaud:rec-") for link in links)
-    fragment = client.get(f"/curate/panel?open={northwind.id}")
-    assert fragment.status_code == 200 and fragment.headers["HX-Push-Url"] == f"/curate?open={northwind.id}"
-    assert not a11y_problems(fragment.text, whole=False)
-    closed = client.get("/curate/panel", headers={"HX-Current-URL": f"{OURS}/curate"})
-    assert closed.headers["HX-Replace-Url"] == "/curate" and "card-panel" not in closed.text
+    got = card_read(client, f"open={northwind.id}")
+    assert got["canonical"] == f"/curate?open={northwind.id}" and got["missing"] is None
+    shown = got["panel"]
+    assert (shown["n"], shown["kind"], shown["title"], shown["state"]) == (1, "New term", "Northwind", "open")
+    assert [s["mark"] for s in shown["snippets"]][:1] == ["Nortwin"]
+    assert shown["snippets"] and all(s["search"].startswith("/search?hit=r:plaud:rec-") for s in shown["snippets"])
+    assert shown["snippets"][0]["search"] == f"/search?hit={shown['snippets'][0]['locator']}"
+    assert (shown["close"], shown["edit_url"], shown["back"]) == (
+        "/curate",
+        f"/curate?edit={northwind.id}",
+        f"/curate?open={northwind.id}",
+    )
+    assert shown["form"] is None and panel(client, f"edit={northwind.id}")["form"] is not None
 
 
 def test_without_an_index_a_card_opens_without_snippets(client: TestClient, vault: Vault) -> None:
     northwind = card(started(client, vault), "Northwind")
     index_build.db_path(vault).unlink()
-    html = page(client, f"/curate?open={northwind.id}")
-    assert "No snippet to show" in html
+    assert panel(client, f"open={northwind.id}")["snippets"] == []
 
 
 # -- decisions ---------------------------------------------------------------------------------------------------------
@@ -171,64 +183,62 @@ def test_without_an_index_a_card_opens_without_snippets(client: TestClient, vaul
 def test_accept_writes_the_entity_and_logs_it_via_the_page(client: TestClient, vault: Vault) -> None:
     found = started(client, vault)
     northwind = card(found, "Northwind")
-    fields = decide(page(client, f"/curate?open={northwind.id}"), "accept")
-    assert fields["round"] == found.round and fields["card"] == northwind.id and fields["hash"] == "none"
-    answer = client.post("/curate/decide", data=fields, headers=SAME)
-    assert answer.status_code == 303 and answer.headers["location"] == f"/curate?done=accepted-{northwind.id}"
+    shown = panel(client, f"open={northwind.id}")
+    assert (shown["round"], shown["hash"]) == (found.round, "none")
+    done = post(client, DECIDE, decision(shown, "accept"))
+    assert done["notice"] == f"Card {northwind.id} accepted and logged; the log below undoes it."
     assert (vault.root / "entities/term/northwind.yaml").is_file()
     [line] = log(vault)
     assert (line.op, line.via, line.round, line.card) == ("create", "page", found.round, northwind.id)
-    html = page(client, f"/curate?open={northwind.id}&done=accepted-{northwind.id}")
-    assert "Decided: accepted." in html and f"Card {northwind.id} accepted" in html
-    assert texts(html, "lead")[0].endswith("1 decided.")
-    again = client.post("/curate/decide", data=fields, headers=SAME)
-    assert again.status_code == 409 and "changed since the page showed the card" in said(again.text)
+    assert panel(client, f"open={northwind.id}")["state"] == "accepted"
+    assert read(client)["view"]["lead"].endswith("1 decided.")
+    again = post(client, DECIDE, decision(shown, "accept"), status=409)
+    assert again["error"] == curate_routes.CHANGED
 
 
 def test_reject_stoplists_and_lift_takes_it_off(client: TestClient, vault: Vault) -> None:
     northwind = card(started(client, vault), "Northwind")
-    fields = decide(page(client, f"/curate?open={northwind.id}"), "reject")
-    assert (
-        client.post("/curate/decide", data=fields, headers=SAME)
-        .headers["location"]
-        .endswith(f"done=rejected-{northwind.id}")
-    )
-    html = page(client)
-    stopped = texts(html, "stop-line")
-    assert [s.split(" Lift")[0] for s in stopped] == ["new:-:northwind", "new:-:nortwin"]
-    lift = parse(html).find_all("form", action="/curate/lift")[0].find("input").attrs["value"]
-    assert "northwind" not in lift
-    assert client.post("/curate/lift", data={"key": lift}, headers=SAME).headers["location"] == "/curate?done=lifted-1"
+    done = post(client, DECIDE, decision(panel(client, f"open={northwind.id}"), "reject"))
+    assert done["notice"].startswith(f"Card {northwind.id} rejected")
+    lifts = read(client)["lifts"]
+    assert [lift["shown"] for lift in lifts] == ["new:-:northwind", "new:-:nortwin"]
+    assert all(lift["liftable"] and "northwind" not in lift["id"] for lift in lifts)
+    assert post(client, LIFT, {"key": lifts[0]["id"]})["notice"] == "Lifted: curation may offer that spelling again."
     assert [ln.op for ln in log(vault)][-1] == "lift" and log(vault)[-1].via == "page"
-    gone = client.post("/curate/lift", data={"key": lift}, headers=SAME)
-    assert gone.status_code == 400 and "isn't on the stoplist any more" in said(gone.text)
+    gone = post(client, LIFT, {"key": lifts[0]["id"]}, status=400)
+    assert "isn't on the stoplist any more" in gone["error"]
 
 
 def test_edit_accepts_the_card_as_typed_and_rejects_what_was_left_out(client: TestClient, vault: Vault) -> None:
     cleo = card(started(client, vault), "Cleo Test")
-    html = page(client, f"/curate?edit={cleo.id}")
-    form = parse(html).find("form", class_="edit-form")
-    assert form.find("input", name="id").attrs["value"] == "cleo-test"
-    assert [i.attrs["value"] for i in form.find_all("input", name="keep") if "checked" in i.attrs] == ["0", "1"]
-    fields = decide(html, "edit") | {"type": "person", "id": "cleo-test", "name.en": "Cleo Test"}
-    fields |= {"name.hu": "Test Cleo", "keep": ["0"], "kind.0": "plain", "role": "rights agent"}
-    answer = client.post("/curate/decide", data=fields, headers=SAME)
-    assert answer.status_code == 303 and answer.headers["location"].endswith(f"done=edited-{cleo.id}")
+    shown = panel(client, f"edit={cleo.id}")
+    form = shown["form"]
+    assert form["id"] == "cleo-test" and [s["i"] for s in form["spellings"] if s["checked"]] == [0, 1]
+    assert {n["code"]: n["value"] for n in form["names"]} == {"en": "Cleo Test", "hu": ""}
+    typed = edited(
+        type="person",
+        id="cleo-test",
+        names={"en": "Cleo Test", "hu": "Test Cleo"},
+        keep=[0],
+        kinds={"0": "plain"},
+        role="rights agent",
+    )
+    done = post(client, DECIDE, decision(shown, "edit", typed))
+    assert done["notice"].startswith(f"Card {cleo.id} accepted as you edited it")
     text = (vault.root / "entities/person/cleo-test.yaml").read_text(encoding="utf-8")
     assert "hu: Test Cleo" in text and "{text: Cleo}" in text and "rights agent" in text
     assert [(ln.op, ln.key, ln.via) for ln in log(vault)] == [("create", "new:-:cleo test", "page")]
 
 
-def test_an_edit_that_makes_no_entity_shows_the_form_again_as_typed(client: TestClient, vault: Vault) -> None:
+def test_an_edit_that_makes_no_entity_is_refused_in_its_words(client: TestClient, vault: Vault) -> None:
     cleo = card(started(client, vault), "Cleo Test")
-    fields = decide(page(client, f"/curate?edit={cleo.id}"), "edit")
-    bad = client.post(
-        "/curate/decide", data=fields | {"type": "person", "id": "Not An Id", "name.en": "Cleo"}, headers=SAME
-    )
-    assert bad.status_code == 400 and "id:" in said(bad.text)
-    assert parse(bad.text).find("input", name="id").attrs["value"] == "Not An Id"
-    kind = client.post("/curate/decide", data=fields | {"keep": ["0"], "kind.0": "loud"}, headers=SAME)
-    assert kind.status_code == 400 and "a spelling is plain or asr" in said(kind.text)
+    shown = panel(client, f"edit={cleo.id}")
+    bad = post(client, DECIDE, decision(shown, "edit", edited(type="person", id="Not An Id")), status=400)
+    assert bad["error"].startswith("id:")
+    kind = post(client, DECIDE, decision(shown, "edit", edited(keep=[0], kinds={"0": "loud"})), status=400)
+    assert "a spelling is plain or asr" in kind["error"]
+    bare = post(client, DECIDE, decision(shown, "edit"), status=400)
+    assert bare["error"] == "an edit carries the card as edited"
     assert log(vault) == []
 
 
@@ -236,53 +246,50 @@ def test_an_alias_card_is_accepted_edited_or_rejected_as_aliases(client: TestCli
     entity(vault, NORTHWIND, "id: northwind\ntype: customer\nname: {en: Northwind}\n")
     found = started(client, vault)
     alias = next(c for c in found.cards if c.kind == "alias")
-    html = page(client, f"/curate?edit={alias.id}")
-    assert "Alias for Northwind: Nortwin" in parse(html).find("h2", id="panel-title").text()
-    fields = decide(html, "edit")
-    assert fields["hash"] != "none"
-    kept = client.post("/curate/decide", data=fields | {"keep": ["0"], "kind.0": "asr"}, headers=SAME)
-    assert kept.status_code == 303
+    shown = panel(client, f"edit={alias.id}")
+    assert (shown["kind"], shown["title"]) == ("Alias for Northwind", "Nortwin")
+    assert shown["hash"] != "none" and not shown["form"]["new"]
+    post(client, DECIDE, decision(shown, "edit", edited(keep=[0], kinds={"0": "asr"})))
     assert [(ln.op, ln.key) for ln in log(vault)] == [("add", "alias:northwind:nortwin")]
-    undo = parse(page(client)).find("form", action="/curate/undo").find("input").attrs["value"]
-    assert client.post("/curate/undo", data={"op": undo}, headers=SAME).headers["location"] == "/curate?done=undone-1"
-    # The undo in the open round reopened the card: nothing ticked rejects it.
-    fields = decide(page(client, f"/curate?edit={alias.id}"), "edit")
-    assert client.post("/curate/decide", data=fields, headers=SAME).status_code == 303
+    undo = next(line for line in read(client)["view"]["log"] if line["undo"])
+    assert post(client, UNDO, {"op": undo["id"]})["notice"] == "Undone: 1 change taken back and logged."
+    # The undo in the open round reopened the card: nothing kept rejects it.
+    post(client, DECIDE, decision(panel(client, f"edit={alias.id}"), "edit", edited()))
     assert [ln.op for ln in log(vault)] == ["add", "undo", "reject"]
 
 
-def test_a_stale_round_or_a_changed_file_writes_nothing(client: TestClient, vault: Vault) -> None:
+def test_a_stale_round_writes_nothing_and_a_changed_file_answers_409(client: TestClient, vault: Vault) -> None:
     entity(vault, NORTHWIND, "id: northwind\ntype: customer\nname: {en: Northwind}\n")
     found = started(client, vault)
     alias = next(c for c in found.cards if c.kind == "alias")
-    fields = decide(page(client, f"/curate?open={alias.id}"), "accept")
-    stale = client.post("/curate/decide", data=fields | {"round": "2020-01-01T000000-other"}, headers=SAME)
-    assert stale.status_code == 400 and "isn't this machine's current one" in said(stale.text)
-    nowhere = client.post("/curate/decide", data=fields | {"card": "abcdef"}, headers=SAME)
-    assert nowhere.status_code == 400 and "no card abcdef" in said(nowhere.text)
+    sent = decision(panel(client, f"open={alias.id}"), "accept")
+    stale = post(client, DECIDE, sent | {"round": "2020-01-01T000000-other"}, status=400)
+    assert "isn't this machine's current one" in stale["error"]
+    nowhere = post(client, DECIDE, sent | {"card": "abcdef"}, status=400)
+    assert "no card abcdef" in nowhere["error"]
     entity(vault, NORTHWIND, "id: northwind\ntype: customer\nname: {en: Northwind, hu: Northwind}\n")
-    changed = client.post("/curate/decide", data=fields, headers=SAME)
-    assert changed.status_code == 409 and "Here it is as it stands now" in said(changed.text)
-    assert parse(changed.text).find("section", class_="card-panel")
+    changed = post(client, DECIDE, sent, status=409)
+    assert changed["error"].endswith("Here it is as it stands now.")
+    assert panel(client, f"open={alias.id}")["hash"] != sent["hash"]
     assert log(vault) == []
 
 
-def test_a_decision_without_a_round_or_a_form_the_page_made_is_refused(client: TestClient, vault: Vault) -> None:
-    fields = {"act": "accept", "round": "r", "card": "abcdef", "hash": "none"}
-    none = client.post("/curate/decide", data=fields, headers=SAME)
-    assert none.status_code == 400 and "no round on this machine" in said(none.text)
+def test_a_decision_without_a_round_or_one_the_page_didn_t_make_is_refused(client: TestClient, vault: Vault) -> None:
+    sent = {"act": "accept", "round": "r", "card": "abcdef", "hash": "none"}
+    assert "no round on this machine" in post(client, DECIDE, sent, status=400)["error"]
     for broken, says in (
         ({"act": "approve"}, "act is accept, reject or edit"),
-        ({"round": ""}, "the form names no round"),
+        ({"round": ""}, "the decision names no round"),
         ({"card": "1"}, "card is a card's id"),
-        ({"hash": ""}, "the form names no entity file's hash"),
+        ({"hash": ""}, "the decision names no entity file's hash"),
     ):
-        answer = client.post("/curate/decide", data=fields | broken, headers=SAME)
-        assert answer.status_code == 400 and says in said(answer.text), broken
-    bad_op = client.post("/curate/undo", data={"op": "x; rm"}, headers=SAME)
-    assert bad_op.status_code == 400 and "op is a logged op's id" in said(bad_op.text)
-    unknown = client.post("/curate/undo", data={"op": "20261016T090000-test-box-1"}, headers=SAME)
-    assert unknown.status_code == 400 and "no op in the log has that id" in said(unknown.text)
+        assert says in post(client, DECIDE, sent | broken, status=400)["error"], broken
+    for extra in ({"via": "cli"}, {"edit": {"keep": [0], "by": "claude"}}):
+        assert client.post(DECIDE, json=sent | extra, headers=SAME).status_code == 422, extra
+    assert client.post(ROUND, json={"cards": 3}, headers=SAME).status_code == 422
+    assert "op is a logged op's id" in post(client, UNDO, {"op": "x; rm"}, status=400)["error"]
+    unknown = post(client, UNDO, {"op": "20261016T090000-test-box-1"}, status=400)
+    assert "no op in the log has that id" in unknown["error"]
     assert log(vault) == []
 
 
@@ -290,32 +297,23 @@ def test_after_the_last_card_the_question_set_is_measured_again(
     client: TestClient, vault: Vault, tmp_path: Path
 ) -> None:
     questions = tmp_path / "questions.yaml"
-    questions.write_text(
-        'schema_version: 1\nasked: "2026-10-14T10:00:00+02:00"\nquestions:\n'
-        '  - q: Nortwin pallets\n    want: ["r:plaud:rec-0000/transaction"]\n    kind: typo\n    lang: en\n',
-        encoding="utf-8",
-    )
+    questions.write_text(QUESTIONS, encoding="utf-8")
     userconfig.set_section("curate", {"questions": str(questions)})
     found = started(client, vault)
     assert found.before is not None
     for c in found.cards:
-        fields = decide(page(client, f"/curate?open={c.id}"), "reject")
-        assert client.post("/curate/decide", data=fields, headers=SAME).status_code == 303
+        post(client, DECIDE, decision(panel(client, f"open={c.id}"), "reject"))
     measured = batch.load(vault)
     assert measured is not None and measured.after is not None
-    rows = [tr.text() for tr in parse(page(client)).find("table", class_="measures").find_all("tr")]
-    assert rows[0] == "Kind Before After" and rows[1].startswith("all ")
+    rows = read(client)["view"]["measures"]["rows"]
+    assert rows[0]["kind"] == "all" and rows[0]["after"]
 
 
 def test_the_measure_after_waits_out_an_index_being_built(
     client: TestClient, vault: Vault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     questions = tmp_path / "questions.yaml"
-    questions.write_text(
-        'schema_version: 1\nasked: "2026-10-14T10:00:00+02:00"\nquestions:\n'
-        '  - q: Nortwin pallets\n    want: ["r:plaud:rec-0000/transaction"]\n    kind: typo\n    lang: en\n',
-        encoding="utf-8",
-    )
+    questions.write_text(QUESTIONS, encoding="utf-8")
     userconfig.set_section("curate", {"questions": str(questions)})
     found = started(client, vault)
 
@@ -324,13 +322,11 @@ def test_the_measure_after_waits_out_an_index_being_built(
 
     monkeypatch.setattr(IndexUpdater, "fresh", building)
     for c in found.cards:
-        fields = decide(page(client, f"/curate?open={c.id}"), "reject")
-        assert client.post("/curate/decide", data=fields, headers=SAME).status_code == 303
+        post(client, DECIDE, decision(panel(client, f"open={c.id}"), "reject"))
     after = batch.load(vault)
     assert after is not None and after.after is None
-    assert "after the last card" in page(client)
-    refused = client.post("/curate/round", headers=SAME)
-    assert refused.status_code == 400 and "the index is being built" in said(refused.text)
+    assert read(client)["view"]["measures"]["rows"][0]["after"] == ""
+    assert "the index is being built" in post(client, ROUND, {}, status=400)["error"]
 
 
 # -- what the page shows -----------------------------------------------------------------------------------------------
@@ -347,43 +343,41 @@ def test_the_log_shows_each_kind_of_change_with_undo(client: TestClient, vault: 
     ])  # fmt: skip
     created = log(vault)[0]
     store.undo([log(vault)[-1].id])
-    html = page(client)
-    lines = texts(html, "log-line")
-    assert any("related org northwind" in ln and f"undone by {log(vault)[-1].id}" in ln for ln in lines)
-    assert any("undoes " in ln for ln in lines)
-    assert any("id email ada@example.com" in ln for ln in lines)
-    assert any("name hu Example Ada" in ln for ln in lines)
-    assert any("person, Ada Example" in ln and "Undo" in ln for ln in lines)
-    assert created.id in html
-    assert texts(html, "minutes") == ["no review time logged yet"]
+    got = read(client)
+    lines = {line["part"]: line for line in got["view"]["log"]}
+    assert lines["related org northwind"]["undone_by"] == log(vault)[-1].id
+    assert any(part.startswith("undoes ") for part in lines)
+    assert "id email ada@example.com" in lines and "name hu Example Ada" in lines
+    assert lines["person, Ada Example"]["undo"] and lines["person, Ada Example"]["id"] == created.id
+    assert lines["person, Ada Example"]["at"] == display.at(created.at, ZoneInfo("Europe/Budapest"))
+    assert got["view"]["minutes"] == "no review time logged yet"
 
 
 def test_what_tier1_applied_shows_since_the_round_started(client: TestClient, vault: Vault) -> None:
     found = started(client, vault)
     plant(vault, found.started + timedelta(seconds=30), "tier1", "new:-:salt road")
-    html = page(client)
-    assert "1 change applied by themselves since" in texts(html, "lead")[0]
-    assert "new:-:salt road" in html
+    view = read(client)["view"]
+    assert "1 change applied by themselves since" in view["lead"]
+    assert [line["part"] for line in view["applied"]] == ["new:-:salt road"]
 
 
 def test_never_store_values_never_show(client: TestClient, vault: Vault) -> None:
     northwind = card(started(client, vault), "Northwind")
-    fields = decide(page(client, f"/curate?open={northwind.id}"), "reject")
-    assert client.post("/curate/decide", data=fields, headers=SAME).status_code == 303
+    post(client, DECIDE, decision(panel(client, f"open={northwind.id}"), "reject"))
     never_store(vault, keywords=["Nortwin"])
-    html = page(client, f"/curate?open={northwind.id}")
-    assert "Nortwin" not in html and "nortwin" not in html
-    assert "new:-:northwind" in html and "(on a never-store list)" in html
+    got = read(client)
+    shown = json.dumps(got) + json.dumps(card_read(client, f"open={northwind.id}"))
+    assert "Nortwin" not in shown and "nortwin" not in shown
+    assert "new:-:northwind" in shown and HIDDEN in shown
     # No Lift and no Undo on the hidden key: their lines would commit it again, and the store refuses both.
-    rows = parse(html).find_all("li", class_="stop-line")
-    assert [len(r.find_all("form")) for r in rows] == [1, 0]
+    assert [lift["liftable"] for lift in got["lifts"]] == [True, False]
     reject = next(ln for ln in log(vault) if ln.key == "new:-:nortwin")
-    assert reject.id not in [i.attrs["value"] for i in parse(html).find_all("input", name="op")]
-    lift = client.post("/curate/lift", data={"key": curate_routes.key_id("new:-:nortwin")}, headers=SAME)
-    assert lift.status_code == 400 and "it stays on the stoplist" in said(lift.text)
-    undo = client.post("/curate/undo", data={"op": reject.id}, headers=SAME)
-    assert undo.status_code == 400 and "edit the entity file by hand" in said(undo.text)
-    assert "nortwin" not in said(lift.text).lower() + said(undo.text).lower()
+    assert not next(line for line in got["view"]["log"] if line["id"] == reject.id)["undo"]
+    lift = post(client, LIFT, {"key": curate_routes.key_id("new:-:nortwin")}, status=400)
+    assert "it stays on the stoplist" in lift["error"]
+    undo = post(client, UNDO, {"op": reject.id}, status=400)
+    assert "edit the entity file by hand" in undo["error"]
+    assert "nortwin" not in (lift["error"] + undo["error"]).lower()
     assert [ln.op for ln in log(vault)] == ["reject", "reject"]
 
 
@@ -393,81 +387,66 @@ def test_a_spelling_listed_after_the_round_never_shows_on_its_card(
 ) -> None:
     northwind = card(started(client, vault), "Northwind")
     never_store(vault, **lists)
-    for path in (f"/curate?open={northwind.id}", f"/curate?edit={northwind.id}", f"/curate/panel?edit={northwind.id}"):
-        html = page(client, path)
-        assert "nortwin" not in html.lower(), path
-        assert "(on a never-store list)" in html, path
-    # Its snippets all name it, so none is cut; the form still posts the hidden spelling by its place.
-    assert parse(page(client, f"/curate?open={northwind.id}")).find_all("figure", class_="snippet") == []
-    form = parse(page(client, f"/curate?edit={northwind.id}")).find("form", class_="edit-form")
-    assert [i.attrs["value"] for i in form.find_all("input", name="keep")] == ["0"]
+    for query in (f"open={northwind.id}", f"edit={northwind.id}"):
+        shown = json.dumps(card_read(client, query))
+        assert "nortwin" not in shown.lower() and HIDDEN in shown, query
+    # Its snippets all name it, so none is cut; the form still names the hidden spelling by its place.
+    assert panel(client, f"open={northwind.id}")["snippets"] == []
+    assert [s["i"] for s in panel(client, f"edit={northwind.id}")["form"]["spellings"]] == [0]
 
 
 def test_a_name_listed_after_the_round_never_shows_on_its_card_or_form(client: TestClient, vault: Vault) -> None:
     cleo = card(started(client, vault), "Cleo Test")
     never_store(vault, people=["Cleo Test"])
-    for path in (f"/curate?open={cleo.id}", f"/curate?edit={cleo.id}"):
-        html = page(client, path)
-        panel = parse(html).find("section", class_="card-panel")
-        assert "Cleo Test" not in panel.text() and "Test Cleo" not in panel.text() and "cleo-test" not in html, path
-        assert panel.find("h2").text() == "4. New person: (on a never-store list)"
-    form = parse(page(client, f"/curate?edit={cleo.id}")).find("form", class_="edit-form")
-    assert form.find("input", name="id").attrs["value"] == "(on a never-store list)"
-    assert form.find("input", name="name.en").attrs["value"] == "(on a never-store list)"
+    for query in (f"open={cleo.id}", f"edit={cleo.id}"):
+        shown = panel(client, query)
+        said = json.dumps(shown)
+        assert "Cleo Test" not in said and "Test Cleo" not in said and "cleo-test" not in said, query
+        assert (shown["n"], shown["kind"], shown["title"]) == (4, "New person", HIDDEN)
+    form = panel(client, f"edit={cleo.id}")["form"]
+    assert form["id"] == HIDDEN and {n["code"]: n["value"] for n in form["names"]}["en"] == HIDDEN
 
 
 def test_the_forms_matching_leaves_out_are_listed(client: TestClient, vault: Vault) -> None:
     entity(vault, ANN, "id: ann-sample\ntype: person\nname: {en: Ann Sample}\naliases:\n  - {text: Ann}\n")
-    html = page(client)
-    assert any(d.startswith("ann-sample: an is under three letters") for d in texts(html, "dropped"))
+    assert any(d.startswith("ann-sample: an is under three letters") for d in read(client)["view"]["dropped"])
 
 
 EVIL = "\"><img src=x onerror=alert(1)> 'onmouseover=alert(2) x=' <script>alert(3)</script>"
 
 
-def test_names_spellings_and_snippets_render_as_text(client: TestClient, vault: Vault) -> None:
+def test_names_spellings_and_snippets_come_as_text_and_write_as_typed(client: TestClient, vault: Vault) -> None:
     more_recordings(vault, [f"Speaker said {EVIL} and met Nortwin today", "Nortwin again, with no markup."])
     found = started(client, vault)
     first = found.cards[0]
     spellings = [s.model_copy(update={"text": EVIL}) if s.add != "name" else s for s in first.spellings]
     planted = first.model_copy(update={"name": EVIL, "spellings": spellings})
     batch.save(vault, found.model_copy(update={"cards": [planted, *found.cards[1:]]}))
-    for path in (f"/curate?open={planted.id}", f"/curate?edit={planted.id}", f"/curate/panel?edit={planted.id}"):
-        html = client.get(path).text
-        tree = parse(html)
-        assert EVIL not in html, path
-        assert tree.find_all("img") == [], path
-        assert not [k for el in tree.walk() for k in el.attrs if k.lower().startswith("on")], path
-    fields = decide(page(client, f"/curate?edit={planted.id}"), "edit") | {"type": "term", "id": "evil-one"}
-    answer = client.post("/curate/decide", data=fields | {"name.en": EVIL, "role": EVIL}, headers=SAME)
-    assert answer.status_code == 303
-    html = page(client)
-    assert EVIL not in html and parse(html).find_all("img") == []
+    shown = panel(client, f"edit={planted.id}")
+    assert shown["title"] == EVIL and EVIL in [s["text"] for s in shown["spellings"]]
+    typed = edited(type="term", id="evil-one", names={"en": EVIL}, role=EVIL)
+    post(client, DECIDE, decision(shown, "edit", typed))
+    written = yaml.safe_load((vault.root / "entities/term/evil-one.yaml").read_text(encoding="utf-8"))
+    assert (written["name"]["en"], written["role"]) == (EVIL, EVIL)
 
 
 def test_a_card_decided_twice_or_from_a_second_tab_is_refused(client: TestClient, vault: Vault) -> None:
     northwind = card(started(client, vault), "Northwind")
-    reject = decide(page(client, f"/curate?open={northwind.id}"), "reject")
-    accept = decide(page(client, f"/curate?open={northwind.id}"), "accept")
-    assert client.post("/curate/decide", data=reject, headers=SAME).status_code == 303
-    again = client.post("/curate/decide", data=reject, headers=SAME)
-    assert again.status_code == 400 and f"card {northwind.id} is rejected already" in said(again.text)
-    other = client.post("/curate/decide", data=accept, headers=SAME)
-    assert other.status_code == 400 and "rejected already" in said(other.text)
+    shown = panel(client, f"open={northwind.id}")
+    post(client, DECIDE, decision(shown, "reject"))
+    again = post(client, DECIDE, decision(shown, "reject"), status=400)
+    assert f"card {northwind.id} is rejected already" in again["error"]
+    other = post(client, DECIDE, decision(shown, "accept"), status=400)
+    assert "rejected already" in other["error"]
     assert [ln.key for ln in log(vault)] == ["new:-:northwind", "new:-:nortwin"]
 
 
-def test_an_edit_the_store_refuses_keeps_what_was_typed(client: TestClient, vault: Vault) -> None:
+def test_an_edit_the_store_refuses_says_why_in_the_page_s_words(client: TestClient, vault: Vault) -> None:
     entity(vault, NORTHWIND, "id: northwind\ntype: customer\nname: {en: Northwind}\n")
     cleo = card(started(client, vault), "Cleo Test")
-    fields = decide(page(client, f"/curate?edit={cleo.id}"), "edit")
-    typed = fields | {"type": "person", "id": "northwind", "name.en": "Cleo Test", "role": "rights agent typed"}
-    answer = client.post("/curate/decide", data=typed | {"name.hu": "Test Cleo", "keep": ["0"]}, headers=SAME)
-    assert answer.status_code == 400
-    assert said(answer.text) == "an entity has that id already"
-    form = parse(answer.text).find("form", class_="edit-form")
-    assert form.find("input", name="role").attrs["value"] == "rights agent typed"
-    assert form.find("input", name="name.hu").attrs["value"] == "Test Cleo"
+    typed = edited(type="person", id="northwind", names={"en": "Cleo Test"}, role="rights agent typed", keep=[0])
+    refused = post(client, DECIDE, decision(panel(client, f"edit={cleo.id}"), "edit", typed), status=400)
+    assert refused["error"] == "an entity has that id already"
     assert log(vault) == []
 
 
@@ -475,17 +454,12 @@ def test_a_question_file_broken_after_the_round_never_fails_a_decision(
     client: TestClient, vault: Vault, tmp_path: Path
 ) -> None:
     questions = tmp_path / "questions.yaml"
-    questions.write_text(
-        'schema_version: 1\nasked: "2026-10-14T10:00:00+02:00"\nquestions:\n'
-        '  - q: Nortwin pallets\n    want: ["r:plaud:rec-0000/transaction"]\n    kind: typo\n    lang: en\n',
-        encoding="utf-8",
-    )
+    questions.write_text(QUESTIONS, encoding="utf-8")
     userconfig.set_section("curate", {"questions": str(questions)})
     found = started(client, vault)
     questions.write_text("schema_version: 1\nquestions: [oops\n", encoding="utf-8")
     for c in found.cards:
-        fields = decide(page(client, f"/curate?open={c.id}"), "reject")
-        assert client.post("/curate/decide", data=fields, headers=SAME).status_code == 303
+        post(client, DECIDE, decision(panel(client, f"open={c.id}"), "reject"))
     after = batch.load(vault)
     assert after is not None and after.after is None
 
@@ -493,87 +467,101 @@ def test_a_question_file_broken_after_the_round_never_fails_a_decision(
 def test_a_line_a_stopped_write_left_is_marked_not_finished(client: TestClient, vault: Vault) -> None:
     found = started(client, vault)
     plant(vault, found.started + timedelta(seconds=30), "tier1", "new:-:salt road", committed=False)
-    html = page(client)
-    marked = [ln for ln in texts(html, "log-line") if "not finished: the next write commits it" in ln]
-    assert len(marked) == 2 and all("new:-:salt road" in ln for ln in marked)
+    view = read(client)["view"]
+    marked = [line for line in view["applied"] + view["log"] if line["unfinished"]]
+    assert len(marked) == 2 and all(line["part"] == "new:-:salt road" for line in marked)
 
 
 @pytest.mark.parametrize(
-    ("path", "says"),
+    ("query", "says"),
     [
-        ("/curate?open=nope", "open is a card's id"),
-        ("/curate?edit=xyz", "edit is a card's id"),
-        ("/curate?open=abcdef&edit=123456", "edit names the open card"),
-        ("/curate?done=bogus", "done is what the last change did"),
+        ("open=nope", "open is a card's id"),
+        ("edit=xyz", "edit is a card's id"),
+        ("open=abcdef&edit=123456", "edit names the open card"),
+        ("done=bogus", "done is what the last change did"),
     ],
 )
-def test_a_url_the_page_can_t_read_says_which_part(client: TestClient, path: str, says: str) -> None:
-    assert says in said(page(client, path, status=400))
+def test_a_url_the_page_can_t_read_says_which_part(client: TestClient, query: str, says: str) -> None:
+    assert says in card_read(client, query, status=400)["error"]
 
 
-def test_a_card_from_an_older_round_and_a_panel_error(client: TestClient, vault: Vault) -> None:
+def test_the_url_reads_one_canonical_form_and_says_a_change_once(client: TestClient, vault: Vault) -> None:
     started(client, vault)
-    assert "Not in this round" in page(client, "/curate?open=abcdef")
-    bad = client.get("/curate/panel?open=nope")
-    assert bad.status_code == 400 and "open is a card" in said(bad.text)
+    done = read(client, "done=lifted-1")
+    assert (done["canonical"], done["notice"]) == ("/curate", "Lifted: curation may offer that spelling again.")
+    assert card_read(client, "edit=abcdef&open=abcdef")["canonical"] == "/curate?edit=abcdef"
 
 
-def test_a_failure_answers_the_error_page(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_card_from_an_older_round_says_so(client: TestClient, vault: Vault) -> None:
+    started(client, vault)
+    got = card_read(client, "open=abcdef")
+    assert got["panel"] is None and got["missing"] == "This round has no such card: the link is from an older round."
+
+
+def test_a_failure_answers_500_with_no_words_and_a_refusal_400_with_its_own(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     def broken(vault: Vault, state: curate_view.CurateState) -> None:
         raise RuntimeError("Kovács Ödön said the price")
 
     monkeypatch.setattr(curate_view, "gather", broken)
-    assert client.get("/curate").status_code == 500
-    panel = client.get("/curate/panel")
-    assert panel.status_code == 500 and "Something failed in Docket" in said(panel.text) and "Kov" not in panel.text
+    for path in (API, f"{API}/panel"):
+        got = client.get(path)
+        assert got.status_code == 500 and "Something failed in Docket" in got.json()["error"]
+        assert "Kov" not in got.text
 
     def refused(vault: Vault, state: curate_view.CurateState) -> None:
         raise DocketError("another docket process holds the vault")
 
     monkeypatch.setattr(curate_view, "gather", refused)
-    answer = client.get("/curate")
-    assert answer.status_code == 400 and "another docket process holds the vault" in said(answer.text)
+    assert read(client, status=400)["error"] == "another docket process holds the vault"
 
 
-# -- the Guard on every post -------------------------------------------------------------------------------------------
+# -- the Guard, the session and the body on every write ---------------------------------------------------------------
+
+WRITES = {ROUND: {}, DECIDE: {"act": "accept", "round": "r", "card": "abcdef", "hash": "none"}, UNDO: {"op": "x"}}
 
 
 @pytest.mark.parametrize(
-    ("headers", "status"),
+    "headers",
     [
-        ({"Origin": "http://evil.example"}, 403),
-        ({"Origin": "null", "Sec-Fetch-Site": "same-origin"}, 403),
-        ({"Sec-Fetch-Site": "cross-site"}, 403),
-        ({}, 403),
+        {"Origin": "http://evil.example"},
+        {"Origin": "null", "Sec-Fetch-Site": "same-origin"},
+        {"Sec-Fetch-Site": "cross-site"},
+        {},
+        SAME | {"Authorization": f"Bearer {TOKEN}"},
     ],
 )
-def test_every_post_passes_the_guard(client: TestClient, vault: Vault, headers: dict[str, str], status: int) -> None:
-    for route in ("/curate/round", "/curate/decide", "/curate/undo", "/curate/lift"):
-        assert client.post(route, data={}, headers=headers).status_code == status, route
+def test_every_write_passes_the_guard_and_takes_the_session_only(
+    client: TestClient, vault: Vault, headers: dict[str, str]
+) -> None:
+    for path, sent in (WRITES | {LIFT: {"key": "x"}}).items():
+        assert client.post(path, json=sent, headers=headers).status_code == 403, path
     assert not batch.batch_path(vault).exists()
 
 
-def test_a_post_without_a_session_is_refused_and_get_on_a_post_route_is_405(client: TestClient, vault: Vault) -> None:
-    for route in ("/curate/round", "/curate/decide", "/curate/undo", "/curate/lift"):
-        assert client.get(route).status_code == 405, route
+def test_a_write_without_a_session_or_a_json_body_is_refused(client: TestClient, vault: Vault) -> None:
+    form = SAME | {"Content-Type": "application/x-www-form-urlencoded"}
+    for path in (ROUND, DECIDE, UNDO, LIFT):
+        assert client.get(path).status_code == 405, path
+        assert client.post(path, content=b"act=accept", headers=form).status_code == 415, path
+    # The form routes of the server's own page are gone with it.
+    assert client.post("/curate/round", data={}, headers=SAME).status_code == 404
+    assert client.get("/curate/panel").status_code == 404
+    assert client.get(API, headers={"Authorization": f"Bearer {TOKEN}"}).status_code == 403
     client.cookies.clear()
-    assert client.post("/curate/round", headers=SAME).status_code == 401
+    assert client.post(ROUND, json={}, headers=SAME).status_code == 401
     assert not batch.batch_path(vault).exists()
-
-
-def test_a_post_that_isn_t_a_form_is_refused(client: TestClient) -> None:
-    for route in ("/curate/round", "/curate/decide", "/curate/undo", "/curate/lift"):
-        assert client.post(route, json={"act": "accept"}, headers=SAME).status_code == 415, route
 
 
 def test_a_round_is_due_a_week_after_the_last(client: TestClient, vault: Vault) -> None:
     begun = schedule.now_utc() - timedelta(days=10)
     plant(vault, begun + timedelta(minutes=2), "user", "new:-:salt road", schedule.round_id(begun, "test-box"))
-    html = page(client)
-    assert "A round is due: the last started 10 days ago." in html
-    assert texts(html, "minutes") == ["review 2 min in the last 1 week with a round"]
+    view = read(client)["view"]
+    assert view["due"] == "A round is due: the last started 10 days ago."
+    assert view["minutes"] == "review 2 min in the last 1 week with a round"
     started(client, vault)
-    assert "The next round is due on" in page(client)
+    assert read(client)["view"]["due"].startswith("The next round is due on")
 
 
 def test_the_batch_holds_no_snippet(client: TestClient, vault: Vault) -> None:

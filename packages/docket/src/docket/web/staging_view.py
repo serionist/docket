@@ -684,8 +684,9 @@ def build_panel(shown: Shown, redactor: Redactor, state: StagingState, tz: ZoneI
             Utterance(
                 n=n,
                 span=_range(s.start_ms, s.end_ms),
-                speaker=v.speaker or "",
-                text=" ".join(v.text.split()),
+                # What the release cuts shows no words, and is never sent to show (DR-0383).
+                speaker="" if id(s) in released else v.speaker or "",
+                text="" if id(s) in released else " ".join(v.text.split()),
                 checked=n in picked,
                 going=n in going or id(s) in released,
                 was_cut=s.text == cutting.CUT_MARKER,

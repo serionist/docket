@@ -302,7 +302,6 @@ class CurateView(BaseModel):
     measures: Measures | None = None
     dropped: list[str] = []
     log: list[LogRow] = []
-    stoplist: list[str] = []
     problems: list[str] = []
     skipped: list[str] = []
     tier1: str | None = None
@@ -534,7 +533,6 @@ def build(facts: Facts) -> CurateView:
         view.tier1 = b.tier1
     view.dropped = [f"{entity}: {term} is {WHY_DROPPED[how]}" for entity, term, how in facts.dropped]
     view.log = [log_row(ln, facts) for ln in reversed(facts.lines[-LOG_LINES:])]
-    view.stoplist = sorted(facts.stoplist)
     return view
 
 

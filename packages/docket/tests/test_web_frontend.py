@@ -54,6 +54,8 @@ def test_each_route_of_the_app_answers_its_document_with_a_nonce_and_the_csp_nam
         "/search",
         "/recording",
         "/briefs",
+        "/staging",
+        "/curate",
     )
     first, second = client.get("/design?part=tokens"), client.get("/ledger?open=A-0012&q=Ada%27s+offer")
     nonces = []

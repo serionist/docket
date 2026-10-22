@@ -34,7 +34,7 @@ const TAB = "inline-flex h-5 shrink-0 items-center rounded-r-sm border-l-[3px] p
 /** A record's state as a margin tab: what waits for the owner in ochre, what goes next in green, a hold in red. */
 export function StateTab({ row }: { row: Pick<StagedRow, "state" | "on_hold" | "why"> }) {
   const held = row.on_hold || row.why === "held-back";
-  const word = row.on_hold ? "on hold" : row.state;
+  const word = row.on_hold ? "on hold" : row.why === "held-back" ? "held back" : row.state;
   return (
     <span
       data-state={word}
@@ -263,7 +263,7 @@ export function WaitingList({
         {view.groups.length ? (
           view.groups.map((group) => <Group key={group.source} group={group} rows={rows} current={current} />)
         ) : (
-          <Empty title={view.narrowed ? "Nothing here waits at the gate" : "Nothing waits at the gate"}>
+          <Empty title={view.narrowed ? "Nothing here waits at the gate" : "The gate is clear"}>
             {!view.narrowed && <p>Records a sync or an import stages show here, for you to classify and promote.</p>}
           </Empty>
         )}

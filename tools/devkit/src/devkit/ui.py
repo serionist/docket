@@ -366,7 +366,11 @@ PAGES: dict[str, Page] = {
             State("list", "/staging"),
             State("record", "/staging", (("click", CALL_ROW), ("wait", "[data-actions]"))),
             State("redacted", "/staging", (("click", '[data-row] a:has-text("Ring Ben")'), ("wait", "[data-actions]"))),
-            State("held", "/staging", (("click", '[data-held="rec-cut-03"] summary'),)),
+            State(
+                "held",
+                "/staging",
+                (("click", '[data-held="rec-cut-03"] summary'), ("click", '[data-held="rec-cut-03"] [data-paste]')),
+            ),
             State(
                 "preview",
                 "/staging",

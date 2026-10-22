@@ -1,6 +1,7 @@
-"""The Staging page over HTTP, signed in (DR-0380 to DR-0384): what waits by source and age, a record opened and shown
-as promotion would write it, cuts previewed and classified, private dropped, promotion, the held part's commands, the
-Guard on every post, and nothing of a record where it shouldn't be."""
+"""The Staging page's JSON routes, signed in (DR-0380, DR-0382, DR-0383, DR-0784, DR-0785): what waits by source and
+age, a record opened and shown as promotion would write it, cuts previewed and classified, private dropped, promotion,
+the held part's commands, the Guard, the session and the body on every write, and nothing of a record where it
+shouldn't be. The page itself is the app's document; its links are the URLs these answers carry."""
 
 from __future__ import annotations
 
@@ -11,8 +12,8 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from docket_webkit import OURS, a11y_problems, html_problems, parse
-from staging_kit import PHONE, TALK, key_of, mail, memo, signed_in, staging_vault
+from docket_webkit import OURS, TOKEN
+from staging_kit import PHONE, TALK, key_of, mail, signed_in, staging_vault
 from starlette.testclient import TestClient
 
 from docket.errors import DocketError
@@ -28,8 +29,11 @@ from docket.vault.releaselog import LoggedCut, Release
 from docket.vault.staging import Staging
 from docket.vault.vault import Vault
 from docket.web import staging as staging_routes
-from docket.web.templating import PAGE_CSP
+from docket.web import webapi
 
+API = "/api/web/staging"
+CLASSIFY = f"{API}/classify"
+PROMOTE = f"{API}/promote"
 SAME = {"Origin": OURS, "Sec-Fetch-Site": "same-origin"}
 TRANSCRIPT = "calls:rec-1/transcript"
 MAIL_RID = "calls:mail-1"
@@ -46,34 +50,39 @@ def client(vault: Vault) -> Iterator[TestClient]:
         yield found
 
 
-def page(client: TestClient, path: str = "/staging", status: int = 200) -> str:
-    answer = client.get(path)
-    assert answer.status_code == status, answer.text
-    assert answer.headers["Content-Security-Policy"] == PAGE_CSP
-    assert answer.headers["Cache-Control"] == "no-store"
-    assert answer.headers["Referrer-Policy"] == "same-origin"
-    assert not html_problems(answer.text), path
-    assert not a11y_problems(answer.text, whole=not path.startswith("/staging/panel")), path
-    return answer.text
+def listed(client: TestClient, query: str = "", status: int = 200) -> dict[str, Any]:
+    got = client.get(f"{API}?{query}" if query else API)
+    assert got.status_code == status, got.text
+    assert got.headers["cache-control"] == "no-store"
+    return got.json()
 
 
-def text_of(html: str, cls: str) -> list[str]:
-    return [el.text() for el in parse(html).find_all(class_=cls)]
+def opened(client: TestClient, vault: Vault, rid: str, extra: str = "", status: int = 200) -> dict[str, Any]:
+    got = client.get(f"{API}/panel?open={key_of(vault, rid)}{extra}")
+    assert got.status_code == status, got.text
+    return got.json()
 
 
-def form(html: str, cls: str = "cut-form") -> dict[str, Any]:
-    """A form's hidden fields, as the browser would post them."""
-    found = parse(html).find("form", class_=cls)
-    return {i.attrs["name"]: i.attrs["value"] for i in found.find_all("input") if i.attrs.get("type") == "hidden"}
+def panel_of(client: TestClient, vault: Vault, rid: str, extra: str = "") -> dict[str, Any]:
+    found = opened(client, vault, rid, extra)["panel"]
+    assert found is not None
+    return found
 
 
-def as_shown(html: str) -> dict[str, Any]:
-    """The panel's form as the browser posts it untouched: its hidden fields, what is checked, and the typed cuts."""
-    found = parse(html).find("form", class_="cut-form")
-    fields = form(html)
-    fields["u"] = [i.attrs["value"] for i in found.find_all("input", name="u") if "checked" in i.attrs]
-    fields["cut"] = found.find("input", name="cut").attrs["value"]
-    return fields
+def rows(view: dict[str, Any]) -> list[dict[str, Any]]:
+    return [r for g in view["groups"] for r in g["rows"]]
+
+
+def body(panel: dict[str, Any], label: str = "work", **chosen: list[str]) -> dict[str, Any]:
+    """A classification as the page posts it: the panel's record and what it showed, with what is ticked and typed."""
+    picks: dict[str, list[str]] = {"u": [], "line": [], "cut": []} | chosen
+    return {"key": panel["key"], "label": label, **picks, "seen": panel["seen"]}
+
+
+def classify(client: TestClient, sent: dict[str, Any], status: int = 200) -> dict[str, Any]:
+    got = client.post(CLASSIFY, json=sent, headers=SAME)
+    assert got.status_code == status, got.text
+    return got.json()
 
 
 def staged(vault: Vault) -> dict[str, dict[str, Any]]:
@@ -88,89 +97,84 @@ def raw(vault: Vault) -> dict[str, Any]:
     return {r.rid: r for _, _, r in vault.rawlog.iter_records()}
 
 
-def opened(vault: Vault, rid: str, extra: str = "") -> str:
-    return f"/staging?open={key_of(vault, rid)}{extra}"
-
-
 # -- the list --------------------------------------------------------------------------------------------------------
 
 
 def test_what_waits_shows_by_source_and_age_with_titles_and_no_text(client: TestClient) -> None:
-    html = page(client)
-    tree = parse(html)
-    assert tree.find("h1").text() == "Staging"
-    assert tree.find("a", aria_current="page").attrs["href"] == "/staging"
-    assert text_of(html, "lead") == ["3 records wait at the gate: 2 for you to classify, 1 ready to promote"]
-    assert text_of(html, "record-title") == ["Supplier call", "The offer", "Day rates"]
-    assert text_of(html, "why") == [
+    page = client.get("/staging")
+    assert page.status_code == 200 and 'id="root"' in page.text
+    read = listed(client)
+    view = read["view"]
+    assert read["canonical"] == "/staging" and read["notice"] is None
+    assert view["lead"] == "3 records wait at the gate: 2 for you to classify, 1 ready to promote"
+    assert [r["title"] for r in rows(view)] == ["Supplier call", "The offer", "Day rates"]
+    assert [r["line"] for r in rows(view)] == [
         "a mixed source: work or private?",
         "a mixed source: work or private?",
         "a work source: it goes at the next promotion",
     ]
+    assert rows(view)[0]["when"] == "7 Oct 2026 10:00"
+    assert rows(view)[0]["url"] == f"/staging?open={rows(view)[0]['key']}"
+    text = json.dumps(read)
     for said in ("weekend", "Ada Example", "10 million", "Northwind", "U0ADA"):
-        assert said not in html
-    assert text_of(html, "promote-counts") == ["memo 1"]
-    assert [b.text() for b in tree.find_all("button") if "Promote" in b.text()] == ["Promote memo"]
-    assert text_of(page(client, "/staging?source=memo"), "record-title") == ["Day rates"]
-    assert text_of(page(client, "/staging?state=pending&k=1"), "record-title") == ["Supplier call"]
-    assert parse(page(client, "/staging?state=pending&k=1")).find("a", class_="button").attrs["href"].endswith("k=51")
-    # Its keys are Search's list keys: no key writes.
-    dialog = tree.find("dialog", id="keys-dialog")
-    assert [k.attrs["data-key"] for k in dialog.find_all("kbd") if "data-key" in k.attrs] == [
-        "j",
-        "k",
-        "Enter",
-        "o",
-        "Escape",
-        "?",
-    ]
+        assert said not in text
+    assert view["ready"] == [{"source": "memo", "n": 1}]
+    assert [c["label"] for c in view["source_chips"]] == ["All sources", "calls", "memo"]
+    assert [r["title"] for r in rows(listed(client, "source=memo")["view"])] == ["Day rates"]
+    narrowed = listed(client, "state=pending&k=1")
+    assert [r["title"] for r in rows(narrowed["view"])] == ["Supplier call"]
+    assert narrowed["view"]["more"] == "/staging?state=pending&k=51"
+    assert narrowed["canonical"] == "/staging?state=pending&k=1"
 
 
-def test_a_value_the_url_cant_hold_is_the_pages_error(client: TestClient) -> None:
-    html = page(client, "/staging?open=nope", status=400)
-    assert text_of(html, "notice")[0].startswith("open is a staged record's key")
-    assert "nothing staged" not in html.lower()
-    panel = page(client, "/staging/panel?u=0", status=400)
-    assert text_of(panel, "notice")[0].startswith("u is a number from 1")
+def test_a_value_the_url_can_t_hold_is_refused_in_its_words(client: TestClient) -> None:
+    assert listed(client, "k=0", status=400)["error"].startswith("k is a whole number")
+    assert listed(client, "state=done", status=400)["error"].startswith("state is pending or ready")
+    bad = client.get(f"{API}/panel?open=nope")
+    assert bad.status_code == 400 and bad.json()["error"].startswith("open is a staged record's key")
+    zero = client.get(f"{API}/panel?u=0")
+    assert zero.status_code == 400 and zero.json()["error"].startswith("u is a number from 1")
 
 
 def test_a_key_nothing_is_staged_under_says_so(client: TestClient) -> None:
-    html = page(client, "/staging?open=" + "0" * 32)
-    assert "Nothing is staged as 000000000000 any more" in html
-    assert "Nothing is staged as 000000000000 any more" in page(client, "/staging/panel?open=" + "0" * 32)
+    got = client.get(f"{API}/panel?open={'0' * 32}")
+    assert got.status_code == 200
+    read = got.json()
+    assert read["panel"] is None
+    assert read["missing"]["note"].startswith("Nothing is staged as 000000000000 any more")
+    assert read["missing"]["close"] == "/staging"
 
 
-def test_content_is_data(client: TestClient, vault: Vault) -> None:
-    Gate(vault).stage(
-        [memo("m-2", title="<script>alert(1)</script>", text="<img src=x onerror=alert(1)> javascript:alert(1)")]
-    )
-    html = page(client)
-    assert "<script>alert" not in html
-    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
-    panel = page(client, opened(vault, "memo:m-2"))
-    assert "<img src=x" not in panel and "&lt;img src=x onerror=alert(1)&gt;" in panel
+def test_the_url_reads_one_canonical_form_and_says_a_write_once(client: TestClient, vault: Vault) -> None:
+    key = key_of(vault, TRANSCRIPT)
+    read = opened(client, vault, TRANSCRIPT, "&u=3&cut=0:50-0:55&u=1-2&source=calls")
+    assert read["canonical"] == f"/staging?source=calls&open={key}&u=1-2&u=3&cut=0:50-0:55"
+    done = listed(client, f"done=work-{key[:12]}&state=pending")
+    assert done["canonical"] == "/staging?state=pending"
+    assert done["notice"] == f"{key[:12]} classified work: it goes to raw at the next promotion."
 
 
 # -- an open record --------------------------------------------------------------------------------------------------
 
 
 def test_a_transcript_opens_with_its_utterances_and_a_mail_with_its_lines(client: TestClient, vault: Vault) -> None:
-    html = page(client, opened(vault, TRANSCRIPT))
-    tree = parse(html)
-    assert tree.find("h2", id="panel-title").text() == "Supplier call"
-    rows = tree.find_all("li", class_="utterance")
-    assert [r.find("span", class_="time").text() for r in rows] == [
+    panel = panel_of(client, vault, TRANSCRIPT)
+    assert (panel["title"], panel["kind"], panel["when"]) == ("Supplier call", "transcript", "7 Oct 2026 10:00")
+    assert [u["span"] for u in panel["utterances"]] == [
         "00:00-00:12",
         "00:12-00:31",
         "00:30-00:46",
         "00:45-00:46",
         "00:46-01:00",
     ]
-    assert rows[1].text().endswith("Ben Sample First the weekend plans.")
-    fragment = page(client, opened(vault, TRANSCRIPT).replace("/staging?", "/staging/panel?"))
-    assert parse(fragment).find("h2", id="panel-title").text() == "Supplier call"
-    lines = parse(page(client, opened(vault, MAIL_RID))).find_all("li", class_="text-line")
-    assert [li.find("span", class_="offset").text() for li in lines][:3] == ["0", "11", "12"]
+    assert (panel["utterances"][1]["speaker"], panel["utterances"][1]["text"]) == (
+        "Ben Sample",
+        "First the weekend plans.",
+    )
+    assert panel["close"] == "/staging" and panel["back"] == f"/staging?open={panel['key']}"
+    assert panel["confirm_url"] == f"/staging?open={panel['key']}&confirm=private"
+    lines = panel_of(client, vault, MAIL_RID)["lines"]
+    assert [line["offset"] for line in lines][:3] == [0, 11, 12]
 
 
 def test_the_version_in_raw_that_was_cut_shows_beside_a_new_one(client: TestClient, vault: Vault) -> None:
@@ -178,25 +182,22 @@ def test_the_version_in_raw_that_was_cut_shows_beside_a_new_one(client: TestClie
     gate.classify(key_of(vault, MAIL_RID), "work", [Cut(start=0, end=10)])
     gate.promote()
     gate.stage([mail(text="Hello again,\nthe offer is now 9 million.")])
-    html = page(client, opened(vault, MAIL_RID))
-    assert "an earlier version was decided by hand" in html
-    cut_before = parse(html).find("details", class_="cut-before")
-    assert CUT_MARKER in cut_before.text()
+    panel = panel_of(client, vault, MAIL_RID)
+    assert panel["why_line"].startswith("an earlier version was decided by hand")
+    assert CUT_MARKER in panel["cut_before"]["text"]
 
 
-def test_a_record_on_hold_shows_no_title_and_doesnt_open(client: TestClient, vault: Vault) -> None:
+def test_a_record_on_hold_shows_no_title_and_no_text(client: TestClient, vault: Vault) -> None:
     holds.add(vault, "calls", ["rec-1"])
-    html = page(client)
-    assert "Supplier call" not in html
-    record = parse(html).find("li", class_="why-on-hold")
-    assert record.find_all("a") == []
-    assert TRANSCRIPT in record.text()
-    assert "on hold: it stops every ingest of calls" in record.text()
-    panel = page(client, opened(vault, TRANSCRIPT))
-    assert "Supplier call" not in panel and "weekend" not in panel
-    assert parse(panel).find("h2", id="panel-title").text() == "on hold: transcript"
-    assert parse(panel).find_all("form", class_="cut-form") == []
-    assert "1 staged record on hold" in page(client)
+    read = listed(client)
+    assert "Supplier call" not in json.dumps(read)
+    held = next(r for r in rows(read["view"]) if r["rid"] == TRANSCRIPT)
+    assert held["on_hold"] and held["title"] == ""
+    assert held["line"].startswith("on hold: it stops every ingest of calls")
+    panel = panel_of(client, vault, TRANSCRIPT)
+    assert "Supplier call" not in json.dumps(panel) and "weekend" not in json.dumps(panel)
+    assert (panel["on_hold"], panel["utterances"], panel["can_work"]) == (True, None, False)
+    assert read["held"][0]["on_hold"] == 1
 
 
 def test_a_rule_turned_on_since_intake_applies_in_the_list_and_the_panel(client: TestClient, vault: Vault) -> None:
@@ -204,111 +205,119 @@ def test_a_rule_turned_on_since_intake_applies_in_the_list_and_the_panel(client:
     config = VaultConfig.load(vault.root / "vault.yaml")
     config.redaction.phone = True
     (vault.root / "vault.yaml").write_text(config.dump(), encoding="utf-8", newline="\n")
-    html = page(client)
-    assert PHONE not in html and "Ring [redacted:phone]" in html
-    panel = page(client, opened(vault, "calls:mail-2"))
-    assert PHONE not in panel
-    assert "The redaction rules changed since this was staged" in panel
-    assert "[redacted:phone]" in parse(panel).find("ol", class_="text-lines").text()
+    read = listed(client)
+    assert PHONE not in json.dumps(read)
+    assert "Ring [redacted:phone]" in [r["title"] for r in rows(read["view"])]
+    panel = panel_of(client, vault, "calls:mail-2")
+    assert PHONE not in json.dumps(panel)
+    assert panel["notes"][0].startswith("The redaction rules changed since this was staged")
+    assert panel["lines"][0]["text"] == "My number: [redacted:phone]"
     assert PHONE in staged(vault)["calls:mail-2"]["record"]["text"]
 
 
 # -- cutting and classifying -----------------------------------------------------------------------------------------
 
 
-def test_preview_is_the_pages_own_state_and_writes_nothing(client: TestClient, vault: Vault) -> None:
-    key = key_of(vault, TRANSCRIPT)
+def test_preview_is_the_panel_s_own_read_and_writes_nothing(client: TestClient, vault: Vault) -> None:
     before = staged(vault)
-    fields = form(page(client, opened(vault, TRANSCRIPT))) | {"u": ["2"], "act": "preview"}
-    answer = client.post("/staging/classify", data=fields, headers=SAME)
-    assert answer.status_code == 303
-    assert answer.headers["location"] == f"/staging?open={key}&u=2"
-    html = page(client, answer.headers["location"])
-    assert text_of(html, "preview")[0].startswith("After the cuts Removes 2 utterances: 00:12-00:31.")
-    assert [li.find("input").attrs["value"] for li in parse(html).find_all("li", class_="going")] == ["2", "3"]
+    panel = panel_of(client, vault, TRANSCRIPT, "&u=2")
+    assert panel["preview"]["summary"] == "Removes 2 utterances: 00:12-00:31."
+    assert [u["n"] for u in panel["utterances"] if u["going"]] == [2, 3]
+    assert panel["work_label"] == "Work, with 1 cut"
     assert staged(vault) == before
 
 
-def test_work_with_checked_utterances_cuts_at_their_exact_times(client: TestClient, vault: Vault) -> None:
+def test_work_with_ticked_utterances_cuts_at_their_exact_times(client: TestClient, vault: Vault) -> None:
     key = key_of(vault, TRANSCRIPT)
-    fields = form(page(client, opened(vault, TRANSCRIPT, "&state=pending"))) | {"u": ["2", "4"], "label": "work"}
-    answer = client.post("/staging/classify", data=fields, headers=SAME)
-    assert answer.status_code == 303, answer.text
-    assert answer.headers["location"] == f"/staging?state=pending&done=work-{key[:12]}"
+    done = classify(client, body(panel_of(client, vault, TRANSCRIPT), u=["2", "4"]))
+    assert done == {
+        "key": key,
+        "label": "work",
+        "notice": f"{key[:12]} classified work: it goes to raw at the next promotion.",
+    }
     file = staged(vault)[TRANSCRIPT]
     assert (file["state"], file["classified_by"]) == ("ready", "user")
     assert file["cuts"] == [
         {"start": TALK[1]["start_ms"], "end": TALK[1]["end_ms"], "unit": "ms"},
         {"start": 45_700, "end": 45_701, "unit": "ms"},
     ]
-    html = page(client, answer.headers["location"])
-    assert f"{key[:12]} classified work" in html
-    html = page(client)
-    assert "classified work by you, with 2 cuts: it goes at the next promotion" in text_of(html, "why")
+    line = next(r["line"] for r in rows(listed(client)["view"]) if r["rid"] == TRANSCRIPT)
+    assert line == "classified work by you, with 2 cuts: it goes at the next promotion"
 
 
 def test_a_classification_from_a_page_the_record_changed_under_writes_nothing(client: TestClient, vault: Vault) -> None:
-    fields = form(page(client, opened(vault, TRANSCRIPT))) | {"label": "work"}
+    sent = body(panel_of(client, vault, TRANSCRIPT))
     # Another tab, the CLI or Claude cut it since.
     Gate(vault).classify(key_of(vault, TRANSCRIPT), "work", [Cut(start=12_000, end=30_400, unit="ms")], by="claude")
     before = staged(vault)
-    answer = client.post("/staging/classify", data=fields, headers=SAME)
-    assert answer.status_code == 409
-    assert "This record changed since you opened it: nothing was written." in answer.text
-    assert "classified work by Claude, with 1 cut" in answer.text
+    refused = classify(client, sent, status=409)
+    assert refused["error"] == staging_routes.CHANGED
     assert staged(vault) == before
+    # Read again, the record is as it stands: Claude's cut, ticked.
+    again = panel_of(client, vault, TRANSCRIPT)
+    assert again["why_line"] == "classified work by Claude, with 1 cut: it goes at the next promotion"
+    assert [u["n"] for u in again["utterances"] if u["checked"]] == [2]
 
 
-def test_a_record_promoted_meanwhile_is_the_pages_error(client: TestClient, vault: Vault) -> None:
-    fields = form(page(client, opened(vault, MAIL_RID))) | {"label": "work"}
+def test_a_record_promoted_meanwhile_is_refused(client: TestClient, vault: Vault) -> None:
+    sent = body(panel_of(client, vault, MAIL_RID))
     gate = Gate(vault)
     gate.classify(key_of(vault, MAIL_RID), "work")
     gate.promote()
     commits = vault.git.run("rev-list", "--count", "HEAD").stdout
-    answer = client.post("/staging/classify", data=fields, headers=SAME)
-    assert answer.status_code == 400
-    assert "nothing staged as" in answer.text
+    assert "nothing staged as" in classify(client, sent, status=400)["error"]
     assert vault.git.run("rev-list", "--count", "HEAD").stdout == commits
 
 
-def test_a_lock_another_process_holds_is_the_pages_error(
+def test_a_lock_another_process_holds_is_refused(
     client: TestClient, vault: Vault, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(service_state, "LOCK_SECONDS", 0.2)
-    fields = form(page(client, opened(vault, MAIL_RID))) | {"label": "work"}
+    sent = body(panel_of(client, vault, MAIL_RID))
     before = staged(vault)
     with Vault.open(vault.root).lock:
-        answer = client.post("/staging/classify", data=fields, headers=SAME)
-    assert answer.status_code == 400
-    assert "another docket process holds" in answer.text
+        refused = classify(client, sent, status=400)
+    assert "another docket process holds" in refused["error"]
     assert staged(vault) == before
 
 
-def test_a_selection_or_label_the_form_cant_hold_writes_nothing(client: TestClient, vault: Vault) -> None:
-    fields = form(page(client, opened(vault, TRANSCRIPT)))
+def test_a_selection_or_label_the_record_can_t_take_writes_nothing(client: TestClient, vault: Vault) -> None:
+    panel = panel_of(client, vault, TRANSCRIPT)
     before = staged(vault)
-    for extra, said in [
-        ({"label": "maybe"}, "label is work or private"),
-        ({"label": "work", "u": "9"}, "u names utterance 9, and this transcript has 5"),
-        ({"label": "work", "cut": "1-4"}, "cut a time, such as 12:30-14:05, not characters"),
-        ({"label": "private", "u": "1"}, "cuts go with work"),
-        ({"label": "work", "open": "nope"}, "open is a staged record&#39;s key"),
+    for sent, said in [
+        (body(panel, "maybe"), "label is work or private"),
+        (body(panel, u=["9"]), "u names utterance 9, and this transcript has 5"),
+        (body(panel, cut=["1-4"]), "cut a time, such as 12:30-14:05, not characters"),
+        (body(panel, cut=["12:30"]), "cut 12:30: a cut is <start>-<end>"),
+        (body(panel, "private", u=["1"]), "cuts go with work"),
+        (body(panel, u=["0"]), "u is a number from 1"),
+        (body(panel) | {"key": "nope"}, "open is a staged record's key"),
     ]:
-        answer = client.post("/staging/classify", data=fields | extra, headers=SAME)
-        assert answer.status_code == 400, extra
-        assert said in answer.text, extra
+        assert said in classify(client, sent, status=400)["error"], sent
     assert staged(vault) == before
-    assert (
-        client.post(
-            "/staging/classify",
-            content=b"x" * 70_000,
-            headers=SAME | {"Content-Type": "application/x-www-form-urlencoded"},
-        ).status_code
-        == 413
-    )
-    assert client.post("/staging/classify", json={"label": "work"}, headers=SAME).status_code == 415
-    assert client.get("/staging/classify").status_code == 405
-    assert client.get("/staging/promote").status_code == 405
+
+
+def test_a_body_the_page_didn_t_make_is_refused_before_the_writer(client: TestClient, vault: Vault) -> None:
+    panel = panel_of(client, vault, TRANSCRIPT)
+    before = staged(vault)
+    for sent in (
+        body(panel) | {"by": "claude"},
+        {k: v for k, v in body(panel).items() if k != "seen"},
+        body(panel) | {"seen": {"state": "pending"}},
+        body(panel) | {"u": "2"},
+    ):
+        assert client.post(CLASSIFY, json=sent, headers=SAME).status_code == 422, sent
+    assert client.post(PROMOTE, json={"source": "memo", "all": True}, headers=SAME).status_code == 422
+    form = SAME | {"Content-Type": "application/x-www-form-urlencoded"}
+    assert client.post(CLASSIFY, content=b"label=work", headers=form).status_code == 415
+    big = SAME | {"Content-Type": "application/json"}
+    assert client.post(CLASSIFY, content=b"x" * 300_000, headers=big).status_code == 413
+    assert client.get(CLASSIFY).status_code == 405
+    assert client.get(PROMOTE).status_code == 405
+    # The form routes of the server's own page are gone with it.
+    assert client.post("/staging/classify", data={"label": "work"}, headers=SAME).status_code == 404
+    assert client.get("/staging/panel").status_code == 404
+    assert staged(vault) == before
 
 
 def test_private_asks_once_more_then_drops_with_no_trace_in_the_answer_or_the_log(
@@ -316,17 +325,14 @@ def test_private_asks_once_more_then_drops_with_no_trace_in_the_answer_or_the_lo
 ) -> None:
     caplog.set_level(logging.DEBUG)
     key = key_of(vault, MAIL_RID)
-    html = page(client, opened(vault, MAIL_RID, "&confirm=private"))
-    assert "Drop this mail for good?" in html
-    fields = form(html, "confirm-form")
-    assert fields["label"] == "private"
-    answer = client.post("/staging/classify", data=fields, headers=SAME)
-    assert answer.status_code == 303
-    assert answer.headers["location"] == f"/staging?done=private-{key[:12]}"
+    asked = panel_of(client, vault, MAIL_RID, "&confirm=private")
+    assert asked["confirm"] and asked["kind"] == "mail"
+    done = classify(client, body(asked, "private"))
+    assert done["notice"] == f"{key[:12]} dropped as private: a later pull of the same version is skipped."
     assert MAIL_RID not in staged(vault)
     decided = (vault.root / "staging" / "_decided.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(decided) == 1 and key in decided[0]
-    after = page(client, answer.headers["location"])
+    after = json.dumps(done) + json.dumps(listed(client))
     for said in ("The offer", "10 million"):
         assert said not in after
         assert said not in caplog.text
@@ -345,17 +351,16 @@ def test_promote_writes_and_commits_and_brings_the_index_up_to_date(client: Test
     Staging(vault.root, vault.home).write(
         gate.show(shown.entry.key).entry.staged.model_copy(update={"problem": "a cut didn't fit"})
     )
-    html = page(client)
-    assert "held back at the last promotion: a cut didn't fit" in text_of(html, "why")
-    answer = client.post("/staging/promote", data=form(html, "promote-all"), headers=SAME)
-    assert answer.status_code == 303
-    assert answer.headers["location"] == "/staging?done=promoted-3-0"
+    lines = [r["line"] for r in rows(listed(client)["view"])]
+    assert "held back at the last promotion: a cut didn't fit" in lines
+    got = client.post(PROMOTE, json={"source": None}, headers=SAME)
+    assert got.status_code == 200, got.text
+    assert got.json() == {"written": 3, "held": 0, "notice": "Promoted: 3 records written to raw and committed."}
     assert set(raw(vault)) == {TRANSCRIPT, MAIL_RID, "memo:m-1"}
     assert vault.git.untracked("raw") == []
     assert pokes
-    assert "Promoted: 3 records written to raw and committed." in page(client, answer.headers["location"])
-    one = client.post("/staging/promote", data={"promote": "Bad name!"}, headers=SAME)
-    assert one.status_code == 400 and "promote names a source" in one.text
+    one = client.post(PROMOTE, json={"source": "Bad name!"}, headers=SAME)
+    assert one.status_code == 400 and "source names a source" in one.json()["error"]
 
 
 def test_a_promotion_whose_calendar_step_stopped_says_meetings_not_made(
@@ -368,10 +373,24 @@ def test_a_promotion_whose_calendar_step_stopped_says_meetings_not_made(
     # A step that stopped earlier left a record pending: this promotion's step runs for it, and stops too.
     calendar.note_pending(vault, ["calendar:E1"])
     Gate(vault).classify(key_of(vault, MAIL_RID), "work")
-    answer = client.post("/staging/promote", data=form(page(client), "promote-all"), headers=SAME)
-    assert answer.headers["location"] == "/staging?done=promoted-2-0-stopped"
-    said = page(client, answer.headers["location"])
-    assert "Meetings not made: the calendar step stopped, and its records wait for the next promotion." in said
+    got = client.post(PROMOTE, json={}, headers=SAME)
+    assert got.status_code == 200, got.text
+    assert got.json()["notice"].endswith(
+        "Meetings not made: the calendar step stopped, and its records wait for the next promotion."
+    )
+
+
+def test_promote_with_nothing_ready_or_the_lock_held_writes_nothing(
+    client: TestClient, vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(service_state, "LOCK_SECONDS", 0.2)
+    with Vault.open(vault.root).lock:
+        busy = client.post(PROMOTE, json={"source": "memo"}, headers=SAME)
+    assert busy.status_code == 400 and "another docket process holds" in busy.json()["error"]
+    assert raw(vault) == {}
+    calm = client.post(PROMOTE, json={"source": "calls"}, headers=SAME)
+    assert calm.json()["notice"] == "Promoted: 0 records written to raw and committed."
+    assert raw(vault) == {}
 
 
 # -- held recordings -------------------------------------------------------------------------------------------------
@@ -393,18 +412,15 @@ def test_held_recordings_are_listed_with_quoted_commands_that_name_the_vault(
     # A merge brought rec-cut-03's hold back; an add would leave a released id out, so the list is written by hand.
     (vault.root / holds.HOLDS).mkdir(parents=True, exist_ok=True)
     (vault.root / holds.HOLDS / "calls.txt").write_text("rec-cut-01\nrec-cut-03\n", encoding="utf-8")
-    html = page(client)
-    assert "Weekend at the cabin" not in html
-    assert "2 recordings held" in text_of(html, "lead")[0]
-    held = parse(html).find("article", class_="held")
-    assert [li.find("span", class_="locator").text() for li in held.find_all("li", class_="held-id")] == [
-        "rec-cut-01",
-        "rec-cut-03",
-    ]
-    assert "held again after its release" in held.find_all("li", class_="held-id")[1].text()
+    read = listed(client)
+    assert "Weekend at the cabin" not in json.dumps(read)
+    assert read["view"]["lead"].endswith("; 2 recordings held")
+    (held,) = read["held"]
+    assert [i["id"] for i in held["ids"]] == ["rec-cut-01", "rec-cut-03"]
+    assert held["ids"][1]["again"] == "released 2026-10-14 09:00 UTC on laptop-1, and held again after a merge"
     where = f'--from "{folder.resolve()}" --vault "{vault.root}"'
-    assert text_of(html, "paste-text") == [
-        "Go through my held calls recordings with /docket:cuts.",
+    assert held["paste"] == "Go through my held calls recordings with /docket:cuts."
+    assert [c["text"] for i in held["ids"] for c in i["commands"]] == [
         f'docket hold show calls "rec-cut-01" {where}',
         f'docket hold release calls "rec-cut-01" {where} --cut <mm:ss-mm:ss>',
         f'docket hold release calls "rec-cut-03" {where}',
@@ -418,104 +434,100 @@ def test_a_folder_a_shell_would_act_on_is_left_as_its_placeholder(
     folder.mkdir()
     local.record(vault, "calls", folder)
     holds.add(vault, "calls", ["rec-cut-01"])
-    html = page(client)
-    assert f'docket hold show calls "rec-cut-01" --from "<folder>" --vault "{vault.root}"' in text_of(
-        html, "paste-text"
-    )
-    assert str(folder.resolve()) in parse(html).find("dl", class_="unfilled").text()
+    (held,) = listed(client)["held"]
+    command = held["ids"][0]["commands"][0]["text"]
+    assert command == f'docket hold show calls "rec-cut-01" --from "<folder>" --vault "{vault.root}"'
+    assert held["unfilled"] == [{"name": "folder", "value": str(folder.resolve())}]
 
 
-def test_a_hold_list_that_doesnt_read_is_the_pages_error(client: TestClient, vault: Vault) -> None:
+def test_a_hold_list_that_doesn_t_read_is_refused(client: TestClient, vault: Vault) -> None:
     (vault.root / holds.HOLDS).mkdir(parents=True, exist_ok=True)
     (vault.root / holds.HOLDS / "calls.txt").write_text("rec-1\nrec 2\n", encoding="utf-8")
-    html = page(client, status=400)
-    assert "line 2" in html
-    assert "rec 2" not in html
+    refused = listed(client, status=400)
+    assert "line 2" in refused["error"] and "rec 2" not in refused["error"]
 
 
-# -- the Guard on every post -----------------------------------------------------------------------------------------
+def test_no_route_releases_a_hold() -> None:
+    """The page names the release's command; no route of the app's takes one (DR-0382)."""
+    routes = list(webapi.openapi()["paths"])
+    assert [r for r in routes if r.startswith(API)] == [API, f"{API}/panel", CLASSIFY, PROMOTE]
+    assert not [r for r in routes if "release" in r or "hold" in r]
+
+
+# -- the Guard, the session and the body on every write ---------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    ("headers", "status"),
+    "headers",
     [
-        ({"Origin": "http://evil.example"}, 403),
-        ({"Origin": "null", "Sec-Fetch-Site": "same-origin"}, 403),
-        ({"Sec-Fetch-Site": "cross-site"}, 403),
-        ({}, 403),
-        (SAME, 303),
+        {"Origin": "http://evil.example"},
+        {"Origin": "null", "Sec-Fetch-Site": "same-origin"},
+        {"Sec-Fetch-Site": "cross-site"},
+        {},
+        SAME | {"Authorization": f"Bearer {TOKEN}"},
     ],
 )
-def test_every_post_passes_the_guard(client: TestClient, vault: Vault, headers: dict[str, str], status: int) -> None:
-    fields = form(page(client, opened(vault, MAIL_RID))) | {"act": "preview"}
-    assert client.post("/staging/classify", data=fields, headers=headers).status_code == status
-    assert client.post("/staging/promote", data={}, headers=headers).status_code == status
-
-
-def test_a_form_the_page_didnt_make_is_refused_and_nothing_written(client: TestClient, vault: Vault) -> None:
-    before = staged(vault)
-    no_record = client.post("/staging/classify", data={"label": "work"}, headers=SAME)
-    assert no_record.status_code == 400 and "the form names no record" in no_record.text
-    form_type = {"Content-Type": "application/x-www-form-urlencoded"}
-    not_utf8 = client.post("/staging/classify", content=b"label=\xff", headers=SAME | form_type)
-    assert not_utf8.status_code == 400
-    assert client.post("/staging/promote", json={"promote": "memo"}, headers=SAME).status_code == 415
-    assert staged(vault) == before
-
-
-def test_promote_with_nothing_ready_or_the_lock_held_writes_nothing(
-    client: TestClient, vault: Vault, monkeypatch: pytest.MonkeyPatch
+def test_every_write_passes_the_guard_and_takes_the_session_only(
+    client: TestClient, vault: Vault, headers: dict[str, str]
 ) -> None:
-    monkeypatch.setattr(service_state, "LOCK_SECONDS", 0.2)
-    with Vault.open(vault.root).lock:
-        busy = client.post("/staging/promote", data={"promote": "memo"}, headers=SAME)
-    assert busy.status_code == 400 and "another docket process holds" in busy.text
-    assert raw(vault) == {}
-    calm = client.post("/staging/promote", data={"promote": "calls"}, headers=SAME)
-    assert calm.headers["location"] == "/staging?done=promoted-0-0"
-    assert raw(vault) == {}
+    sent = body(panel_of(client, vault, MAIL_RID))
+    before = staged(vault)
+    assert client.post(CLASSIFY, json=sent, headers=headers).status_code == 403
+    assert client.post(PROMOTE, json={"source": None}, headers=headers).status_code == 403
+    assert staged(vault) == before and raw(vault) == {}
 
 
-def test_an_unexpected_failure_is_the_error_page_and_names_nothing_of_it(
+def test_the_token_never_reads_the_page_and_a_write_without_a_session_is_refused(
+    client: TestClient, vault: Vault
+) -> None:
+    assert client.get(API, headers={"Authorization": f"Bearer {TOKEN}"}).status_code == 403
+    sent = body(panel_of(client, vault, MAIL_RID))
+    client.cookies.clear()
+    assert client.post(CLASSIFY, json=sent, headers=SAME).status_code == 401
+    assert client.get(API).status_code == 401
+    assert staged(vault)[MAIL_RID]["state"] == "pending"
+
+
+def test_an_unexpected_failure_answers_500_and_names_nothing_of_it(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def broken(*_: object, **__: object) -> None:
         raise RuntimeError("Kovács Ödön's weekend")
 
     monkeypatch.setattr(staging_routes, "gather", broken)
-    answer = client.get("/staging")
-    assert answer.status_code == 500
-    assert "Something failed in Docket" in answer.text and "Kovács" not in answer.text
-    panel = client.get("/staging/panel")
-    assert panel.status_code == 500 and "Something failed in Docket" in panel.text
-    assert "Kovács" not in panel.text
+    for path in (API, f"{API}/panel"):
+        got = client.get(path)
+        assert got.status_code == 500
+        assert "Something failed in Docket" in got.json()["error"] and "Kovács" not in got.text
 
 
 def test_a_classification_of_a_record_on_hold_writes_nothing(client: TestClient, vault: Vault) -> None:
-    key = key_of(vault, TRANSCRIPT)
+    panel = panel_of(client, vault, TRANSCRIPT)
     holds.add(vault, "calls", ["rec-1"])
     before = staged(vault)
-    shown = {"shown_state": "pending", "shown_by": "", "shown_cuts": ""}
     for label in ("work", "private"):
-        answer = client.post("/staging/classify", data={"open": key, "label": label} | shown, headers=SAME)
-        assert answer.status_code == 400, label
-        assert "is on hold" in answer.text
+        refused = classify(client, body(panel, label), status=400)
+        assert "is on hold" in refused["error"], label
     assert staged(vault) == before
     assert not (vault.root / "staging" / "_decided.jsonl").exists()
 
 
-def test_work_on_a_cut_record_keeps_its_cuts_unless_they_are_unchecked(client: TestClient, vault: Vault) -> None:
+def test_work_on_a_cut_record_keeps_its_cuts_unless_they_are_unticked(client: TestClient, vault: Vault) -> None:
     cuts = [Cut(start=12_000, end=30_400, unit="ms"), Cut(start=50_000, end=55_000, unit="ms")]
     Gate(vault).classify(key_of(vault, TRANSCRIPT), "work", cuts, by="claude")
-    html = page(client, opened(vault, TRANSCRIPT))
-    assert "Work, with 2 cuts" in html
-    answer = client.post("/staging/classify", data=as_shown(html) | {"label": "work"}, headers=SAME)
-    assert answer.status_code == 303, answer.text
+    panel = panel_of(client, vault, TRANSCRIPT)
+    assert panel["work_label"] == "Work, with 2 cuts"
+    ticked = [str(u["n"]) for u in panel["utterances"] if u["checked"]]
+    assert (ticked, panel["typed"]) == (["2"], "0:50-0:55")
+    classify(client, body(panel, u=ticked, cut=[panel["typed"]]))
     file = staged(vault)[TRANSCRIPT]
     assert (file["classified_by"], [(c["start"], c["end"]) for c in file["cuts"]]) == (
         "user",
         [(12_000, 30_400), (50_000, 55_000)],
     )
+    # Unticked on purpose and read with picked: nothing stays ticked, and Work is whole.
+    bare = panel_of(client, vault, TRANSCRIPT, "&picked=1")
+    assert not any(u["checked"] for u in bare["utterances"]) and bare["work_label"] == "Work, whole"
 
 
 def test_a_version_staged_before_its_release_shows_the_released_stretch_as_gone(
@@ -526,29 +538,15 @@ def test_a_version_staged_before_its_release_shows_the_released_stretch_as_gone(
          "machine": "laptop-1"}
     )  # fmt: skip
     releaselog.add(vault, "calls", line)
-    html = page(client, opened(vault, TRANSCRIPT))
-    assert "released with its cuts" in html
-    assert "First the weekend plans." not in html and "The cabin by the lake" not in html
-    assert text_of(html, "was-cut") == ["00:12-00:31 cut by its release", "00:30-00:46 cut by its release"]
-    assert parse(html).find_all("input", name="u", value="2") == []
+    panel = panel_of(client, vault, TRANSCRIPT)
+    assert panel["why_line"].startswith("released with its cuts")
+    assert [u["n"] for u in panel["utterances"] if u["released"]] == [2, 3]
+    shown = json.dumps(panel)
+    assert "First the weekend plans." not in shown and "The cabin by the lake" not in shown
 
 
-def test_a_badly_typed_cut_keeps_the_record_open_and_its_checks(client: TestClient, vault: Vault) -> None:
-    before = staged(vault)
-    fields = form(page(client, opened(vault, TRANSCRIPT))) | {"u": "2", "cut": "12:30", "label": "work"}
-    answer = client.post("/staging/classify", data=fields, headers=SAME)
-    assert answer.status_code == 400
-    panel = parse(answer.text).find("section", class_="staged-record")
-    assert "cut 12:30: a cut is <start>-<end>" in panel.text()
-    assert [i.attrs["value"] for i in panel.find_all("input", name="u") if "checked" in i.attrs] == ["2"]
-    assert staged(vault) == before
-    html = page(client, opened(vault, TRANSCRIPT, "&u=2&cut=12.30-14.05"))
-    assert "cut 12.30-14.05: a cut" in text_of(html, "notice")[0]
-    assert parse(html).find("input", name="cut").attrs["value"] == "12.30-14.05"
-
-
-def test_a_post_without_a_session_is_refused(client: TestClient, vault: Vault) -> None:
-    fields = form(page(client, opened(vault, MAIL_RID))) | {"label": "work"}
-    client.cookies.clear()
-    assert client.post("/staging/classify", data=fields, headers=SAME).status_code == 401
-    assert staged(vault)[MAIL_RID]["state"] == "pending"
+def test_a_badly_typed_cut_is_the_panel_s_problem_with_the_ticks_kept(client: TestClient, vault: Vault) -> None:
+    panel = panel_of(client, vault, TRANSCRIPT, "&u=2&cut=12.30-14.05")
+    assert panel["problem"].startswith("cut 12.30-14.05: a cut")
+    assert [u["n"] for u in panel["utterances"] if u["checked"]] == [2]
+    assert panel["typed"] == "12.30-14.05" and not panel["can_work"] and panel["preview"] is None

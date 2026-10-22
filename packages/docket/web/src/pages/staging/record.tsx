@@ -102,7 +102,7 @@ function Utterances({
               data-utterance={u.n}
               data-going={going || undefined}
               className={cn(
-                "grid grid-cols-[auto_4.75rem_minmax(0,1fr)] items-start gap-x-2 rounded-sm py-0.5 pr-2",
+                "grid grid-cols-[auto_7rem_minmax(0,1fr)] items-start gap-x-2 rounded-sm py-0.5 pr-2",
                 choice.u.includes(u.n) && "bg-me-wash",
               )}
             >
@@ -116,7 +116,7 @@ function Utterances({
                   aria-label={`Cut ${u.span}`}
                 />
               )}
-              <span className="pt-0.5 font-mono text-xs text-ink-muted tabular-nums">{u.span}</span>
+              <span className="pt-0.5 font-mono text-xs whitespace-nowrap text-ink-muted tabular-nums">{u.span}</span>
               {gone ? (
                 <span className="pt-0.5 text-sm text-ink-muted italic">
                   {u.was_cut ? "[cut]" : "cut by its release"}
@@ -216,17 +216,20 @@ export function RecordBody({
     { name: "source", value: panel.source },
     { name: "said", value: panel.when },
     { name: "staged", value: panel.staged_at },
-    { name: "state", value: `${panel.state}, classified by ${panel.by}${cuts}` },
   ];
   return (
     <div className="grid gap-3 pb-4">
       <div className="grid gap-3 px-4 pt-3">
         <Facts pairs={facts} />
         <p className="grid gap-0.5">
+          <span className="text-xs text-ink-muted">state</span>
+          <span className="text-sm">{`${panel.state}, classified by ${panel.by}${cuts}`}</span>
+        </p>
+        <p className="grid gap-0.5">
           <span className="text-xs text-ink-muted">key</span>
           <code className="font-mono text-xs break-all">{panel.key}</code>
         </p>
-        <p className={cn("text-sm", panel.on_hold && "text-red")} data-why>
+        <p className={cn("text-sm", panel.on_hold && "text-red")} data-reason>
           {panel.why_line}
         </p>
         {changed && <Note tone="warn">{changed}</Note>}

@@ -18,10 +18,8 @@ from typing import Any
 
 import pytest
 from browser_kit import live
-from curate_kit import curate_vault
 from playwright.sync_api import Page, expect, sync_playwright
 from settings_kit import settings_template
-from staging_kit import staging_vault
 from sync_kit import as_structured, as_text, memo, sync_template
 
 from docket.service import client
@@ -46,12 +44,6 @@ def sync_service(sync_project: Path, tmp_path: Path) -> Iterator[tuple[int, str]
     yield from _serve(tmp_path / "project" / "vault")
 
 
-@pytest.fixture
-def staging_service(tmp_path: Path) -> Iterator[tuple[int, str]]:
-    """The real service over a vault with a transcript and a mail waiting, and a memo ready."""
-    yield from _serve(staging_vault(tmp_path).root)
-
-
 @pytest.fixture(scope="module")
 def settings_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return settings_template(tmp_path_factory)
@@ -62,12 +54,6 @@ def settings_service(settings_project: Path, tmp_path: Path) -> Iterator[tuple[i
     """The real service over a consuming project with a mixed, a work and a folder source, and never-store values."""
     shutil.copytree(settings_project, tmp_path / "project")
     yield from _serve(tmp_path / "project" / "vault")
-
-
-@pytest.fixture
-def curate_service(tmp_path: Path) -> Iterator[tuple[int, str]]:
-    """The real service over the invented curate vault: recordings, notes and mail, no entity yet."""
-    yield from _serve(curate_vault(tmp_path).root)
 
 
 _serve = live
@@ -132,137 +118,6 @@ def test_the_sync_page_in_a_browser(sync_service: tuple[int, str], tmp_path: Pat
         page.reload()
         _fits(page, f"li.run[id='{run}']", "li.failure", ".machine")
         page.screenshot(path=str(shots / "sync-390.png"), full_page=True)
-        assert not errors, errors
-        browser.close()
-
-
-def test_the_staging_page_in_a_browser(staging_service: tuple[int, str], tmp_path: Path) -> None:
-    port, token = staging_service
-    shots = Path(os.environ.get("DOCKET_TEST_SCREENSHOTS") or tmp_path)
-    shots.mkdir(parents=True, exist_ok=True)
-    link = client.call("POST", "/api/session", token=token, at=port)
-    assert link is not None
-    errors: list[str] = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
-        page = browser.new_page(viewport={"width": 1440, "height": 900})
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        page.on("requestfailed", lambda r: errors.append(f"request failed: {r.method} {r.url} ({r.failure})"))
-        page.on(
-            "response", lambda r: errors.append(f"{r.status} {r.request.method} {r.url}") if r.status >= 400 else None
-        )
-        base = f"http://127.0.0.1:{port}"
-        page.goto(f"{link.body['url']}&next=/staging")
-        page.wait_for_url(f"{base}/staging")
-        expect(page.locator(".lead")).to_have_text(
-            "3 records wait at the gate: 2 for you to classify, 1 ready to promote"
-        )
-
-        # j moves to the first record and Enter opens it beside the list, without leaving the page.
-        page.keyboard.press("j")
-        page.keyboard.press("Enter")
-        expect(page.locator("#panel-title")).to_have_text("Supplier call")
-        assert page.url.startswith(f"{base}/staging?open=")
-
-        # Two utterances checked and previewed: the overlapping third goes too. A real browser's post passes the
-        # Guard: the page's Referrer-Policy lets it send its Origin, not null.
-        page.locator("li.utterance input[value='2']").check()
-        page.click("button[value='preview']")
-        expect(page.locator(".preview")).to_contain_text("Removes 2 utterances: 00:12-00:31.")
-        assert "&u=2" in page.url
-        page.screenshot(path=str(shots / "staging.png"), full_page=True)
-
-        # At phone width the open record covers the list and nothing scrolls sideways.
-        page.set_viewport_size({"width": 390, "height": 844})
-        page.reload()
-        _fits(page, "#panel .close", ".utterance", "button[value='work']")
-        page.screenshot(path=str(shots / "staging-390.png"), full_page=True)
-        page.set_viewport_size({"width": 1440, "height": 900})
-
-        page.click("button[value='work']")
-        expect(page.locator(".notice")).to_contain_text("classified work: it goes to raw at the next promotion")
-        expect(page.locator("li.record.state-ready")).to_have_count(2)
-
-        # The mail dropped as private, through its own question.
-        page.click("text=The offer")
-        page.click("text=Private: drop it")
-        page.click("text=Drop it as private")
-        expect(page.locator(".notice")).to_contain_text("dropped as private")
-        expect(page.locator(".record-title")).to_have_count(2)
-
-        page.click("text=Promote all")
-        expect(page.locator(".notice")).to_contain_text("Promoted: 2 records written to raw and committed.")
-        expect(page.locator(".lead")).to_have_text("Nothing waits at the gate")
-        page.set_viewport_size({"width": 390, "height": 844})
-        _fits(page, ".lead", '[data-action="keys"]')
-        page.screenshot(path=str(shots / "staging-390-done.png"), full_page=True)
-        assert not errors, errors
-        browser.close()
-
-
-def test_the_curate_page_in_a_browser(curate_service: tuple[int, str], tmp_path: Path) -> None:
-    port, token = curate_service
-    shots = Path(os.environ.get("DOCKET_TEST_SCREENSHOTS") or tmp_path)
-    shots.mkdir(parents=True, exist_ok=True)
-    link = client.call("POST", "/api/session", token=token, at=port)
-    assert link is not None
-    errors: list[str] = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
-        page = browser.new_page(viewport={"width": 1440, "height": 900})
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        page.on("requestfailed", lambda r: errors.append(f"request failed: {r.method} {r.url} ({r.failure})"))
-        page.on(
-            "response", lambda r: errors.append(f"{r.status} {r.request.method} {r.url}") if r.status >= 400 else None
-        )
-        base = f"http://127.0.0.1:{port}"
-        page.goto(f"{link.body['url']}&next=/curate")
-        page.wait_for_url(f"{base}/curate")
-        expect(page.locator(".lead")).to_have_text("No round on this machine yet.")
-
-        # A round starts only on the click; a real browser's post passes the Guard.
-        page.click("text=Start a round")
-        expect(page.locator(".notice")).to_contain_text("A new round: 6 cards.")
-        expect(page.locator("li.card")).to_have_count(6)
-        # The keys are docket.js's, a deferred script: the new page's cards show before it has run, and a key pressed
-        # then is lost. It has run once the page has finished parsing.
-        page.wait_for_load_state("domcontentloaded")
-
-        # j moves to the first card and Enter opens it beside the list, its snippets cut now.
-        page.keyboard.press("j")
-        expect(page.locator("li.card a.hit-link").first).to_be_focused()
-        page.keyboard.press("Enter")
-        expect(page.locator("#panel-title")).to_have_text("1. New term: Northwind")
-        expect(page.locator(".snippet mark").first).to_have_text("Nortwin")
-        assert page.url.startswith(f"{base}/curate?open=")
-        page.screenshot(path=str(shots / "curate.png"), full_page=True)
-
-        # Edit opens the form in place; Cancel goes back to the card.
-        page.click("#panel >> text=Edit")
-        expect(page.locator(".edit-form")).to_be_visible()
-        assert "edit=" in page.url
-        page.screenshot(path=str(shots / "curate-edit.png"), full_page=True)
-        page.click("#panel >> text=Cancel")
-        expect(page.locator(".edit-form")).to_have_count(0)
-
-        # Accept: the entity is written, the card shows it, the log lists it with its Undo.
-        page.click("button[value='accept']")
-        expect(page.locator(".notice")).to_contain_text("accepted and logged")
-        expect(page.locator("li.card.state-accepted")).to_have_count(1)
-        expect(page.locator(".log-line")).to_have_count(1)
-
-        # At phone width the open card covers the list and nothing scrolls sideways.
-        page.set_viewport_size({"width": 390, "height": 844})
-        second = page.locator("li.card a.hit-link").nth(1).get_attribute("href")
-        assert second is not None
-        page.goto(f"{base}{second}")
-        _fits(page, "#panel .close", "button[value='accept']", "button[value='reject']")
-        page.screenshot(path=str(shots / "curate-390.png"), full_page=True)
-        page.goto(f"{base}/curate")
-        _fits(page, ".lead", ".log-line", '[data-action="keys"]')
-        page.screenshot(path=str(shots / "curate-390-list.png"), full_page=True)
         assert not errors, errors
         browser.close()
 

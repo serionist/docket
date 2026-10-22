@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from docket_testkit import INDEX_FIXTURE
 
+from docket.vault import entities
 from docket.vault.entities import (
     Alias,
     Entity,
@@ -258,3 +259,20 @@ def test_render_quotes_what_yaml_would_read_otherwise() -> None:
 )
 def test_a_comment_is_found_outside_every_value(text: str, line: int | None) -> None:
     assert comment_line(text) == line
+
+
+def test_a_file_s_read_is_kept_by_its_path_and_bytes_and_the_keep_is_bounded(tmp_path: Path) -> None:
+    """A changed file reads afresh, and the same bytes at another path read as that path's (DR-0786)."""
+    path = write(tmp_path, "person/ada-example.yaml", "id: ada-example\ntype: person\nname: {en: Ada Example}\n")
+    assert load_file(tmp_path, path)[0] == load_file(tmp_path, path)[0]
+    write(tmp_path, "person/ada-example.yaml", "id: ada-example\ntype: person\nname: {en: Ada Sample}\n")
+    found = load_file(tmp_path, path)[0]
+    assert found is not None and found.names == {"en": "Ada Sample"}
+    other = write(tmp_path, "person/ben-sample.yaml", "id: ada-example\ntype: person\nname: {en: Ada Sample}\n")
+    entity, problems = load_file(tmp_path, other)
+    assert entity is None or entity.path == "entities/person/ben-sample.yaml"
+    assert all(p.path == "entities/person/ben-sample.yaml" for p in problems)
+    # A caller's problems are its own: changing them changes nothing kept.
+    problems.append(entities.EntityProblem("x", "y"))
+    assert len(load_file(tmp_path, other)[1]) == len(problems) - 1
+    assert entities._parsed.cache_info().maxsize == entities.FILES_KEPT  # pyright: ignore[reportPrivateUsage]

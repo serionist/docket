@@ -98,10 +98,6 @@ def test_the_navigation_has_a_slot_for_every_page_and_links_the_built_ones(clien
     [
         "/sync",
         "/sync/runs",
-        "/staging",
-        "/staging/panel",
-        "/curate",
-        "/curate/panel",
         "/settings",
     ],
 )

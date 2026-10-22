@@ -116,6 +116,8 @@ export function RoundHead({ view, pending, onStart }: { view: CurateView; pendin
       </p>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <p className="min-w-0 flex-1 text-xs text-ink-muted">
+          {/* The header holds the minutes from 640 px; below, they lead this line. */}
+          <span className="sm:hidden">{view.minutes.charAt(0).toUpperCase() + view.minutes.slice(1)}. </span>
           {view.due}
           {view.round && " A new round replaces this one; every decision stays in the log."}
         </p>

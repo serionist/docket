@@ -1411,14 +1411,6 @@
             "title": "Skipped",
             "type": "array"
           },
-          "stoplist": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Stoplist",
-            "type": "array"
-          },
           "tier1": {
             "anyOf": [
               {
