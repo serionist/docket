@@ -292,8 +292,8 @@ def _test_file(path: Path, config: pytest.Config) -> bool:
 def collect_problems(path: Path, config: pytest.Config, nodes: list[Any], found: Plan) -> list[str]:
     """Why the collection of a test file, or of a class in one, fails: the list doesn't name the file, so no share
     would hold it; or the file is under same and holds a test marked smoke or perf that its text doesn't show, so
-    --select would never collect it on Windows and macOS. Every Linux share collects every file under same that isn't
-    the nightly's whole."""
+    --select would never collect it on Windows and macOS. Linux's shares between them collect every file under same
+    that isn't the nightly's whole, each share its own, so a PR's run there finds every such test."""
     rel = _relative(path, config.rootpath)
     if _test_file(path, config) and rel not in found.named:
         return [_unnamed(rel)]
