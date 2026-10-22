@@ -1,0 +1,19 @@
+decisions:
+  - id: DR-0794
+    title: UI work on the web app follows build-ui and check-ui, and a full audit ui-audit, on throwaway services identified by their port and token, with no committed baselines
+    status: proposed
+    at: "2026-10-22"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#299", "22 Oct, the maintainer's ask"]
+    description: "The maintainer asked, on 22 Oct, to \"copy and use the ui related skills\" of another of his repos. Three skills join the work loop in .claude/skills, adapted to Docket's web app rather than copied: build-ui holds the bar a page meets (its states, writes, typed text, focus, keys, the phone width every page is shot at, what a read may send, what no page does) and the traps the React move paid for; check-ui runs uv run devkit ui for the shots and machine checks, and headless Playwright against a throwaway service for what still shots can't show (interaction, interruption, concurrency, failure, a lapsed session, a slow network, the shell's folds), at most four rounds a page as DR-0712 says, ending with a coverage table; ui-audit audits many pages with journeys, Tier 1 machine checks, judges and fixes systemic first, as fresh agents per role at its deep tier. Its runner starts each world's service through serve.py, which runs devkit.ui.service, so it gets the same own folders, file token, failing keyring and free port, and it identifies that service before any step: never port 8741, the origin localhost on the recorded port, the vault in a docket-ui- folder, and /api/status answering the token the run's world wrote with the recorded port, pid, vault and machine. The service has no fault hook; route interception in the browser stands in. Blessed baselines stay in .local/ui-audit/baselines on the machine, never committed, as DR-0712 chose no pixel baselines in the repo. Docket has one owner, so the personas are the owner and a stranger. AGENTS.md lists the three, start-work points a web app change at build-ui, and finish-work asks for check-ui's coverage table in the PR."
+    binds:
+      - A change to the web app's pages runs check-ui on each page it changes, and its coverage table goes in the PR.
+      - check-ui and ui-audit drive only a throwaway service they started and identified, never port 8741, the owner's vault, cookie or keychain, or the owner's browser.
+      - No UI baseline or shot is committed.
+      - "ui-audit keeps DR-0712's cap: at most four fix-and-verify rounds a page, its default 4."
+    not_chosen:
+      - "Copying the skills as they were: their stack, a dev deployment with seed and fault hooks, roles and committed baselines, isn't Docket's."
+      - "A second screenshot tool for check-ui beside devkit ui: two sets of checks to keep in step."
+      - "A fault hook in the service: a new surface with no other caller, where route interception in the browser does the job."
+      - "Committing blessed baselines: DR-0712 chose none while the pages change PR by PR."

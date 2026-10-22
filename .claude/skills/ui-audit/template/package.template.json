@@ -1,0 +1,17 @@
+{
+  "name": "ui-audit-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The ui-audit runner. A run copies template/ into .local/ui-audit/<run>/e2e/ and this file to package.json there; kept under another name so no tool takes this folder for a package. App facts live in config.json and serve.py, never here.",
+  "engines": { "node": ">=24.21.0 <25" },
+  "scripts": {
+    "check": "node runner.mjs check"
+  },
+  "dependencies": {
+    "axe-core": "4.14.0",
+    "pixelmatch": "8.0.0",
+    "playwright": "1.64.0",
+    "pngjs": "7.0.0"
+  }
+}

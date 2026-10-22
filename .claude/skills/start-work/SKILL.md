@@ -21,7 +21,7 @@ code can start: an issue on the board, a plan when the change needs one, the pla
      milestone; add `--size S|M|L`).
 2. Read before planning: `uv run docs door <path>` for every folder the change touches and what it lists, the
    decisions that bind them (`uv run docs list decisions --path <path>`), the code and the tests there, and
-   `REVIEW.md`.
+   `REVIEW.md`. A change to the web app (`packages/docket/web/`) also reads `build-ui`, whose bar the plan meets.
 3. Decide whether it needs a plan, by the rule in `docs/plans/README.md`. Recommend one for anything touching a
    one-way door, the vault's data, or more than one package.
 4. Write the plan at `docs/plans/<today>-<n>-<slug>.md` from the template, with `issue` set. Fill every section;
