@@ -37,8 +37,6 @@ STYLESHEETS = (
     "css/components.css",
     "css/panes.css",
     "css/sync.css",
-    "css/staging.css",
-    "css/curate.css",
     "css/settings.css",
 )
 # A page that posts a form says so: under the service's floor, no-referrer, a browser sends Origin: null on a

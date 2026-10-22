@@ -253,18 +253,6 @@
     border-radius: 0 4px 4px 0;
   }
 
-  /* -- a time beside an utterance, as Staging's cuts list them ---------------------------------------------- */
-  .time {
-    padding: 0 4px;
-    font-size: var(--text-xs);
-    color: var(--muted);
-    background: none;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    cursor: copy;
-  }
-  .time:hover { border-color: var(--line-strong); color: var(--ink); }
-
   /* -- the empty state any page shows -------------------------------------------------------------------------- */
   .empty { padding: var(--space-5); color: var(--ink); background: var(--surface); border: 1px dashed var(--line-strong); border-radius: var(--radius-lg); }
   .empty h3 { margin-bottom: var(--space-2); }

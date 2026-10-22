@@ -9,13 +9,16 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { docketBuild } from "./scripts/build.js";
+import { inputsHash } from "./scripts/inputs.js";
 
 const root = import.meta.dirname;
 const target = process.env.DOCKET_DEV_TARGET ?? "http://127.0.0.1:8742";
 const proxied = { target, changeOrigin: true, headers: { Origin: target } };
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   base: "/static/app/",
+  // The build's stamp, as build.json holds it, so a page loaded later can tell the service now serves another build.
+  define: { __DOCKET_BUILD__: JSON.stringify(command === "build" ? inputsHash(root) : "") },
   plugins: [react(), tailwindcss(), docketBuild({ root })],
   resolve: { alias: { "@": path.resolve(root, "src") } },
   build: {
@@ -42,4 +45,4 @@ export default defineConfig({
     strictPort: true,
     proxy: { "/api": proxied, "/session": proxied, "/static/icon.svg": proxied },
   },
-});
+}));

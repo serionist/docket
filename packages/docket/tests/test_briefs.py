@@ -283,6 +283,8 @@ def test_a_brief_whose_history_isnt_here_is_stale_never_current(vault: Vault, mo
 def test_one_brief_s_missing_commit_leaves_the_others_as_they_are(
     vault: Vault, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # A time kept by an earlier test would leave only the missing commit to ask git for, one by one.
+    keeps_emptied(monkeypatch)
     put_ben(vault)
     recall.doc_put(vault, brief("northwind", "Northwind", changed=[f"- Above the budget. {cite(vault, TEN)}"]))
     real = DocStore.histories

@@ -302,6 +302,11 @@ Unreleased in the same PR.
 
 ### Changed
 
+- The Staging and Curate pages move into the web app's shell. Staging's open record sits beside the list with its
+  ticks, Preview, Work and Private at the panel's foot, and a record another tab, the CLI or Claude changed since you
+  opened it is refused and shown as it stands; the sidebar's count follows each write. On Curate the open card's edit
+  form opens in the panel, deciding a card opens the next one still open, and a card whose entity changed since is
+  refused the same way. Their URLs and keys are as before, and a round on hundreds of entities lists faster.
 - The Briefs page moves into the web app's shell. The decisions waiting for you lead the list; a brief's line opens
   its raw in the panel beside it, and `j` and `k` carry it along; a decision's buttons confirm, reject or settle a
   contradiction as before, and one that changed since you opened the page, in another tab or by Claude, is refused

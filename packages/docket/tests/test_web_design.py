@@ -15,7 +15,6 @@ TOKEN = re.compile(r"--([a-z0-9-]+):\s*light-dark\((#[0-9a-f]{6}),\s*(#[0-9a-f]{
 # (foreground, background, the least ratio): text 4.5:1; borders, the focus ring and icons 3:1 (WCAG 1.4.3, 1.4.11).
 PAIRS = [
     *((ink, ground, 4.5) for ink in ("ink", "muted", "accent", "error", "warn", "ok") for ground in ("bg", "surface")),
-    *((f"k-{kind}", "surface", 4.5) for kind in ("recording", "thread", "record", "event", "doc")),
     ("accent", "accent-soft", 4.5),
     ("accent-ink", "accent", 4.5),
     ("ink", "mark", 4.5),

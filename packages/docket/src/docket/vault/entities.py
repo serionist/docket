@@ -28,6 +28,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, cast
 
@@ -252,14 +253,37 @@ class _Reader:
         )
 
 
+# The entity files' reads kept, by path and bytes: a page that lists a round or the briefs reads every entity file,
+# and parsing hundreds of them each time took most of the read. A file's read is a function of the two alone.
+FILES_KEPT = 4096
+
+
+def _rel(root: Path, path: Path) -> str:
+    """A path under root as a vault path; by its text, since pathlib's relative_to takes most of a read of hundreds of
+    files on Windows."""
+    base, text = f"{root.as_posix().rstrip('/')}/", path.as_posix()
+    return text.removeprefix(base) if text.startswith(base) else path.relative_to(root).as_posix()
+
+
 def load_file(root: Path, path: Path) -> tuple[Entity | None, list[EntityProblem]]:
+    rel = _rel(root, path)
+    if path.suffix != ".yaml" or len(PurePosixPath(rel).parts) != 3:
+        # Refused by its place before it is read.
+        return _load(rel, lambda: "")
+    entity, problems = _parsed(rel, path.read_bytes())
+    return entity, list(problems)
+
+
+@lru_cache(maxsize=FILES_KEPT)
+def _parsed(rel: str, data: bytes) -> tuple[Entity | None, tuple[EntityProblem, ...]]:
     def text() -> str:
         try:
-            return path.read_bytes().decode("utf-8")
+            return data.decode("utf-8")
         except UnicodeDecodeError:
             raise _SkipError("isn't UTF-8") from None
 
-    return _load(path.relative_to(root).as_posix(), text)
+    entity, problems = _load(rel, text)
+    return entity, tuple(problems)
 
 
 def load_text(rel: str, text: str) -> tuple[Entity | None, list[EntityProblem]]:
@@ -317,7 +341,7 @@ def load_entities(root: Path) -> Entities:
             if other not in seen:
                 problems.append(EntityProblem(entity.path, f"{what}: no entity has the id {other!r}"))
     entities.sort(key=lambda e: e.id)
-    return Entities(entities, problems, [p.relative_to(root).as_posix() for p in files])
+    return Entities(entities, problems, [_rel(root, p) for p in files])
 
 
 # Wide enough that no name, alias or note is ever folded onto a second line.

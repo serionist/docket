@@ -3,9 +3,9 @@ renders without JavaScript (DR-0170). Nothing loads from the network: htmx, the 
 package, served under `/static/` (DR-0171), and every page carries a CSP stricter than the service's floor (DR-0172).
 
 The pages move one by one into the React app (#252): its build is served under `/static/app/` and its document for
-each route its `routes.json` lists, the day pages, Search, the Recording page, Briefs and `/design` so far, beside its
-JSON routes under `/api/web` (`frontend`, `webapi`, `day_api`, `search`, `recording`, `briefs`). `/` answers 303 to
-Today, the start page (DR-0669).
+each route its `routes.json` lists, the day pages, Search, the Recording page, Briefs, Staging, Curate and `/design` so
+far, beside its JSON routes under `/api/web` (`frontend`, `webapi`, `day_api`, `search`, `recording`, `briefs`,
+`staging`, `curate`). `/` answers 303 to Today, the start page (DR-0669).
 
 `install` mounts it on the service's FastAPI app; `sign_in_page` and `used_link_page` are the pages the service shows
 a browser without a session, in the bare layout that names neither the vault nor the machine.
@@ -20,16 +20,7 @@ from starlette.responses import RedirectResponse, Response
 
 from docket.service.sessions import open_command
 from docket.service.state import Service
-from docket.web import (
-    assets,
-    curate,
-    frontend,
-    settings,
-    staging,
-    sync,
-    templating,
-    webapi,
-)
+from docket.web import assets, frontend, settings, sync, templating, webapi
 
 # Paths whose 404 stays JSON: the clients of these read JSON, never a page.
 MACHINE_PATHS = ("/api", "/mcp")
@@ -51,8 +42,6 @@ def used_link_page(after: str) -> str:
 
 def install(app: FastAPI, service: Service) -> None:
     app.include_router(sync.router(service))
-    app.include_router(staging.router(service))
-    app.include_router(curate.router(service))
     app.include_router(settings.router(service))
     app.include_router(webapi.router(service))
     app.add_middleware(webapi.WriteBodies)

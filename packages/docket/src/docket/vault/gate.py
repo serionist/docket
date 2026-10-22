@@ -172,6 +172,14 @@ class Shown:
     release_cuts: tuple[Cut, ...] = ()
 
 
+def held_refusal(record: RawRecord) -> DocketError:
+    """Why a record a hold covers can't be classified, in words that name nothing of its body."""
+    return DocketError(
+        f"{record.rid} is on hold in {holds.HOLDS}/{record.source}.txt: it can't be classified, work or private, until "
+        "the hold is released"
+    )
+
+
 class Gate:
     def __init__(self, vault: Vault) -> None:
         self.vault = vault
@@ -302,10 +310,7 @@ class Gate:
             record = entry.staged.record
             if self._holds.covers(record):
                 # Private too: dropping it would record a decision that releasing the hold would have to undo.
-                raise DocketError(
-                    f"{record.rid} is on hold in {holds.HOLDS}/{record.source}.txt: it can't be classified, work or "
-                    "private, until the hold is released"
-                )
+                raise held_refusal(record)
             if label == "private":
                 if cuts:
                     raise DocketError("cuts go with work; a private record is dropped whole")

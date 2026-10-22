@@ -884,7 +884,7 @@ Queue, the Ledger, Meetings, Search, Recording, Briefs, Sync, Staging, Curate an
 pages still to come, with the phase each arrives in.
 
 The pages are moving, one by one, into a new app built in React; the day pages, Today, the Queue, the Ledger and
-Meetings, are its first, then Search, the Recording page and Briefs. Its shell is the sidebar with
+Meetings, are its first, then Search, the Recording page, Briefs, Staging and Curate. Its shell is the sidebar with
 what waits at the gate and whether a sync is due, the theme and keys switches at its foot, the list and the open item
 beside it; `/design` shows its parts on invented data. It comes built with Docket; nothing to install.
 
@@ -1048,25 +1048,47 @@ drops or closes a run.
 
 ### The Staging page
 
-`/staging` is what waits at the gate, worked in the browser through the same calls as `docket staging` (DR-0380 to
-DR-0384).
+`/staging` is what waits at the gate, worked in the browser through the same calls as `docket staging` (DR-0380,
+DR-0382, DR-0383, DR-0784, DR-0785).
 
 | Part | Shows and does |
 |---|---|
 | Ready | what goes at the next promotion, per source, with a Promote button per source and one for all |
 | Waiting | each record by source, oldest first: kind, title, when, how long it waited, and why it waits; a record's text only once you open it |
-| The open record | as promotion would write it, redacted by today's rules: check utterances or lines to cut, or type a range (`12:30-14:05`, `120-340`), Preview, then Work; or Private, which asks once more and drops it |
+| The open record | beside the list, as promotion would write it, redacted by today's rules: tick utterances or lines to cut, or type a range (`12:30-14:05`, `120-340`), Preview, then Work; or Private, which asks once more and drops it |
 | Held | each source's held ids, and the commands that read and release one in your terminal, quoted, with `--from` and `--vault` filled |
 
 - The page names the release's command, which you run or Claude runs on your yes; no page releases a hold (DR-0382).
 - A record the CLI, Claude or another tab changed since you opened it isn't overwritten: the page says so and shows it
-  as it stands.
-- A record that already has cuts opens with them checked, and Work keeps them unless you uncheck them. Utterances its
+  as it stands. A refused cut, such as a range that doesn't read, keeps what you ticked and typed beside its words.
+- A record that already has cuts opens with them ticked, and Work keeps them unless you untick them. Utterances its
   recording's release cuts show as gone, with no text.
 - A typed time can carry milliseconds, `0:30.400`, as `--cut` takes it everywhere.
-- Its URL holds `source`, `state`, `k`, the open record (`open`), what you checked (`u`, `line`), typed cuts (`cut`),
+- Its URL holds `source`, `state`, `k`, the open record (`open`), what you previewed (`u`, `line`), typed cuts (`cut`),
   `picked=1` when you cleared a record's cuts on purpose, and the drop's question (`confirm=private`).
-- Keys: `j` and `k` through the records, `Enter` to open one, `Esc` to close it, `?`. No key writes.
+- Its writes take the browser's session only: the token never classifies or promotes.
+- Keys: `j` and `k` through the records, an open record following, `Enter` or `o` to open one, `Esc` to close it,
+  `?`. No key writes.
+
+### The Curate page
+
+`/curate` is this machine's curate round, worked in the browser as `docket curate` and the curate skill work it
+(DR-0468, DR-0786).
+
+| Part | Shows and does |
+|---|---|
+| The round | its cards, up to 15: new people and terms, and spellings search misses for entities you have, each with its state; Start a round, or a new one |
+| The open card | beside the list: what it would write, its spellings, and up to three snippets with the spelling marked, each a link to Search; Accept, Edit or Reject |
+| Edit | in the panel: for a new card its type, id, a name per language and role; the spellings to keep, each plain or asr; the rest are rejected as its aliases |
+| Around it | what tier 1 applied by itself, your question set before and after, the forms matching leaves out, the log with Undo, the stoplist with Lift |
+
+- Once you decide a card, the next open card opens.
+- A card whose entity file changed since the page showed it, by another tab, the CLI or Claude, isn't overwritten: the
+  page says so and shows it as it stands. A refused edit keeps what you typed beside its words.
+- A value a never-store list holds shows as hidden, with no Undo or Lift.
+- Its URL holds the open card (`open`) or its edit form (`edit`). Its writes take the browser's session only.
+- Keys: `j` and `k` through the cards, an open card following, `Enter` or `o` to open one, `Esc` to close it, `?`.
+  No key decides a card.
 
 ### The Settings page
 

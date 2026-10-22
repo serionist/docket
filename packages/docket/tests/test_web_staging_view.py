@@ -1,4 +1,4 @@
-"""The Staging page's parts on invented records, with no I/O (DR-0380 to DR-0384): the URL both ways, the cuts a
+"""The Staging page's parts on invented records, with no I/O (DR-0380, DR-0383, DR-0784): the URL both ways, the cuts a
 selection makes, a record shown as promotion would write it, the list and its reasons, and the held part's commands."""
 
 from __future__ import annotations
@@ -27,7 +27,6 @@ from docket.web.staging_view import (
     build_held,
     build_list,
     build_panel,
-    canonical,
     chosen_cuts,
     done_line,
     read_record,
@@ -69,9 +68,6 @@ def test_the_url_is_written_back_in_one_canonical_form() -> None:
     assert state("u=1&line=2&cut=1-4&confirm=private").url() == "/staging"
     assert state("done=work-3f9a1c2e4b5d").url() == "/staging"
     assert state("done=work-3f9a1c2e4b5d").url(done=True) == "/staging?done=work-3f9a1c2e4b5d"
-    assert canonical(f"http://127.0.0.1:1/staging/panel?u=2&open={OPENED}") == f"/staging?open={OPENED}&u=2"
-    assert canonical("http://127.0.0.1:1/search?query=x") is None
-    assert canonical("http://127.0.0.1:1/staging?k=0") is None
     # picked says an empty selection is the user's; with anything selected it says nothing, and it needs a record.
     assert state(f"open={OPENED}&picked=1").url() == f"/staging?open={OPENED}&picked=1"
     assert state(f"open={OPENED}&picked=1&u=2").url() == f"/staging?open={OPENED}&u=2"
@@ -187,7 +183,7 @@ def test_a_cut_the_record_cant_take_is_the_previews_problem() -> None:
 
 def test_seen_names_what_the_panel_showed() -> None:
     staged = Staged(state="ready", staged_at=NOW, classified_by="claude", cuts=[Cut(start=1, end=4)], record=memo())
-    assert seen(staged) == {"shown_state": "ready", "shown_by": "claude", "shown_cuts": "char:1-4"}
+    assert seen(staged).model_dump() == {"state": "ready", "by": "claude", "cuts": "char:1-4"}
 
 
 # -- the panel -------------------------------------------------------------------------------------------------------
@@ -206,9 +202,9 @@ def test_the_panel_shows_a_record_as_promotion_would_write_it_and_says_so() -> N
 
 def test_a_transcript_s_people_read_as_its_speakers_and_a_message_s_as_its_recipients() -> None:
     talk = build_panel(shown(transcript(to=["Ada Example", "Ben Sample"])), CREDENTIALS, state(f"open={OPENED}"))
-    assert ("speakers", "Ada Example, Ben Sample") in talk.facts
+    assert ("speakers", "Ada Example, Ben Sample") in [(f.name, f.value) for f in talk.facts]
     note = build_panel(shown(mail(to=["ben@example.invalid"])), CREDENTIALS, state(f"open={OPENED}"))
-    assert ("to", "ben@example.invalid") in note.facts
+    assert ("to", "ben@example.invalid") in [(f.name, f.value) for f in note.facts]
 
 
 def test_the_preview_names_the_utterances_that_go_an_overlapping_one_included() -> None:
@@ -293,6 +289,33 @@ def test_a_record_on_hold_shows_neither_its_title_nor_its_text() -> None:
     assert not panel.can_work
 
 
+@pytest.mark.parametrize("chosen", ["u=2", "u=99", "line=1", "cut=0-12", "cut=0:10-0:20", "picked=1"])
+@pytest.mark.parametrize("record", [transcript(), mail()], ids=["transcript", "mail"])
+def test_a_selection_on_a_record_on_hold_works_out_nothing_from_its_body(chosen: str, record: RawRecord) -> None:
+    """Neither a preview nor a selection's problem: each would carry the body or its shape (DR-0380, DR-0382)."""
+    panel = build_panel(shown(record, "on-hold"), CREDENTIALS, state(f"open={OPENED}&{chosen}"))
+    assert (panel.preview, panel.problem, panel.typed, panel.notes) == (None, None, "", [])
+    said = str(panel.model_dump())
+    for words in (
+        "weekend",
+        "Morning",
+        "offer",
+        "10 million",
+        "Hello Ben",
+        "names utterance",
+        "this text has",
+        "Removes",
+    ):
+        assert words not in said, (chosen, words)
+
+
+def test_a_record_on_hold_with_stored_cuts_works_out_nothing_from_its_body() -> None:
+    cuts = [Cut(start=0, end=10, unit="char")]
+    panel = build_panel(shown(mail(), "on-hold", state="ready", cuts=cuts), CREDENTIALS, state(f"open={OPENED}"))
+    assert (panel.preview, panel.problem, panel.typed, panel.work_label) == (None, None, "", "Work, whole")
+    assert "offer" not in str(panel.model_dump()) and "Hello" not in str(panel.model_dump())
+
+
 # -- the list --------------------------------------------------------------------------------------------------------
 
 
@@ -315,7 +338,7 @@ def test_the_list_counts_titles_and_reasons() -> None:
     assert rows["calls:rec-9/transcript"].title == "" and rows["calls:rec-9/transcript"].on_hold
     assert rows["calls:mail-1"].line == "an earlier version was decided by hand: work or private?"
     assert rows["calls:rec-1/transcript"].waited == "2 days"
-    assert view.ready == [("memo", 1)]
+    assert [(r.source, r.n) for r in view.ready] == [("memo", 1)]
     assert [c.label for c in view.source_chips] == ["All sources", "calls", "memo"]
     narrowed = build_list(Listing(entries, [], why), CREDENTIALS, state("state=ready"), NOW)
     assert [r.rid for g in narrowed.groups for r in g.rows] == ["memo:m-1"]
@@ -381,7 +404,11 @@ def test_a_value_a_shell_would_act_on_stays_a_placeholder_listed_beside() -> Non
     folders = {"calls": ["/home/ada/$HOME/calls", "/srv/two"]}
     (out,) = build_held(held, Releases(), StagingState(), folders=folders, root="/srv/100%", on_hold={})
     assert out.ids[0].commands[0].text == 'docket hold show calls "rec-1" --from "<folder>" --vault "<vault>"'
-    assert out.unfilled == [("folder", "/home/ada/$HOME/calls"), ("folder", "/srv/two"), ("vault", "/srv/100%")]
+    assert [(u.name, u.value) for u in out.unfilled] == [
+        ("folder", "/home/ada/$HOME/calls"),
+        ("folder", "/srv/two"),
+        ("vault", "/srv/100%"),
+    ]
     assert build_held(held, Releases(), state("source=memo"), folders={}, root="/v", on_hold={}) == []
 
 
@@ -402,7 +429,7 @@ def test_each_character_a_shell_reads_leaves_its_value_a_placeholder(bad: str, w
     (out,) = build_held(held, Releases(), StagingState(), folders={"calls": [folder]}, root=root, on_hold={})
     command = out.ids[0].commands[1].text
     assert value not in command and f'"<{where}>"' in command
-    assert out.unfilled == [(where, value)]
+    assert [(u.name, u.value) for u in out.unfilled] == [(where, value)]
 
 
 def test_a_trailing_backslash_leaves_its_value_a_placeholder() -> None:

@@ -104,14 +104,19 @@ def _notes() -> list[str]:
     ]
 
 
-def build_curate_vault(folder: Path) -> Path:
-    vault = Vault.init(folder / "vault", make_config(), "test-box")
+def fill_curate(vault: Vault) -> None:
+    """The recordings, mail and notes above, written into a vault, and its index built."""
     records = _records()
     vault.write_run("plaud", [r for r in records if r.source == "plaud"])
     vault.write_run("mail", [r for r in records if r.source == "mail"])
     for text in _notes():
         recall.doc_put(vault, text)
     index.rebuild(vault)
+
+
+def build_curate_vault(folder: Path) -> Path:
+    vault = Vault.init(folder / "vault", make_config(), "test-box")
+    fill_curate(vault)
     return vault.root
 
 

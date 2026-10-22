@@ -835,6 +835,184 @@
         "title": "Card",
         "type": "object"
       },
+      "CardPanel": {
+        "properties": {
+          "back": {
+            "title": "Back",
+            "type": "string"
+          },
+          "close": {
+            "title": "Close",
+            "type": "string"
+          },
+          "edit_url": {
+            "title": "Edit Url",
+            "type": "string"
+          },
+          "editable": {
+            "title": "Editable",
+            "type": "boolean"
+          },
+          "entity": {
+            "title": "Entity",
+            "type": "string"
+          },
+          "form": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditForm"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "missed": {
+            "title": "Missed",
+            "type": "string"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "new": {
+            "title": "New",
+            "type": "boolean"
+          },
+          "newest": {
+            "title": "Newest",
+            "type": "string"
+          },
+          "round": {
+            "title": "Round",
+            "type": "string"
+          },
+          "snippets": {
+            "items": {
+              "$ref": "#/components/schemas/SnippetView"
+            },
+            "title": "Snippets",
+            "type": "array"
+          },
+          "spellings": {
+            "items": {
+              "$ref": "#/components/schemas/SpellingView"
+            },
+            "title": "Spellings",
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "accepted",
+              "rejected",
+              "done"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "n",
+          "new",
+          "editable",
+          "kind",
+          "title",
+          "state",
+          "type",
+          "entity",
+          "spellings",
+          "missed",
+          "newest",
+          "snippets",
+          "round",
+          "hash",
+          "close",
+          "edit_url",
+          "back",
+          "form"
+        ],
+        "title": "CardPanel",
+        "type": "object"
+      },
+      "CardRow": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "missed": {
+            "title": "Missed",
+            "type": "string"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "spellings": {
+            "items": {
+              "$ref": "#/components/schemas/SpellingView"
+            },
+            "title": "Spellings",
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "accepted",
+              "rejected",
+              "done"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "n",
+          "state",
+          "kind",
+          "title",
+          "spellings",
+          "missed",
+          "url"
+        ],
+        "title": "CardRow",
+        "type": "object"
+      },
       "Changed": {
         "properties": {
           "changed": {
@@ -959,6 +1137,343 @@
           "spans"
         ],
         "title": "CitedLine",
+        "type": "object"
+      },
+      "Classified": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "notice": {
+            "title": "Notice",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "notice"
+        ],
+        "title": "Classified",
+        "type": "object"
+      },
+      "Classify": {
+        "additionalProperties": false,
+        "description": "Work or private on a staged record: its key, what is checked on it and typed, as the URL holds them (`u` and\n`line` each a number from 1 or a range, `cut` as --cut takes it), and what the panel showed of it.",
+        "properties": {
+          "cut": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Cut",
+            "type": "array"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "line": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Line",
+            "type": "array"
+          },
+          "seen": {
+            "$ref": "#/components/schemas/Seen"
+          },
+          "u": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "U",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "seen"
+        ],
+        "title": "Classify",
+        "type": "object"
+      },
+      "CurateDecide": {
+        "additionalProperties": false,
+        "description": "Accept, reject or edit one card, at the round and the entity file's hash the page showed it with.",
+        "properties": {
+          "act": {
+            "title": "Act",
+            "type": "string"
+          },
+          "card": {
+            "title": "Card",
+            "type": "string"
+          },
+          "edit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Edited"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "round": {
+            "title": "Round",
+            "type": "string"
+          }
+        },
+        "required": [
+          "act",
+          "round",
+          "card",
+          "hash"
+        ],
+        "title": "CurateDecide",
+        "type": "object"
+      },
+      "CuratePanelRead": {
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "missing": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing"
+          },
+          "panel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CardPanel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "canonical",
+          "panel",
+          "missing"
+        ],
+        "title": "CuratePanelRead",
+        "type": "object"
+      },
+      "CurateRead": {
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "lifts": {
+            "items": {
+              "$ref": "#/components/schemas/Lift"
+            },
+            "title": "Lifts",
+            "type": "array"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice"
+          },
+          "view": {
+            "$ref": "#/components/schemas/CurateView"
+          }
+        },
+        "required": [
+          "canonical",
+          "view",
+          "lifts",
+          "notice"
+        ],
+        "title": "CurateRead",
+        "type": "object"
+      },
+      "CurateView": {
+        "properties": {
+          "applied": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LogRow"
+            },
+            "title": "Applied",
+            "type": "array"
+          },
+          "cards": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CardRow"
+            },
+            "title": "Cards",
+            "type": "array"
+          },
+          "dropped": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Dropped",
+            "type": "array"
+          },
+          "due": {
+            "title": "Due",
+            "type": "string"
+          },
+          "lead": {
+            "title": "Lead",
+            "type": "string"
+          },
+          "left_out": {
+            "default": "",
+            "title": "Left Out",
+            "type": "string"
+          },
+          "log": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LogRow"
+            },
+            "title": "Log",
+            "type": "array"
+          },
+          "measures": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Measures"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "minutes": {
+            "title": "Minutes",
+            "type": "string"
+          },
+          "problems": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "round": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Round"
+          },
+          "skipped": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "tier1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier1"
+          }
+        },
+        "required": [
+          "lead",
+          "due",
+          "minutes",
+          "round"
+        ],
+        "title": "CurateView",
+        "type": "object"
+      },
+      "CutBefore": {
+        "description": "The version in raw that was cut before: its run and its text.",
+        "properties": {
+          "run": {
+            "title": "Run",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run",
+          "text"
+        ],
+        "title": "CutBefore",
+        "type": "object"
+      },
+      "CutPreview": {
+        "properties": {
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "summary",
+          "text"
+        ],
+        "title": "CutPreview",
         "type": "object"
       },
       "Day": {
@@ -1212,6 +1727,19 @@
         "title": "DocChoice",
         "type": "object"
       },
+      "Done": {
+        "properties": {
+          "notice": {
+            "title": "Notice",
+            "type": "string"
+          }
+        },
+        "required": [
+          "notice"
+        ],
+        "title": "Done",
+        "type": "object"
+      },
       "Due": {
         "properties": {
           "text": {
@@ -1237,6 +1765,158 @@
           }
         },
         "title": "Due",
+        "type": "object"
+      },
+      "EditForm": {
+        "description": "The edit form as the card proposes it: for a new card its type, id, a name per language and role; the\nspellings to keep, each plain or asr.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "names": {
+            "items": {
+              "$ref": "#/components/schemas/EditName"
+            },
+            "title": "Names",
+            "type": "array"
+          },
+          "new": {
+            "title": "New",
+            "type": "boolean"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "spellings": {
+            "items": {
+              "$ref": "#/components/schemas/EditSpelling"
+            },
+            "title": "Spellings",
+            "type": "array"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Types",
+            "type": "array"
+          }
+        },
+        "required": [
+          "new",
+          "types",
+          "type",
+          "id",
+          "names",
+          "spellings",
+          "role"
+        ],
+        "title": "EditForm",
+        "type": "object"
+      },
+      "EditName": {
+        "description": "A new card's name in one of the owner's languages.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "value"
+        ],
+        "title": "EditName",
+        "type": "object"
+      },
+      "EditSpelling": {
+        "properties": {
+          "checked": {
+            "title": "Checked",
+            "type": "boolean"
+          },
+          "i": {
+            "title": "I",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "trust": {
+            "title": "Trust",
+            "type": "string"
+          }
+        },
+        "required": [
+          "i",
+          "text",
+          "trust",
+          "checked",
+          "kind"
+        ],
+        "title": "EditSpelling",
+        "type": "object"
+      },
+      "Edited": {
+        "additionalProperties": false,
+        "description": "A card as the edit form says: the spellings kept, by their place, each plain or asr; for a new card its type,\nid, a name per language and role. The spellings left out are rejected as its aliases (DR-0461).",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "keep": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Keep",
+            "type": "array"
+          },
+          "kinds": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Kinds",
+            "type": "object"
+          },
+          "names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Names",
+            "type": "object"
+          },
+          "role": {
+            "default": "",
+            "title": "Role",
+            "type": "string"
+          },
+          "type": {
+            "default": "",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "Edited",
         "type": "object"
       },
       "Facet": {
@@ -1301,6 +1981,24 @@
           "url"
         ],
         "title": "FacetItem",
+        "type": "object"
+      },
+      "Fact": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "Fact",
         "type": "object"
       },
       "Filters": {
@@ -1421,6 +2119,96 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HeldCommand": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "text"
+        ],
+        "title": "HeldCommand",
+        "type": "object"
+      },
+      "HeldId": {
+        "properties": {
+          "again": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Again"
+          },
+          "commands": {
+            "items": {
+              "$ref": "#/components/schemas/HeldCommand"
+            },
+            "title": "Commands",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "again",
+          "commands"
+        ],
+        "title": "HeldId",
+        "type": "object"
+      },
+      "HeldSource": {
+        "properties": {
+          "ids": {
+            "items": {
+              "$ref": "#/components/schemas/HeldId"
+            },
+            "title": "Ids",
+            "type": "array"
+          },
+          "on_hold": {
+            "title": "On Hold",
+            "type": "integer"
+          },
+          "paste": {
+            "default": "",
+            "title": "Paste",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "unfilled": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Unfilled"
+            },
+            "title": "Unfilled",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source",
+          "ids",
+          "on_hold"
+        ],
+        "title": "HeldSource",
         "type": "object"
       },
       "HistoryLine": {
@@ -2147,6 +2935,43 @@
         "title": "LedgerList",
         "type": "object"
       },
+      "Lift": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "liftable": {
+            "title": "Liftable",
+            "type": "boolean"
+          },
+          "shown": {
+            "title": "Shown",
+            "type": "string"
+          }
+        },
+        "required": [
+          "shown",
+          "id",
+          "liftable"
+        ],
+        "title": "Lift",
+        "type": "object"
+      },
+      "LiftKey": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "LiftKey",
+        "type": "object"
+      },
       "Link": {
         "description": "A material or a source as the panel links it (DR-0664): a URL, a record's raw on the Search page, a recording\nat its time, a text locator as a search, or a path from the host repo's top that opens through the service, a text\nfile in the panel's viewer too.",
         "properties": {
@@ -2206,6 +3031,111 @@
           "href"
         ],
         "title": "Linked",
+        "type": "object"
+      },
+      "LogRow": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "by": {
+            "title": "By",
+            "type": "string"
+          },
+          "entity": {
+            "title": "Entity",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "op": {
+            "title": "Op",
+            "type": "string"
+          },
+          "part": {
+            "title": "Part",
+            "type": "string"
+          },
+          "undo": {
+            "title": "Undo",
+            "type": "boolean"
+          },
+          "undone_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Undone By"
+          },
+          "unfinished": {
+            "default": false,
+            "title": "Unfinished",
+            "type": "boolean"
+          },
+          "via": {
+            "title": "Via",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "op",
+          "entity",
+          "part",
+          "by",
+          "via",
+          "undo",
+          "undone_by"
+        ],
+        "title": "LogRow",
+        "type": "object"
+      },
+      "MeasureRow": {
+        "description": "A kind of question, its recall at 10 and MRR before the round and after its last card.",
+        "properties": {
+          "after": {
+            "title": "After",
+            "type": "string"
+          },
+          "before": {
+            "title": "Before",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "before",
+          "after"
+        ],
+        "title": "MeasureRow",
+        "type": "object"
+      },
+      "Measures": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/MeasureRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "title": "Measures",
         "type": "object"
       },
       "MeetingBox": {
@@ -2688,6 +3618,30 @@
         "title": "MeetingsList",
         "type": "object"
       },
+      "Missing": {
+        "description": "An open key nothing is staged under any more.",
+        "properties": {
+          "close": {
+            "title": "Close",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "note",
+          "close"
+        ],
+        "title": "Missing",
+        "type": "object"
+      },
       "Notice": {
         "description": "What the last write did (DR-0710): its words, the batch's lines, and Undo or Redo by its batch.",
         "properties": {
@@ -3137,6 +4091,48 @@
         "title": "Prep",
         "type": "object"
       },
+      "Promote": {
+        "additionalProperties": false,
+        "description": "One source's ready records, or every source's when `source` is null.",
+        "properties": {
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "title": "Promote",
+        "type": "object"
+      },
+      "Promoted": {
+        "properties": {
+          "held": {
+            "title": "Held",
+            "type": "integer"
+          },
+          "notice": {
+            "title": "Notice",
+            "type": "string"
+          },
+          "written": {
+            "title": "Written",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "written",
+          "held",
+          "notice"
+        ],
+        "title": "Promoted",
+        "type": "object"
+      },
       "Queue": {
         "description": "The Queue's list (DR-0666), in the Ledger's shape: its groups by call, no state chips, and the Ledger's own\nfilters, state, group and archived, at their defaults.",
         "properties": {
@@ -3295,6 +4291,25 @@
           "n"
         ],
         "title": "RawView",
+        "type": "object"
+      },
+      "ReadyCount": {
+        "description": "A source with records ready to promote, and how many.",
+        "properties": {
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "n"
+        ],
+        "title": "ReadyCount",
         "type": "object"
       },
       "RecordingRead": {
@@ -3572,6 +4587,13 @@
         "title": "Results",
         "type": "object"
       },
+      "Round": {
+        "additionalProperties": false,
+        "description": "A new round: nothing to say but that it is asked for.",
+        "properties": {},
+        "title": "Round",
+        "type": "object"
+      },
       "Row": {
         "description": "A row of the list: an item as it reads at a glance, with its quick buttons when a call takes it.",
         "properties": {
@@ -3773,6 +4795,30 @@
         "title": "SearchRead",
         "type": "object"
       },
+      "Seen": {
+        "description": "What a panel showed of a staged record: its state, who classified it and its cuts, posted back with a\nclassification so a change since is caught (DR-0785).",
+        "properties": {
+          "by": {
+            "title": "By",
+            "type": "string"
+          },
+          "cuts": {
+            "title": "Cuts",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "by",
+          "cuts"
+        ],
+        "title": "Seen",
+        "type": "object"
+      },
       "SegmentView": {
         "properties": {
           "at": {
@@ -3900,6 +4946,39 @@
         "title": "Shell",
         "type": "object"
       },
+      "SnippetView": {
+        "properties": {
+          "after": {
+            "title": "After",
+            "type": "string"
+          },
+          "before": {
+            "title": "Before",
+            "type": "string"
+          },
+          "locator": {
+            "title": "Locator",
+            "type": "string"
+          },
+          "mark": {
+            "title": "Mark",
+            "type": "string"
+          },
+          "search": {
+            "title": "Search",
+            "type": "string"
+          }
+        },
+        "required": [
+          "locator",
+          "before",
+          "mark",
+          "after",
+          "search"
+        ],
+        "title": "SnippetView",
+        "type": "object"
+      },
       "Snooze": {
         "description": "A snooze choice: the day it snoozes to, and how its button reads.",
         "properties": {
@@ -3995,6 +5074,512 @@
           "mark"
         ],
         "title": "SpanView",
+        "type": "object"
+      },
+      "SpellingView": {
+        "properties": {
+          "add": {
+            "title": "Add",
+            "type": "string"
+          },
+          "chunks": {
+            "title": "Chunks",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "trust": {
+            "title": "Trust",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "trust",
+          "add",
+          "chunks"
+        ],
+        "title": "SpellingView",
+        "type": "object"
+      },
+      "StageChip": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "on": {
+            "title": "On",
+            "type": "boolean"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "url",
+          "on"
+        ],
+        "title": "StageChip",
+        "type": "object"
+      },
+      "StagedGroup": {
+        "properties": {
+          "counts": {
+            "title": "Counts",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/StagedRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "rows",
+          "counts"
+        ],
+        "title": "StagedGroup",
+        "type": "object"
+      },
+      "StagedRow": {
+        "properties": {
+          "icon": {
+            "title": "Icon",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "line": {
+            "title": "Line",
+            "type": "string"
+          },
+          "on_hold": {
+            "title": "On Hold",
+            "type": "boolean"
+          },
+          "rid": {
+            "title": "Rid",
+            "type": "string"
+          },
+          "short": {
+            "title": "Short",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "waited": {
+            "title": "Waited",
+            "type": "string"
+          },
+          "when": {
+            "title": "When",
+            "type": "string"
+          },
+          "why": {
+            "enum": [
+              "on-hold",
+              "held-back",
+              "released",
+              "by-hand",
+              "mixed",
+              "work",
+              "classified"
+            ],
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "short",
+          "rid",
+          "source",
+          "kind",
+          "icon",
+          "title",
+          "when",
+          "waited",
+          "state",
+          "why",
+          "line",
+          "on_hold",
+          "url"
+        ],
+        "title": "StagedRow",
+        "type": "object"
+      },
+      "StagingList": {
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/StagedGroup"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "lead": {
+            "title": "Lead",
+            "type": "string"
+          },
+          "more": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "More"
+          },
+          "narrowed": {
+            "title": "Narrowed",
+            "type": "boolean"
+          },
+          "ready": {
+            "items": {
+              "$ref": "#/components/schemas/ReadyCount"
+            },
+            "title": "Ready",
+            "type": "array"
+          },
+          "source_chips": {
+            "items": {
+              "$ref": "#/components/schemas/StageChip"
+            },
+            "title": "Source Chips",
+            "type": "array"
+          },
+          "state_chips": {
+            "items": {
+              "$ref": "#/components/schemas/StageChip"
+            },
+            "title": "State Chips",
+            "type": "array"
+          },
+          "unreadable": {
+            "items": {
+              "$ref": "#/components/schemas/Unreadable"
+            },
+            "title": "Unreadable",
+            "type": "array"
+          }
+        },
+        "required": [
+          "lead",
+          "source_chips",
+          "state_chips",
+          "ready",
+          "groups",
+          "more",
+          "unreadable",
+          "narrowed"
+        ],
+        "title": "StagingList",
+        "type": "object"
+      },
+      "StagingPanel": {
+        "properties": {
+          "back": {
+            "title": "Back",
+            "type": "string"
+          },
+          "by": {
+            "title": "By",
+            "type": "string"
+          },
+          "can_work": {
+            "title": "Can Work",
+            "type": "boolean"
+          },
+          "close": {
+            "title": "Close",
+            "type": "string"
+          },
+          "confirm": {
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "confirm_url": {
+            "title": "Confirm Url",
+            "type": "string"
+          },
+          "cut_before": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CutBefore"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cuts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Cuts",
+            "type": "array"
+          },
+          "facts": {
+            "items": {
+              "$ref": "#/components/schemas/Fact"
+            },
+            "title": "Facts",
+            "type": "array"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lines": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TextLine"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lines"
+          },
+          "native": {
+            "title": "Native",
+            "type": "string"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "on_hold": {
+            "title": "On Hold",
+            "type": "boolean"
+          },
+          "preview": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CutPreview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "rid": {
+            "title": "Rid",
+            "type": "string"
+          },
+          "seen": {
+            "$ref": "#/components/schemas/Seen"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "staged_at": {
+            "title": "Staged At",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "typed": {
+            "title": "Typed",
+            "type": "string"
+          },
+          "utterances": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Utterance"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Utterances"
+          },
+          "when": {
+            "title": "When",
+            "type": "string"
+          },
+          "why_line": {
+            "title": "Why Line",
+            "type": "string"
+          },
+          "work_label": {
+            "title": "Work Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "rid",
+          "kind",
+          "title",
+          "source",
+          "when",
+          "staged_at",
+          "state",
+          "by",
+          "cuts",
+          "why_line",
+          "on_hold",
+          "utterances",
+          "lines",
+          "text",
+          "facts",
+          "native",
+          "cut_before",
+          "notes",
+          "problem",
+          "preview",
+          "typed",
+          "work_label",
+          "can_work",
+          "confirm",
+          "seen",
+          "close",
+          "confirm_url",
+          "back"
+        ],
+        "title": "StagingPanel",
+        "type": "object"
+      },
+      "StagingPanelRead": {
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "missing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Missing"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "panel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StagingPanel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "canonical",
+          "panel",
+          "missing"
+        ],
+        "title": "StagingPanelRead",
+        "type": "object"
+      },
+      "StagingRead": {
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "held": {
+            "items": {
+              "$ref": "#/components/schemas/HeldSource"
+            },
+            "title": "Held",
+            "type": "array"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice"
+          },
+          "view": {
+            "$ref": "#/components/schemas/StagingList"
+          }
+        },
+        "required": [
+          "canonical",
+          "view",
+          "held",
+          "notice"
+        ],
+        "title": "StagingRead",
         "type": "object"
       },
       "SummaryDoc": {
@@ -4146,6 +5731,34 @@
           "href"
         ],
         "title": "SyncLine",
+        "type": "object"
+      },
+      "TextLine": {
+        "properties": {
+          "checked": {
+            "title": "Checked",
+            "type": "boolean"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "n",
+          "offset",
+          "text",
+          "checked"
+        ],
+        "title": "TextLine",
         "type": "object"
       },
       "Today": {
@@ -4490,6 +6103,105 @@
         "title": "TypeChoice",
         "type": "object"
       },
+      "Undo": {
+        "additionalProperties": false,
+        "properties": {
+          "op": {
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op"
+        ],
+        "title": "Undo",
+        "type": "object"
+      },
+      "Unfilled": {
+        "description": "A placeholder a command keeps, and the value it stands for: one a shell would act on.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "Unfilled",
+        "type": "object"
+      },
+      "Unreadable": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "message"
+        ],
+        "title": "Unreadable",
+        "type": "object"
+      },
+      "Utterance": {
+        "properties": {
+          "checked": {
+            "title": "Checked",
+            "type": "boolean"
+          },
+          "going": {
+            "title": "Going",
+            "type": "boolean"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "released": {
+            "default": false,
+            "title": "Released",
+            "type": "boolean"
+          },
+          "span": {
+            "title": "Span",
+            "type": "string"
+          },
+          "speaker": {
+            "title": "Speaker",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "was_cut": {
+            "title": "Was Cut",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "n",
+          "span",
+          "speaker",
+          "text",
+          "checked",
+          "going",
+          "was_cut"
+        ],
+        "title": "Utterance",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -4741,6 +6453,264 @@
           }
         },
         "summary": "Briefs Decision"
+      }
+    },
+    "/api/web/curate": {
+      "get": {
+        "operationId": "curate_read_api_web_curate_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurateRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Curate Read"
+      }
+    },
+    "/api/web/curate/decide": {
+      "post": {
+        "operationId": "curate_decide_api_web_curate_decide_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurateDecide"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Done"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Curate Decide"
+      }
+    },
+    "/api/web/curate/lift": {
+      "post": {
+        "operationId": "curate_lift_api_web_curate_lift_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiftKey"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Done"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Curate Lift"
+      }
+    },
+    "/api/web/curate/panel": {
+      "get": {
+        "operationId": "curate_panel_api_web_curate_panel_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratePanelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Curate Panel"
+      }
+    },
+    "/api/web/curate/round": {
+      "post": {
+        "operationId": "curate_round_api_web_curate_round_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Round"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Done"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Curate Round"
+      }
+    },
+    "/api/web/curate/undo": {
+      "post": {
+        "operationId": "curate_undo_api_web_curate_undo_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Undo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Done"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Curate Undo"
       }
     },
     "/api/web/ledger": {
@@ -5269,6 +7239,168 @@
           }
         },
         "summary": "Shell"
+      }
+    },
+    "/api/web/staging": {
+      "get": {
+        "operationId": "staging_read_api_web_staging_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagingRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Staging Read"
+      }
+    },
+    "/api/web/staging/classify": {
+      "post": {
+        "operationId": "staging_classify_api_web_staging_classify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Classify"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Classified"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Staging Classify"
+      }
+    },
+    "/api/web/staging/panel": {
+      "get": {
+        "operationId": "staging_panel_api_web_staging_panel_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagingPanelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Staging Panel"
+      }
+    },
+    "/api/web/staging/promote": {
+      "post": {
+        "operationId": "staging_promote_api_web_staging_promote_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Promote"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Promoted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Staging Promote"
       }
     },
     "/api/web/today": {

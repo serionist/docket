@@ -6,5 +6,7 @@
   "/meetings",
   "/search",
   "/recording",
-  "/briefs"
+  "/briefs",
+  "/staging",
+  "/curate"
 ]

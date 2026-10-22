@@ -63,7 +63,7 @@ def test_the_shots_and_their_checks_are_named_and_summed() -> None:
     assert ui.summary([good]) == ["1 shots, every check passed"]
 
 
-WORLDS = ("empty", "week", "meetings", "today", "stale", "search", "recording", "briefs")
+WORLDS = ("empty", "week", "meetings", "today", "stale", "search", "recording", "briefs", "staging", "curate")
 
 
 def test_every_page_s_states_open_a_path_and_fit_a_size() -> None:
@@ -346,3 +346,48 @@ def test_a_post_the_service_refuses_stops_the_state() -> None:
 
     with pytest.raises(KitError, match="answered 403"):
         ui._steps(Refusing(), [("post", "/api/web/briefs/decision|{}")])  # pyright: ignore[reportPrivateUsage]
+
+
+def test_another_tab_s_click_comes_first_on_the_page_s_own_url() -> None:
+    """A write another tab of the owner's makes first, as a record classified or a card decided there, so the page's
+    own write on what it read is refused: the other tab opens the same URL, clicks, and closes."""
+    log: list[str] = []
+
+    class Other:
+        def goto(self, url: str) -> None:
+            log.append(f"other goto {url}")
+
+        def wait_for_load_state(self, state: str) -> None:
+            log.append(f"other load {state}")
+
+        def click(self, selector: str) -> None:
+            log.append(f"other click {selector}")
+
+        def close(self) -> None:
+            log.append("other close")
+
+    class Context:
+        def new_page(self) -> Other:
+            return Other()
+
+    class Tab:
+        url = "http://localhost:61234/staging?open=d59ac38cdfc692cec0989d036a6644d0"
+        context = Context()
+
+        def click(self, selector: str) -> None:
+            log.append(f"click {selector}")
+
+        def wait_for_timeout(self, ms: int) -> None:
+            pass
+
+    ui._steps(Tab(), [("other", ui.WORK), ("click", ui.WORK)])  # pyright: ignore[reportPrivateUsage]
+    assert log == [
+        f"other goto {Tab.url}",
+        "other load networkidle",
+        f"other click {ui.WORK}",
+        "other load networkidle",
+        "other close",
+        f"click {ui.WORK}",
+    ]
+    assert {s.name for s in ui.PAGES["staging"].states if ("other", ui.WORK) in s.steps} == {"conflict"}
+    assert all(s.fresh for p in ("staging", "curate") for s in ui.PAGES[p].states if s.name == "conflict")

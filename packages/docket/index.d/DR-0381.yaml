@@ -1,11 +1,12 @@
 decisions:
   - id: DR-0381
     title: The Staging page writes only through the staging gate's calls, on the service's writer thread, as same-origin form posts
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#71"]
+    superseded_by: [DR-0785]
     description: "Work, private and promote are POST /staging/classify and POST /staging/promote: plain HTML forms answered with a 303 to the page, so a write works without JavaScript and a reload doesn't post again; Preview posts the same form and is answered with a 303 to its own URL, writing nothing. Each write runs the CLI's own call, Gate.classify(key, label, cuts, by=user) or Gate.promote(source), through the service's writer thread; private is the gate's drop, and a promotion that wrote something pokes the index updater. Listing and showing run there too, since every gate call sweeps staging first. A classification carries the state, who classified and the cuts its panel showed: under one vault's one lock the writer compares them with Gate.show and calls Gate.classify only when they match, so a click from a page the record changed under writes nothing and shows it as it stands. The Guard checks each post as it checks every write (DR-0152). A page with a form sends Referrer-Policy: same-origin, because under the floor's no-referrer a browser sends Origin: null on a same-origin post, which the Guard refuses. The routes read their urlencoded bodies with the standard library, at most 64 KB, and check them before the writer runs."
     binds:
       - No route of the page writes but through Gate.classify and Gate.promote.

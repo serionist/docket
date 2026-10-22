@@ -10,8 +10,7 @@ from starlette.datastructures import QueryParams
 
 from docket.curate.batch import Measure
 from docket.vault.config import NeverStore
-from docket.web import curate_view
-from docket.web.curate_view import CurateState, CurateStateError, canonical, done_line, measures, stop_key
+from docket.web.curate_view import CurateState, CurateStateError, done_line, measures, stop_key
 
 AT = datetime(2026, 10, 16, 9, 0, tzinfo=UTC)
 
@@ -22,10 +21,6 @@ def test_the_url_reads_into_one_canonical_form() -> None:
     state = CurateState.read(QueryParams("edit=1a2b3c&done=accepted-1a2b3c"))
     assert state.url() == "/curate?edit=1a2b3c"
     assert state.url(done=True) == "/curate?edit=1a2b3c&done=accepted-1a2b3c"
-    assert CurateState().url(curate_view.PANEL) == "/curate/panel"
-    assert canonical("http://127.0.0.1:8741/curate/panel?open=1a2b3c") == "/curate?open=1a2b3c"
-    assert canonical("http://127.0.0.1:8741/curate?open=nope") is None
-    assert canonical("http://127.0.0.1:8741/staging?open=1a2b3c") is None
 
 
 @pytest.mark.parametrize("query", ["open=1A2B3C", "edit=12345", "open=1a2b3c&edit=4d5e6f", "done=accepted"])
@@ -60,15 +55,16 @@ def test_the_measures_before_and_after() -> None:
     before = Measure(at=AT, all=(0.8, 0.5), kinds={"typo": (0.75, 0.46)})
     assert measures(None, None) is None
     only = measures(before, None)
-    assert only is not None and only.rows == (("all", "0.80 / 0.50", ""), ("typo", "0.75 / 0.46", ""))
+    assert only is not None
+    assert [(r.kind, r.before, r.after) for r in only.rows] == [("all", "0.80 / 0.50", ""), ("typo", "0.75 / 0.46", "")]
     after = Measure(at=AT, all=(0.9, 0.6), kinds={"exact-name": (1.0, 0.9)})
     both = measures(before, after)
     assert both is not None
-    assert both.rows == (
+    assert [(r.kind, r.before, r.after) for r in both.rows] == [
         ("all", "0.80 / 0.50", "0.90 / 0.60"),
         ("exact-name", "", "1.00 / 0.90"),
         ("typo", "0.75 / 0.46", ""),
-    )
+    ]
 
 
 def test_a_never_store_value_is_hidden_in_a_key() -> None:

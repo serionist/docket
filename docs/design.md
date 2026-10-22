@@ -783,6 +783,20 @@ How it is built (DR-0170 to DR-0175, DR-0546), and where it is going (#252, DR-0
   `/api/web/briefs/decision`, which writes a decision's status as `docket decision set` does, on the writer thread
   and checked against the rev the page showed; a decision that moved since is refused with 409 and the page reads
   itself again (DR-0781, DR-0782).
+- The Staging page lists what waits at the gate by source and age, with why each waits, and shows a record's text only
+  once it is opened (DR-0380), as promotion would write it (DR-0383), over `/api/web/staging` and its panel, both read
+  on the writer thread. Its writes are JSON writes through the gate's own calls on the writer thread, and a
+  classification of a record that changed since the panel showed it answers 409 and the page reads it again
+  (DR-0785). Held recordings are listed with the commands that release them, run by the owner or by Claude on their
+  yes; no page releases (DR-0382, DR-0600). Its URL holds the list's filters, the open record and what is checked on
+  it (DR-0784).
+- The Curate page shows this machine's round over `/api/web/curate`: its cards, the open one beside the list with its
+  snippets cut when opened and its edit form in the panel; what tier 1 applied by itself; the review minutes, the
+  question set before and after, the forms matching left out, the log with Undo and the stoplist with Lift. A round
+  starts only on the owner's click. Every write is a JSON write on the writer thread, and a decision is refused when
+  the round isn't this machine's current one, or answered 409 when the entity file changed since the card was shown
+  (DR-0786). Its URL holds the open card or its edit form.
+- Staging and Curate load their scripts when first opened, so the first page's script keeps to its budget.
 - A page not moved yet is its Jinja page, as below.
 - Pages rendered by the service with Jinja2, parts of them swapped by htmx; every state is a URL that renders without
   JavaScript, and the navigation shows every page above with its phase.
@@ -794,17 +808,6 @@ How it is built (DR-0170 to DR-0175, DR-0546), and where it is going (#252, DR-0
   final-run rule (DR-0304); the failures still current, each with what to do (DR-0305); the runs open and ended; each
   machine's cursors. Its URL holds `source`, `run` and `k` (DR-0303), and its runs part refreshes while a run is open
   (DR-0306).
-- The Staging page lists what waits at the gate by source and age, with why each waits, and shows a record's text only
-  once it is opened (DR-0380), as promotion would write it (DR-0383). It writes only through the gate's own calls on
-  the writer thread, as same-origin form posts the Guard checks, and refuses a classification the record changed under
-  (DR-0381). Held recordings are listed with the commands that release them, run by the owner or by Claude on their
-  yes; no page releases (DR-0382, DR-0600). Its URL holds the list's filters, the open record and what is checked on it (DR-0384).
-- The Curate page shows this machine's round: its cards, the open one beside the list with its snippets cut when
-  opened, and its edit form in place; what tier 1 applied by itself; the review minutes, the question set before and
-  after, the forms matching left out, the log with Undo and the stoplist with Lift. A round starts only on the user's
-  click. Every write is a same-origin form post on the writer thread, and a decision is refused when the round isn't
-  this machine's current one or the entity file changed since the card was shown (DR-0473). Its URL holds the open
-  card, the edit form and what the last change did.
 - The Settings page shows each source, the never-store lists (their values only with `show=lists`), redaction and
   this machine's models (DR-0505, DR-0510). Its buttons make changes both ways through the CLI's writer: a source's
   sensitivity, a source on or off, a redaction rule on or off, a never-store value added or taken off, each committed
