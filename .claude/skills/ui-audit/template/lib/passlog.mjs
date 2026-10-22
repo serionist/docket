@@ -35,6 +35,8 @@ function summary(m) {
   if (m.axe?.length) bits.push(`**axe: ${m.axe.length}**`);
   if (m.hitTargets?.length) bits.push(`**targets: ${m.hitTargets.length}**`);
   if (m.overflow?.length) bits.push(`**overflow: ${m.overflow.length}**`);
+  if (m.csp?.length) bits.push(`**csp: ${m.csp.length}**`);
+  if (m.sideways?.length) bits.push('**sideways scroll**');
   if (m.rawKeys?.length || m.bannedText?.length) bits.push('**copy: hits**');
   if (typeof m.vitals?.cls === 'number') bits.push(`cls ${m.vitals.cls.toFixed(3)}`);
   if (m.flags?.prePaintError) bits.push('**error before input**');

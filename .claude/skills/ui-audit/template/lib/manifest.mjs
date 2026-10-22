@@ -122,7 +122,8 @@ export class Manifest {
   write(rec) {
     const {
       part = '?', journey, step, state, url, action, texts = {}, shots = [], clipShots = [], ms = 0, flags = {},
-      axe = [], contrast = [], hitTargets = [], overflow = [], rawKeys = [], bannedText = [], vitals = null,
+      axe = [], contrast = [], hitTargets = [], overflow = [], rawKeys = [], bannedText = [], csp = [], sideways = [],
+      vitals = null,
       ariaSnapshotRef = null, recorder = null, expectedStatuses = [],
     } = rec;
     const noise = recorder ? recorder.drain() : { consoleErrors: [], failedRequests: [], requests: [] };
@@ -133,7 +134,7 @@ export class Manifest {
       run: this.run, part, journey, step, state, url, action,
       consoleErrors: noise.consoleErrors, failedRequests: noise.failedRequests,
       texts: safeTexts, shots, clipShots,
-      axe, contrast, hitTargets, overflow, rawKeys, bannedText, vitals, ariaSnapshotRef,
+      axe, contrast, hitTargets, overflow, rawKeys, bannedText, csp, sideways, vitals, ariaSnapshotRef,
       budget, ms, flags, ts: nowIso(),
     };
     appendFileSync(this.path, JSON.stringify(line) + '\n');

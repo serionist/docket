@@ -7,6 +7,8 @@
 //   seed.expiredCode(ctx)  seed.usedCode(ctx)                                  → { code }
 //   seed.expiredLink(ctx)  seed.usedLink(ctx)  seed.tamperedLink(ctx)          → { url }
 // A missing method makes that case BLOCKED(env), never a pass.
+// In Docket, lib/docket.mjs's sessionLinks(service) gives B9 the sign-in link's tampered, used and expired states; no
+// form takes a code, so B8 is n/a. Docket's dates are picked in its DatePicker, so a date field's fill is a click there.
 //
 // Each case drives the inputs, shoots one clip at the canonical cell, reads the error texts, checks that a rejected
 // submit kept the valid input, and records the timing of the validation display (appears on blur, clears on fix).
@@ -42,7 +44,7 @@ async function fill(page, f, v) {
     return;
   }
   if (f.role === 'date') {
-    if (!(await el.fill(v ? (f.validDate ?? '2026-09-25') : '').then(() => true, () => false))) {
+    if (!(await el.fill(v ? (f.validDate ?? '2026-10-20') : '').then(() => true, () => false))) {
       throw new Error(`BLOCKED(env): date ${f.name} not fillable`);
     }
     return;

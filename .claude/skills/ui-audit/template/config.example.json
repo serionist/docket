@@ -1,0 +1,102 @@
+{
+  "//": "Copy to config.json in the run's e2e/ and fill it. Keys starting with // are comments. A value starting with FILL makes `node runner.mjs check` fail: fill it or remove the key. No secrets here: the service's record and the owner's session live in state/, which never leaves the run folder. The origin is not here: each segment's service gets a free port, which state/service.json names.",
+
+  "run": "p1",
+  "//run": "The pass id; the runner's --run overrides it. Partitions manifest.<run>.jsonl and screens/<run>/.",
+
+  "checkWorld": "empty",
+  "//checkWorld": "The world `node runner.mjs check` starts a service on. The worlds are packages/docket/tests/ui_world.py's: empty, week, meetings, today, stale, search, recording, briefs, staging, curate.",
+
+  "browser": { "channel": "chrome" },
+  "//browser": "The machine's own Chrome, headless, in a profile of Playwright's own, as devkit ui and the browser tests drive it: nothing is downloaded, and the owner's browser is never touched. msedge works too.",
+
+  "captureGrid": {
+    "viewports": [
+      { "name": "desktop", "width": 1440, "height": 900, "dpr": 1 },
+      { "name": "laptop", "width": 1280, "height": 720, "dpr": 1 },
+      { "name": "phone", "width": 390, "height": 844, "dpr": 3, "touch": true }
+    ],
+    "//viewports": "Desktop first, but devkit ui shoots every page at 1440x900 and 390x844, so the phone is in every page's grid; 1280 is the narrowest width with the sidebar, the list and the 480 px panel side by side (DR-0708). touch: true shoots the cell in a fresh context with a real coarse pointer (isMobile, hasTouch) and holds it to the 44 px target floor.",
+    "themes": ["light", "dark"],
+    "langs": ["en"],
+    "//langs": "English only.",
+    "extraViewports": {
+      "short": { "width": 1280, "height": 600, "dpr": 1 },
+      "fold": { "width": 1024, "height": 768, "dpr": 1 },
+      "tablet": { "width": 900, "height": 1100, "dpr": 2, "touch": true }
+    },
+    "//extraViewports": "Opt-in cells, shot only when a step names them. short: the Environment lens's short viewport, shoot(state, { viewports: ['short'] }), named 1280x600. fold: the sidebar folded to icons. tablet: from 768 to 1023 px the sidebar is a sheet and the panel slides over the list, where the notice's Undo once hid under the panel."
+  },
+
+  "judgedCombos": [["desktop", "light", "en"]],
+  "//judgedCombos": "The canonical cell a judge reads per state. Other cells reach a judge only as pixel deltas or through the sweeps.",
+
+  "clockEpoch": "2026-10-20T07:30:00Z",
+  "//clockEpoch": "Date.now() is fixed here so relative times and baselines are stable: devkit ui's clock, a Tuesday 09:30 in the invented week, in Europe/Budapest.",
+  "browserTimezone": "Europe/Budapest",
+  "browserLocale": "en-GB",
+
+  "lang": {},
+  "themePref": { "cookie": "docket_theme", "systemValue": "system" },
+  "//themePref": "capture() sets the theme cookie and the document's data-theme to follow the system before the grid, so the emulated colour scheme drives the theme, and restores both after.",
+
+  "authedAssert": { "notPathPrefix": "/session", "selector": "[data-slot=\"sidebar-wrapper\"]" },
+  "//authedAssert": "The signed-in shell renders the sidebar; a stranger gets the 401 sign-in page instead, which is never shot as the target.",
+
+  "fonts": ["Atkinson Hyperlegible Next Variable", "Atkinson Hyperlegible Mono Variable"],
+
+  "personas": {
+    "//": "Docket has one owner. The runner signs the owner in at the start of each segment, through a one-time link on localhost; a stranger has no session.",
+    "owner": { "storageState": "state/owner.json" },
+    "stranger": {}
+  },
+
+  "maskRegions": ["[data-ui-audit-mask]"],
+  "//maskRegions": "Selectors painted a flat colour before every shot, so live values never move a baseline. The clock is fixed, so usually none are needed.",
+
+  "overlaySelector": "[role=\"dialog\"][data-state=\"open\"], [role=\"alertdialog\"][data-state=\"open\"], [role=\"menu\"][data-state=\"open\"], [role=\"listbox\"][data-state=\"open\"]",
+  "//overlaySelector": "What an open overlay looks like, as Radix marks it: capture() shoots it in place and never reloads under it.",
+
+  "textSelectors": {},
+  "//textSelectors": "Extra places a page shows errors and status, merged over the defaults in lib/capture.mjs: role alert (a refusal, the writer's words), role status (a write's notice), aria-invalid.",
+  "prePaintSelectors": "[aria-invalid=\"true\"]",
+
+  "axeTags": ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"],
+  "//axeTags": "devkit ui's and browser_kit's rule set: a cell this passes, they pass.",
+
+  "bannedText": ["\\bundefined\\b", "\\bNaN\\b", "\\[object Object\\]", "Traceback"],
+  "//bannedText": "Regexes for words a page must never show. Regenerate per run from what the text of record bans rather than keep a copy that drifts.",
+
+  "coarseProbe": null,
+  "//coarseProbe": "{ selector, minPx }: a control styled per pointer; touch cells must render it at least minPx tall, proving the coarse pointer rendered. A row is 32 px on a fine pointer and 44 on a coarse one (DR-0707).",
+
+  "consoleBudget": { "allow": [] },
+  "networkBudget": {
+    "allow": ["\\.map$"],
+    "expectStatus": {},
+    "foreignAllow": [],
+    "//": "expectStatus: { \"<url regex>\": [400, 409] } for statuses that are designed; a step's expectedStatuses adds to it. foreignAllow stays empty: nothing loads from another origin."
+  },
+  "vitalsBudget": { "cls": 0.1, "lcp": 2500, "inp": 200 },
+
+  "hitTarget": { "minPx": 24, "minPxCoarse": 44 },
+  "pixelThreshold": 0.1,
+  "//pixelThreshold": "pixelmatch 8: how different two colours must be for a pixel to count as changed, 0 to 1, measured in OKLab with the HyAB distance, where 1 is black against white. Per pixel, not a share of the image.",
+  "pixelDiffRatioMax": 0,
+  "//pixelDiffRatioMax": "The ratio rule, used while pixelWindowSize is null: a cell changed when the share of differing pixels exceeds this. 0: any differing pixel.",
+  "pixelWindowSize": null,
+  "pixelWindowMax": 0,
+  "//pixelWindowSize": "The window rule, off while null. With N set, a cell changed when the most differing pixels in any N x N square exceed pixelWindowMax. Turn it on only when clean cells keep showing noise deltas, and keep the max below what one changed character makes at DPR 1.",
+
+  "batteryValues": {},
+  "//batteryValues": "Valid values per field role for the battery's fix probe.",
+
+  "scrollCapture": { "enabled": true, "maxSteps": 4, "minArea": 60000 },
+
+  "timeouts": { "action": 15000, "navigation": 30000, "settle": 8000 },
+
+  "runner": { "watchIntervalS": 15, "envFailThreshold": 3, "serviceStartS": 240 },
+  "//runner": "serviceStartS: how long a world may take to build and its service to start; the indexed worlds take longest.",
+
+  "paths": { "e2eRoot": ".", "screensRoot": "../screens", "journeysDir": "../journeys" }
+}
