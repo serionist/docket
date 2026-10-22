@@ -51,9 +51,14 @@ from docket.vault.spans import RawLookup, problem
 from docket.vault.vault import UnmergedError, Vault
 
 log = logging.getLogger(__name__)
-# A final decision's committed text, by its blob id: what every read of it takes (DR-0603), read once a process.
+# A final decision's committed text, by its blob id: what every read of it takes (DR-0782), read once a process.
 _BLOBS: dict[str, str] = {}
 BLOBS_KEPT = 1000
+# Docs' histories by the vault, its repo, the commit read at and the repo's shallow mark, and the docs asked for: what
+# git's log says from a commit never changes, so a read asking again at the same HEAD, such as the Briefs page's, asks
+# git nothing. The vault is in the key, as two folder vaults of one host repo share its git dir and its HEAD.
+_HISTORIES: dict[tuple[str, str, str, str, tuple[str, ...]], dict[str, list[tuple[int, str]]]] = {}
+HISTORIES_KEPT = 64
 
 # On Windows another program holding the doc open makes the rename fail for a moment.
 REPLACE_TRIES = 5
@@ -114,6 +119,14 @@ class RedactReport(BaseModel):
         return dict(sorted(total.items()))
 
 
+def _shallow_mark(git_dir: Path) -> str:
+    """When the repo's shallow file last changed, "" with none: a fetch that deepens the history changes it."""
+    try:
+        return str((git_dir / "shallow").stat().st_mtime_ns)
+    except OSError:
+        return ""
+
+
 class DocStore:
     def __init__(self, vault: Vault) -> None:
         self.vault = vault
@@ -146,7 +159,7 @@ class DocStore:
 
     def get(self, doc_id: str) -> ProcessedDoc | None:
         """The doc as it is on disk, read leniently; None when there is no file. A decision as every read takes it: a
-        final one whole from its last commit, a proposed one with its status and links from it (DR-0603)."""
+        final one whole from its last commit, a proposed one with its status and links from it (DR-0782)."""
         path = self.file(doc_id)
         if not path.is_file():
             return None
@@ -188,7 +201,7 @@ class DocStore:
     def decide(
         self, doc_id: str, shown: int, pick: str, subject: str | None = None, *, via: Literal["page", "cli"] = "page"
     ) -> PutResult:
-        """The user's click on the Briefs page, or `docket decision set` on the owner's yes (DR-0603, DR-0566), and the
+        """The user's click on the Briefs page, or `docket decision set` on the owner's yes (DR-0782, DR-0781), and the
         only writer of a decision's status: the candidate's next rev, confirmed or rejected as `pick` says, written and
         committed under the vault's lock, its `by` and its commit saying who and where.
         Refused when it isn't a proposed decision, its file says otherwise than its last commit, or a never-store list
@@ -242,13 +255,15 @@ class DocStore:
         folder = self.root / "processed" / "decision"
         return self.at_paths(sorted(folder.rglob("*.md")) if folder.is_dir() else [])
 
-    def history(self, doc_id: str) -> list[tuple[int, str]]:
-        """The doc's revs, newest commit first: (rev, commit) for every commit whose message has its `Doc:` line."""
+    def history(self, doc_id: str, at: str | None = None) -> list[tuple[int, str]]:
+        """The doc's revs, newest commit first: (rev, commit) for every commit whose message has its `Doc:` line; from
+        HEAD, or from the commit `at` names."""
         if self._known is not None and doc_id in self._known:
             return self._known[doc_id]
         # Signature lines a user's log.showSignature adds would read as commit ids.
         rel = self.path(doc_id).as_posix()
-        out = self.vault.git.out("log", "--no-show-signature", "--format=%H%x1f%B%x1e", "--", rel)
+        start = [at] if at else []
+        out = self.vault.git.out("log", "--no-show-signature", "--format=%H%x1f%B%x1e", *start, "--", rel)
         revs: list[tuple[int, str]] = []
         for entry in out.split("\x1e"):
             sha, _, message = entry.strip("\n").partition("\x1f")
@@ -261,17 +276,42 @@ class DocStore:
         isn't the union of the per-file logs, so when one touched those folders, or the batch is too small to gain,
         each doc's log is read on its own; one `rev-list --merges` decides."""
         ids = list(dict.fromkeys(doc_ids))
+        git = self.vault.git
+        head = git.head_id()
+        key = (str(self.root), str(git.git_dir), head, _shallow_mark(git.git_dir), tuple(ids)) if head else None
+        # One look-up: another thread may clear the keep between a check and a read.
+        kept = _HISTORIES.get(key) if key is not None else None
+        if kept is not None:
+            return {doc_id: list(revs) for doc_id, revs in kept.items()}
+        # The log reads from the commit the key names, never HEAD again: HEAD may move in between.
+        found = self._histories(ids, head)
+        if key is not None:
+            if len(_HISTORIES) >= HISTORIES_KEPT:
+                _HISTORIES.clear()
+            _HISTORIES[key] = {doc_id: list(revs) for doc_id, revs in found.items()}
+        return found
+
+    def _histories(self, ids: list[str], head: str | None) -> dict[str, list[tuple[int, str]]]:
         if len(ids) < BATCHED_HISTORIES:
-            return {doc_id: self.history(doc_id) for doc_id in ids}
+            return {doc_id: self.history(doc_id, head) for doc_id in ids}
         rels = {self.path(doc_id).as_posix(): doc_id for doc_id in ids}
         folders = sorted({f"processed/{doc_id.partition(':')[0]}" for doc_id in ids})
         git = self.vault.git
-        merges = git.run("rev-list", "--merges", "-1", "HEAD", "--", *folders, check=False)
+        merges = git.run("rev-list", "--merges", "-1", head or "HEAD", "--", *folders, check=False)
         if merges.returncode != 0 or merges.stdout.strip():
-            return {doc_id: self.history(doc_id) for doc_id in ids}
+            return {doc_id: self.history(doc_id, head) for doc_id in ids}
         # NUL between names, so no name is quoted; names from the repo's top, so the prefix comes off.
+        start = [head] if head else []
         out = git.out(
-            "log", "-z", "--no-renames", "--no-show-signature", "--format=%x1e%H%x1f%B", "--name-only", "--", *folders
+            "log",
+            "-z",
+            "--no-renames",
+            "--no-show-signature",
+            "--format=%x1e%H%x1f%B",
+            "--name-only",
+            *start,
+            "--",
+            *folders,
         )
         revs: dict[str, list[tuple[int, str]]] = {doc_id: [] for doc_id in ids}
         sha, message = "", ""
@@ -646,7 +686,7 @@ class DocStore:
     def _hand_edit(self, edited: ProcessedDoc, text: str, last: str | None) -> derived.HandEdit:
         """A hand edit as `derived.hand_edit` reads it, and for a brief or a decision its own stops too: one that names
         a listed person stays on disk, as one that says a keyword does (DR-0558), and so does one that changes a
-        decision's status or links, or a confirmed or rejected decision at all (DR-0603), or one that adds a brief's
+        decision's status or links, or a confirmed or rejected decision at all (DR-0782), or one that adds a brief's
         Decisions line no current decision backs (DR-0565)."""
         edit = derived.hand_edit(edited.meta.type, text, last, self.redactor, self.lists)
         if edited.meta.type == "brief":

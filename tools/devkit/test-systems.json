@@ -222,6 +222,7 @@
     "packages/docket/tests/test_web_assets.py",
     "packages/docket/tests/test_web_briefs.py",
     "packages/docket/tests/test_web_browser.py",
+    "packages/docket/tests/test_web_browser_briefs.py",
     "packages/docket/tests/test_web_browser_design.py",
     "packages/docket/tests/test_web_browser_ledger.py",
     "packages/docket/tests/test_web_browser_meetings.py",

@@ -7,7 +7,7 @@ import tempfile
 import urllib.request
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -63,7 +63,7 @@ def test_the_shots_and_their_checks_are_named_and_summed() -> None:
     assert ui.summary([good]) == ["1 shots, every check passed"]
 
 
-WORLDS = ("empty", "week", "meetings", "today", "stale", "search", "recording")
+WORLDS = ("empty", "week", "meetings", "today", "stale", "search", "recording", "briefs")
 
 
 def test_every_page_s_states_open_a_path_and_fit_a_size() -> None:
@@ -75,7 +75,7 @@ def test_every_page_s_states_open_a_path_and_fit_a_size() -> None:
             assert state.only in (None, *ui.SIZES), state.name
             assert state.world in (None, *WORLDS), state.name
             assert all(verb in ui.VERBS for verb, _ in (*state.steps, *state.after)), state.name
-            assert all("|" in arg for verb, arg in state.steps if verb == "fill"), state.name
+            assert all("|" in arg for verb, arg in state.steps if verb in ("fill", "post")), state.name
 
 
 def test_signing_in_goes_to_localhost_never_127_0_0_1(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -158,6 +158,10 @@ class _Tab:
             return []
         if script == ui.AXE_RUN:
             return []
+        if script == ui.POST:
+            path, body = cast("list[str]", arg)
+            self.log.append(f"post {path} {json.loads(body)['pick']}")
+            return 200
         return None
 
 
@@ -298,3 +302,47 @@ def test_a_service_that_doesn_t_start_says_why(tmp_path: Path, monkeypatch: pyte
 def test_the_command_names_a_page_it_can_t_shoot(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main(["ui", "outbox"]) == 2
     assert "no page 'outbox'" in capsys.readouterr().err
+
+
+def test_a_fresh_state_gets_a_world_for_each_shot_and_its_post_writes_from_the_page(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pick on a decision is final, so each of its shots gets a world of its own; another tab's write runs in the
+    page, with its session, before the pick it moves."""
+    (tmp_path / ui.AXE).parent.mkdir(parents=True)
+    (tmp_path / ui.AXE).write_text("window.axe = {};", encoding="utf-8")
+    browser = _Browser()
+    served: list[str] = []
+
+    @contextlib.contextmanager
+    def serve(root: Path, world: str) -> Generator[tuple[int, str]]:
+        served.append(world)
+        yield 61234, "t0ken"
+
+    @contextlib.contextmanager
+    def driven() -> Generator[Any]:
+        yield browser
+
+    monkeypatch.setattr(ui, "sign_in_link", lambda port, token, after: f"http://localhost:{port}/session?next={after}")
+    ui.run("briefs", root=tmp_path, browser=driven, serve=serve)
+    states = ui.PAGES["briefs"].states
+    fresh = sum(1 for s in states if s.fresh)
+    assert fresh == 3
+    combos = len(ui.SIZES) * len(ui.THEMES)
+    assert served == ["briefs", *["briefs"] * fresh * combos, "empty"]
+    posted = [line for line in browser.log if line.startswith("post ")]
+    assert posted == ["post /api/web/briefs/decision confirm"] * combos
+    checks = json.loads((tmp_path / ui.ROUNDS / "briefs" / "r1" / "checks.json").read_text(encoding="utf-8"))
+    assert len(checks) == len(states) * combos
+
+
+def test_a_post_the_service_refuses_stops_the_state() -> None:
+    class Refusing:
+        def evaluate(self, script: str, arg: object = None) -> int:
+            return 403
+
+        def wait_for_timeout(self, ms: int) -> None:
+            pass
+
+    with pytest.raises(KitError, match="answered 403"):
+        ui._steps(Refusing(), [("post", "/api/web/briefs/decision|{}")])  # pyright: ignore[reportPrivateUsage]

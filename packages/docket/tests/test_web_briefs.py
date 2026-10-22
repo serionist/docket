@@ -1,5 +1,6 @@
-"""The Briefs page over HTTP, signed in, on the invented briefs vault (DR-0557, DR-0558): the briefs by entity type, a
-brief beside the raw its open line cites, the URL's states, and what a never-store list hides, by URL too."""
+"""The Briefs page's read, signed in, on the invented briefs vault (DR-0780, DR-0558): the briefs by entity type, a
+brief with the raw its open line cites, the URL's states and refusals, and what a never-store list hides, by URL too.
+The page itself is the app's document; its links are the URLs these answers carry."""
 
 from __future__ import annotations
 
@@ -7,13 +8,14 @@ import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import pytest
 from briefs_kit import ABOUT_BEN, BEN, CALL, DORA, HARBOUR, NORTHWIND, NOTE, briefs_template
 from docket_testkit import OFFER, git, indexed, read_only
-from docket_webkit import Element, a11y_problems, html_problems, parse, serving, signed_in
+from docket_webkit import TOKEN, serving, signed_in
 from starlette.testclient import TestClient
 
 from docket.briefs import BriefsReport, BriefState, NewRecords
@@ -27,7 +29,8 @@ from docket.vault.vault import Vault
 from docket.web import briefs
 from docket.web.briefs_state import BriefsState, BriefsStateError
 from docket.web.briefs_view import Facts, build
-from docket.web.templating import PAGE_CSP
+
+API = "/api/web/briefs"
 
 
 @pytest.fixture(scope="module")
@@ -53,23 +56,26 @@ def reader(seen: Path) -> Iterator[TestClient]:
         yield found
 
 
-def page(client: TestClient, path: str, status: int = 200) -> Element:
-    """A state of the page: its status, the page CSP, no-store, and the checks every page passes."""
-    answer = client.get(path)
-    assert answer.status_code == status, answer.text
-    assert answer.headers["Content-Security-Policy"] == PAGE_CSP
-    assert answer.headers["Cache-Control"] == "no-store"
-    assert not html_problems(answer.text), path
-    assert not a11y_problems(answer.text), path
-    return parse(answer.text)
+def answer(client: TestClient, query: str = "", status: int = 200) -> dict[str, Any]:
+    got = client.get(f"{API}?{query}" if query else API)
+    assert got.status_code == status, got.text
+    assert got.headers["cache-control"] == "no-store"
+    return got.json()
 
 
-def rows(tree: Element) -> dict[str, list[str]]:
-    """Each group's heading, with its briefs' names in order."""
-    return {
-        g.find("h2").text(): [a.text() for a in g.find_all("a", class_="brief-name")]
-        for g in tree.find_all("section", class_="brief-group")
-    }
+def view(client: TestClient, query: str = "") -> dict[str, Any]:
+    found = answer(client, query)["view"]
+    assert found is not None
+    return found
+
+
+def rows(found: dict[str, Any]) -> dict[str, list[str]]:
+    """Each group's entity type, with its briefs' names in order."""
+    return {g["type"]: [r["name"] for r in g["rows"]] for g in found["groups"]}
+
+
+def by_name(found: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {r["name"]: r for g in found["groups"] for r in g["rows"]}
 
 
 def line_of(root: Path, doc_id: str, start: str) -> int:
@@ -78,10 +84,8 @@ def line_of(root: Path, doc_id: str, start: str) -> int:
     return next(n for n, line in doc.lines() if line.startswith(start))
 
 
-def lines(tree: Element) -> dict[int, Element]:
-    return {
-        int(d.attrs["data-line"]): d for d in tree.find("section", class_="brief-column").find_all("div", class_="line")
-    }
+def lines(found: dict[str, Any]) -> dict[int, dict[str, Any]]:
+    return {line["n"]: line for line in found["lines"]}
 
 
 def list_more(tmp_path: Path, **values: list[str]) -> None:
@@ -95,150 +99,141 @@ def list_more(tmp_path: Path, **values: list[str]) -> None:
 # -- the list ---------------------------------------------------------------------------------------------------------
 
 
-def test_the_list_groups_the_briefs_by_entity_type_with_plain_links(reader: TestClient) -> None:
-    tree = page(reader, "/briefs")
-    assert tree.find("title").text() == "Briefs - Docket"
-    assert rows(tree) == {
+def test_the_page_is_the_app_s_and_lists_the_briefs_by_entity_type(reader: TestClient) -> None:
+    assert '<div id="root">' in reader.get("/briefs?brief=brief:ben-sample&line=3").text
+    read = answer(reader)
+    assert (read["canonical"], read["notice"], read["waiting"], read["decisions"]) == ("/briefs", None, "", None)
+    found = read["view"]
+    assert found["mode"] == "list"
+    assert rows(found) == {
         "person": ["Ben Sample"],
         "customer": ["Northwind"],
         "site": ["Harbour site"],
         "orphaned": ["Dóra Minta"],
     }
-    assert tree.find("header", class_="briefs-head").find("p", class_="meta").text() == (
-        "4 briefs: 2 stale, 1 current, 1 orphaned"
-    )
-    found = {r.find("a").text(): r for r in tree.find_all("li", class_="brief-row")}
-    assert found["Ben Sample"].attrs["data-state"] == "stale"
-    assert "1 new record" in found["Ben Sample"].text()
-    assert "1 flagged line" in found["Northwind"].text()
-    assert found["Harbour site"].find("span", class_="state").text() == "current"
-    assert "its entity is gone; cleo-test holds its name now" in found["Dóra Minta"].text()
-    assert found["Northwind"].find("a").attrs["href"] == f"/briefs?brief={NORTHWIND}"
-    assert "rev 1, " in found["Northwind"].find("span", class_="meta").text()
-    # Every state is its URL, and every link a plain one: the page needs no script to work.
-    main = tree.find("main")
-    assert not [el for el in main.walk() if any(name.startswith("hx-") for name in el.attrs)]
-    assert all(a.attrs["href"].startswith("/") for a in main.find_all("a"))
-    nav = tree.find("nav", class_="nav")
-    assert nav.find("a", href="/briefs").attrs["aria-current"] == "page"
+    assert found["summary"] == "4 briefs: 2 stale, 1 current, 1 orphaned"
+    named = by_name(found)
+    assert (named["Ben Sample"]["state"], named["Ben Sample"]["new"]) == ("stale", 1)
+    assert (named["Northwind"]["state"], named["Northwind"]["flagged"]) == ("stale", 1)
+    assert named["Northwind"]["url"] == f"/briefs?brief={NORTHWIND}"
+    assert named["Northwind"]["rev"] == 1 and named["Northwind"]["age"]
+    assert named["Harbour site"]["state"] == "current"
+    assert named["Dóra Minta"]["orphan"] == "its entity is gone; cleo-test holds its name now"
 
 
-def test_a_type_narrows_the_list_and_its_chips_say_how_many(reader: TestClient) -> None:
-    tree = page(reader, "/briefs?type=person")
-    assert rows(tree) == {"person": ["Ben Sample"]}
-    chips = {a.text(): a for a in tree.find("nav", aria_label="Entity types").find_all("a")}
-    assert list(chips) == ["All 4", "person 1", "customer 1", "site 1", "orphaned 1"]
-    assert chips["person 1"].attrs["aria-current"] == "true"
-    assert chips["All 4"].attrs["href"] == "/briefs"
+def test_a_type_narrows_the_list_and_its_tabs_say_how_many(reader: TestClient) -> None:
+    found = view(reader, "type=person")
+    assert rows(found) == {"person": ["Ben Sample"]}
+    tabs = {t["name"]: t for t in found["types"]}
+    assert [(t["name"], t["count"]) for t in found["types"]] == [
+        ("All", 4),
+        ("person", 1),
+        ("customer", 1),
+        ("site", 1),
+        ("orphaned", 1),
+    ]
+    assert tabs["person"]["on"] and not tabs["All"]["on"]
+    assert tabs["All"]["url"] == "/briefs"
     # A brief opened from the list keeps the type, so the way back does too.
-    assert tree.find("a", class_="brief-name").attrs["href"] == f"/briefs?brief={BEN}&type=person"
-    assert rows(page(reader, "/briefs?type=orphaned")) == {"orphaned": ["Dóra Minta"]}
-    none = page(reader, "/briefs?type=project")
-    assert none.find("div", class_="empty").text() == "No project briefs."
+    assert by_name(found)["Ben Sample"]["url"] == f"/briefs?brief={BEN}&type=person"
+    assert rows(view(reader, "type=orphaned")) == {"orphaned": ["Dóra Minta"]}
+    none = view(reader, "type=project")
+    assert (none["groups"], none["empty"], none["empty_how"]) == ([], "No project briefs.", "")
 
 
 def test_a_vault_with_no_brief_says_how_one_is_written(client: TestClient, tmp_path: Path) -> None:
     for path in (tmp_path / "vault" / "processed" / "brief").glob("*.md"):
         path.unlink()
-    tree = page(client, "/briefs")
-    assert "No briefs yet." in tree.find("div", class_="empty").text()
-    assert not tree.find_all("nav", aria_label="Entity types")
+    found = view(client)
+    assert (found["empty"], found["types"], found["summary"]) == ("No briefs yet.", [], "")
+    assert found["empty_how"].startswith("Ask Claude for a brief")
 
 
 # -- an open brief ----------------------------------------------------------------------------------------------------
 
 
-def test_a_brief_opens_beside_the_raw_its_line_cites(reader: TestClient, seen: Path) -> None:
-    tree = page(reader, f"/briefs?brief={NORTHWIND}")
-    assert tree.find("title").text() == "Northwind - Briefs - Docket"
-    assert tree.find("h1").text() == "Northwind"
-    assert tree.find("p", class_="eyebrow").text().startswith("brief customer \N{MIDDLE DOT} rev 1 \N{MIDDLE DOT} ")
-    assert "Choose a line" in tree.find("section", class_="raw-column").text()
+def test_a_brief_opens_with_its_lines_and_a_line_with_the_raw_it_cites(reader: TestClient, seen: Path) -> None:
+    found = view(reader, f"brief={NORTHWIND}")
+    assert (found["mode"], found["title"], found["id"], found["state"]) == ("brief", "Northwind", NORTHWIND, "stale")
+    assert found["meta"][:2] == ["customer", "rev 1"]
+    assert found["back"] == "/briefs"
+    assert found["raw"] is None and found["choose"].startswith("Choose a line")
     mail = line_of(seen, NORTHWIND, "- The offer comes by mail.")
-    shown = lines(tree)
-    link = shown[mail].find("a", class_="line-link")
-    assert link.attrs["href"] == f"/briefs?brief={NORTHWIND}&line={mail}#raw"
-    anchor = shown[mail].find("a", class_="anchor")
-    assert anchor.attrs["href"] == f"/search?hit={quote(f'r:{OFFER}#1', safe=':@/,')}"
-    opened = page(reader, link.attrs["href"].partition("#")[0])
-    raw = opened.find("section", class_="raw-column")
-    assert raw.attrs["id"] == "raw"
-    assert raw.find("h2").text() == f"Line {mail}"
-    assert raw.find("p", class_="raw-line").text() == "The offer comes by mail."
-    assert "The consultant's offer" in raw.find("article", class_="span").text()
-    assert raw.find("p", class_="raw-link").find("a").text() == "On the Search page"
-    assert lines(opened)[mail].find("a", class_="line-link").attrs["aria-current"] == "true"
+    line = lines(found)[mail]
+    assert line["url"] == f"/briefs?brief={NORTHWIND}&line={mail}#raw"
+    assert line["anchors"][0]["url"] == f"/search?hit={quote(f'r:{OFFER}#1', safe=':@/,')}"
+    assert not line["open"]
+    # The line's own URL, as the app follows it: its query string read, its #raw where the raw is.
+    opened = answer(reader, line["url"].partition("?")[2].partition("#")[0])
+    assert opened["canonical"] == f"/briefs?brief={NORTHWIND}&line={mail}"
+    raw = opened["view"]["raw"]
+    assert (raw["n"], raw["body"], raw["close"]) == (mail, "The offer comes by mail.", f"/briefs?brief={NORTHWIND}")
+    [span] = raw["spans"]
+    assert "The consultant's offer" in span["span"]["head"]
+    assert span["link"]["text"] == "On the Search page"
+    assert lines(opened["view"])[mail]["open"]
 
 
 def test_a_person_s_brief_links_to_their_items_on_the_ledger(reader: TestClient) -> None:
     """DR-0669: a person's brief, and only a person's, links to the Ledger narrowed to them."""
-    links = page(reader, f"/briefs?brief={BEN}").find("p", class_="briefs-locator").find_all("a")
-    assert [(a.attrs["href"], a.text()) for a in links][1:] == [
-        ("/ledger?who=Ben+Sample", "Ben Sample's items on the Ledger")
-    ]
-    assert len(page(reader, f"/briefs?brief={NORTHWIND}").find("p", class_="briefs-locator").find_all("a")) == 1
+    ben = view(reader, f"brief={BEN}")["ledger"]
+    assert (ben["url"], ben["text"]) == ("/ledger?who=Ben+Sample", "Ben Sample's items on the Ledger")
+    assert view(reader, f"brief={NORTHWIND}")["ledger"] is None
 
 
 def test_a_time_anchor_opens_the_recording_page_at_its_time(reader: TestClient, seen: Path) -> None:
     n = line_of(seen, NORTHWIND, "- 7 Oct, supplier call")
-    tree = page(reader, f"/briefs?brief={NORTHWIND}&line={n}")
-    assert lines(tree)[n].find("a", class_="anchor").attrs["href"] == f"/recording?rid={CALL}&at=04:00-05:00#at"
-    raw = tree.find("section", class_="raw-column")
-    assert raw.find("p", class_="raw-link").find("a").attrs["href"] == f"/recording?rid={CALL}&at=04:00-05:00#at"
-    assert "offer in writing" in raw.find("article", class_="span").text()
+    found = view(reader, f"brief={NORTHWIND}&line={n}")
+    assert lines(found)[n]["anchors"][0]["url"] == f"/recording?rid={CALL}&at=04:00-05:00#at"
+    [span] = found["raw"]["spans"]
+    assert span["link"]["url"] == f"/recording?rid={CALL}&at=04:00-05:00#at"
+    assert "offer in writing" in str(span["span"]["segments"])
 
 
 def test_a_ref_is_followed_one_level_with_its_own_raw(reader: TestClient, seen: Path) -> None:
     n = line_of(seen, BEN, "- Ben wants the deadline")
-    tree = page(reader, f"/briefs?brief={BEN}&line={n}")
-    ref = lines(tree)[n].find("a", class_="ref")
+    found = view(reader, f"brief={BEN}&line={n}")
     deadline = line_of(seen, NOTE, "- Dóra agrees the deadline")
-    assert ref.attrs["href"] == f"/search?hit={NOTE}&lines={deadline}"
-    cited = tree.find("article", class_="cited-line")
-    assert f"{NOTE}, line {deadline}" in cited.find("header").text()
-    assert cited.find("p", class_="raw-line").text() == "Dóra agrees the deadline with Ben on Friday."
-    assert cited.find("p", class_="raw-link").find("a").attrs["href"] == f"/recording?rid={CALL}&at=02:30-03:20#at"
+    assert lines(found)[n]["refs"][0]["url"] == f"/search?hit={NOTE}&lines={deadline}"
+    [cited] = found["raw"]["cited"]
+    assert cited["link"]["text"] == f"{NOTE}, line {deadline}"
+    assert cited["text"] == "Dóra agrees the deadline with Ben on Friday."
+    assert cited["spans"][0]["link"]["url"] == f"/recording?rid={CALL}&at=02:30-03:20#at"
 
 
 def test_a_flagged_line_is_marked_and_says_what_changed(reader: TestClient, seen: Path) -> None:
     n = line_of(seen, NORTHWIND, "- The consultant's price")
-    tree = page(reader, f"/briefs?brief={NORTHWIND}&line={n}")
-    assert "flagged" in lines(tree)[n].attrs["class"]
-    assert lines(tree)[n].find("span", class_="flag").text() == "changed under it"
-    notices = [d.text() for d in tree.find("main").find_all("div", class_="warn")]
-    assert "1 line cites a line that changed since; marked below." in notices
-    raw = tree.find("section", class_="raw-column")
-    assert "reads otherwise" in raw.find("article", class_="cited-line").text()
+    found = view(reader, f"brief={NORTHWIND}&line={n}")
+    assert lines(found)[n]["flagged"]
+    assert "1 line cites a line that changed since; marked below." in found["notices"]
+    assert "reads otherwise" in str(found["raw"])
 
 
 def test_a_stale_brief_lists_its_new_records(reader: TestClient) -> None:
-    tree = page(reader, f"/briefs?brief={BEN}")
-    assert "1 record about Ben Sample since rev 1:" in tree.find("main").text()
-    [new] = tree.find("ul", class_="new-records").find_all("a")
-    assert new.text() == ABOUT_BEN.rid
-    assert new.attrs["href"] == f"/search?hit={quote(f'r:{ABOUT_BEN.rid}', safe=':@/,')}"
+    found = view(reader, f"brief={BEN}")
+    assert "1 record about Ben Sample since rev 1:" in found["notices"]
+    [new] = found["new"]
+    assert (new["text"], new["url"]) == (ABOUT_BEN.rid, f"/search?hit={quote(f'r:{ABOUT_BEN.rid}', safe=':@/,')}")
 
 
 def test_an_orphan_names_the_entity_that_holds_its_name(reader: TestClient) -> None:
-    tree = page(reader, f"/briefs?brief={DORA}")
-    assert tree.find("p", class_="eyebrow").text().startswith("brief orphaned \N{MIDDLE DOT} rev 1")
-    assert "Its entity is gone; cleo-test holds its name now." in tree.find("main").text()
+    found = view(reader, f"brief={DORA}")
+    assert found["meta"][:2] == ["orphaned", "rev 1"]
+    assert "Its entity is gone; cleo-test holds its name now." in found["notices"]
 
 
-def test_a_current_brief_has_no_notice(reader: TestClient) -> None:
-    tree = page(reader, f"/briefs?brief={HARBOUR}&type=site")
-    assert not tree.find("main").find_all("div", class_="warn")
-    assert tree.find("p", class_="briefs-locator").find("a").attrs["href"] == "/briefs?type=site"
+def test_a_current_brief_has_no_notice_and_its_way_back_keeps_the_type(reader: TestClient) -> None:
+    found = view(reader, f"brief={HARBOUR}&type=site")
+    assert (found["notices"], found["back"]) == ([], "/briefs?type=site")
 
 
 def test_a_line_that_cites_nothing_or_isn_t_there_says_so(reader: TestClient, seen: Path) -> None:
     n = line_of(seen, HARBOUR, "## Last conversations")
-    heading = page(reader, f"/briefs?brief={HARBOUR}&line={n}")
-    assert not lines(heading)[n].find_all("a")
-    assert f"Line {n} cites nothing" in heading.find("section", class_="raw-column").text()
+    heading = view(reader, f"brief={HARBOUR}&line={n}")
+    assert lines(heading)[n]["url"] is None
+    assert heading["raw"]["empty"] == f"Line {n} cites nothing: it has no anchors or refs."
     for far in (2, 99):
-        past = page(reader, f"/briefs?brief={HARBOUR}&line={far}")
-        assert f"line {far} isn't in the doc's body" in past.find("section", class_="raw-column").text()
+        assert f"line {far} isn't in the doc's body" in str(view(reader, f"brief={HARBOUR}&line={far}")["raw"])
 
 
 # -- never-store ------------------------------------------------------------------------------------------------------
@@ -246,45 +241,45 @@ def test_a_line_that_cites_nothing_or_isn_t_there_says_so(reader: TestClient, se
 
 def test_a_brief_a_list_now_holds_is_hidden_and_counted(client: TestClient, tmp_path: Path) -> None:
     list_more(tmp_path, people=["ben@northwind.example"])
-    tree = page(client, "/briefs")
-    assert "Ben Sample" not in tree.find("main").text()
-    assert "1 brief hidden: a never-store list holds its entity." in tree.find("main").text()
-    hidden = page(client, f"/briefs?brief={BEN}&line=10")
-    assert hidden.find("h1").text() == "A hidden brief"
-    assert hidden.find("title").text() == "A hidden brief - Briefs - Docket"
-    main = hidden.find("main").text()
-    assert "Ben" not in main
-    assert "ben-sample" not in main
+    found = view(client)
+    assert "Ben Sample" not in str(found)
+    assert found["hidden_note"] == "1 brief hidden: a never-store list holds its entity."
+    hidden = answer(client, f"brief={BEN}&line=10")
+    assert (hidden["view"]["mode"], hidden["view"]["title"]) == ("hidden", "A hidden brief")
+    assert "Ben" not in str(hidden["view"]) and "ben-sample" not in str(hidden["view"])
+    assert hidden["decisions"] is None
     # A listed person opens nothing either, brief or no brief: by the name an id spells, or by a contact id.
     list_more(tmp_path, people=["ben@northwind.example", "Vera Nobody", "U0CLEO"])
     for nobody in ("brief:vera-nobody", "brief:cleo-test"):
-        assert page(client, f"/briefs?brief={nobody}").find("h1").text() == "A hidden brief"
-    assert "cleo" not in page(client, "/briefs?brief=brief:cleo-test").find("main").text().casefold()
+        assert view(client, f"brief={nobody}")["mode"] == "hidden"
+    assert "cleo" not in str(view(client, "brief=brief:cleo-test")).casefold()
 
 
 def test_a_line_a_list_now_names_is_hidden_and_opens_nothing(client: TestClient, tmp_path: Path) -> None:
     n = line_of(tmp_path / "vault", NORTHWIND, "- 7 Oct, supplier call")
     list_more(tmp_path, keywords=["offer in writing"])
-    tree = page(client, f"/briefs?brief={NORTHWIND}&line={n}")
-    line = lines(tree)[n]
-    assert line.text().strip() == f"{n} a line hidden: it names a never-store value"
-    assert not line.find_all("a")
-    raw = tree.find("section", class_="raw-column")
-    assert raw.text().strip().endswith(f"Line {n} is hidden: it names a never-store value, so nothing of it opens.")
-    assert not raw.find_all("article")
-    assert "offer in writing" not in tree.text()
+    found = view(client, f"brief={NORTHWIND}&line={n}")
+    line = lines(found)[n]
+    assert (line["body"], line["hidden"], line["url"], line["anchors"]) == (
+        "a line hidden: it names a never-store value",
+        True,
+        None,
+        [],
+    )
+    raw = found["raw"]
+    assert raw["empty"] == f"Line {n} is hidden: it names a never-store value, so nothing of it opens."
+    assert (raw["spans"], raw["cited"]) == ([], [])
+    assert "offer in writing" not in str(found)
 
 
 def test_a_cited_line_a_list_now_names_is_hidden(client: TestClient, tmp_path: Path) -> None:
     n = line_of(tmp_path / "vault", BEN, "- Ben wants the deadline")
     list_more(tmp_path, keywords=["agrees the deadline"])
-    tree = page(client, f"/briefs?brief={BEN}&line={n}")
-    cited = tree.find("article", class_="cited-line")
-    assert cited.find("p", class_="raw-line").text() == "a line hidden: it names a never-store value"
-    assert not cited.find_all("article", class_="span")
+    [cited] = view(client, f"brief={BEN}&line={n}")["raw"]["cited"]
+    assert (cited["text"], cited["hidden"], cited["spans"]) == ("a line hidden: it names a never-store value", True, [])
 
 
-# -- the URL and its errors -------------------------------------------------------------------------------------------
+# -- the URL and its refusals -----------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -296,22 +291,23 @@ def test_a_cited_line_a_list_now_names_is_hidden(client: TestClient, tmp_path: P
         (f"brief={BEN}&line=0", "line is a line's number"),
         (f"brief={BEN}&line=two", "line is a line's number"),
         ("type=people", "type is an entity type"),
+        ("done=decided", "done is what a click did"),
     ],
 )
-def test_a_value_the_url_can_t_hold_is_the_page_s_own_error(reader: TestClient, query: str, named: str) -> None:
-    tree = page(reader, f"/briefs?{query}", status=400)
-    assert named in tree.find("div", class_="error").text()
+def test_a_value_the_url_can_t_hold_is_refused_in_its_words(reader: TestClient, query: str, named: str) -> None:
+    assert named in answer(reader, query, status=400)["error"]
 
 
 def test_a_brief_that_isn_t_there_says_so(reader: TestClient) -> None:
-    tree = page(reader, "/briefs?brief=brief:fleet-management", status=404)
-    assert "No brief brief:fleet-management." in tree.find("main").text()
-    assert tree.find("main").find("a", class_="button").attrs["href"] == "/briefs"
+    found = view(reader, "brief=brief:fleet-management")
+    assert found["mode"] == "missing"
+    assert found["message"].startswith("No brief brief:fleet-management.")
+    assert found["link"] == {"text": "All briefs", "url": "/briefs", "title": ""}
 
 
-def test_the_url_reads_and_writes_one_canonical_form() -> None:
-    state = BriefsState.read({"type": "person", "line": "12", "brief": BEN, "other": "kept out"})
-    assert state == BriefsState(BEN, 12, "person")
+def test_the_url_reads_and_writes_one_canonical_form_and_says_a_click_once(reader: TestClient) -> None:
+    state = BriefsState.read({"type": "person", "line": "12", "brief": BEN, "other": "kept out", "done": "reject"})
+    assert state == BriefsState(BEN, 12, "person", "reject")
     assert state.url() == f"/briefs?brief={BEN}&line=12&type=person"
     assert state.link() == f"{state.url()}#raw"
     assert BriefsState(BEN).link() == f"/briefs?brief={BEN}"
@@ -320,17 +316,28 @@ def test_the_url_reads_and_writes_one_canonical_form() -> None:
     assert BriefsState.read({"line": "4"}) == BriefsState()
     with pytest.raises(BriefsStateError, match="type is an entity type"):
         BriefsState.read({"type": "Person"})
+    # A URL from before the app, naming what a click did: its notice once, and a canonical URL without it.
+    said = answer(reader, f"other=1&brief={HARBOUR}&done=confirm")
+    assert (said["canonical"], said["notice"]) == (f"/briefs?brief={HARBOUR}", "Confirmed: it is a decision now.")
 
 
-def test_the_index_being_built_waits_and_a_failure_is_the_error_page(
+def test_the_token_never_reads_the_page(reader: TestClient) -> None:
+    token = reader.get(API, headers={"Authorization": f"Bearer {TOKEN}"})
+    assert token.status_code == 403
+    reader.cookies.clear()
+    assert reader.get(API).status_code == 401
+
+
+def test_the_index_being_built_waits_and_a_failure_says_no_words(
     reader: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     app = reader.app
     assert isinstance(app, ServiceApp)
     updater = app.service.updater
     app.service.updater = IndexUpdater(lambda: time.sleep(0.5), wait_seconds=0.01)
-    waiting = page(reader, "/briefs", status=503)
-    assert "the index is being built" in waiting.find("div", class_="error").text()
+    waiting = answer(reader, f"brief={BEN}")
+    assert (waiting["view"], waiting["canonical"]) == (None, f"/briefs?brief={BEN}")
+    assert "the index is being built" in waiting["waiting"]
     app.service.updater = updater
 
     def failing(*_args: object) -> object:
@@ -340,11 +347,10 @@ def test_the_index_being_built_waits_and_a_failure_is_the_error_page(
         raise DocketError("the index can't be read")
 
     monkeypatch.setattr(briefs, "gather", refusing)
-    assert "the index can't be read" in page(reader, "/briefs", status=400).find("div", class_="error").text()
+    assert answer(reader, status=400)["error"] == "the index can't be read"
     monkeypatch.setattr(briefs, "gather", failing)
-    failed = reader.get("/briefs")
+    failed = reader.get(API)
     assert failed.status_code == 500
-    assert "Something failed in Docket" in failed.text
     assert "words from a record" not in failed.text
 
 
@@ -364,22 +370,22 @@ def test_a_brief_with_its_history_not_here_says_so() -> None:
                DocLine(n=4, text="- Said twice. @00:10")],
     )  # fmt: skip
     doc = doc.model_copy(update={"covers": ["calls:rec-1", "calls:rec-2"]})
-    view = build(Facts(now, ZoneInfo("UTC"), BriefsReport(briefs=[found]), found, doc=doc), BriefsState(BEN))
-    assert view.meta == "person \N{MIDDLE DOT} rev 2"
-    assert view.notices == [
+    view_ = build(Facts(now, ZoneInfo("UTC"), BriefsReport(briefs=[found]), found, doc=doc), BriefsState(BEN))
+    assert view_.meta == ["person", "rev 2"]
+    assert view_.notices == [
         "Stale: its history isn't here, so Docket can't tell which records it hasn't seen.",
         "7 records about Ben Sample since rev 2 (the newest five):",
     ]
-    assert [link.text for link in view.new] == ["a", "b", "c", "d", "e"]
+    assert [link.text for link in view_.new] == ["a", "b", "c", "d", "e"]
     # A short anchor on a brief covering two records names no record, so it links nowhere.
-    [anchor] = view.lines[-1].anchors
+    [anchor] = view_.lines[-1].anchors
     assert (anchor.text, anchor.url) == ("@00:10", "")
 
 
 def test_an_orphan_no_one_entity_holds_the_name_of_says_so() -> None:
     gone = BriefState(id="brief:vera", entity="vera", name="Vera", type="", rev=1, state="orphaned")
-    view = build(Facts(datetime.now(UTC), ZoneInfo("UTC"), BriefsReport(briefs=[gone])), BriefsState())
-    [group] = view.groups
+    view_ = build(Facts(datetime.now(UTC), ZoneInfo("UTC"), BriefsReport(briefs=[gone])), BriefsState())
+    [group] = view_.groups
     assert (group.type, group.rows[0].orphan) == ("orphaned", "its entity is gone, and no one entity holds its name")
 
 
@@ -391,8 +397,7 @@ def test_a_decisions_line_from_before_the_log_is_marked_and_the_brief_stale(clie
     git(root, "add", "--", str(path))
     git(root, "commit", "-qm", f"Doc: {HARBOUR} rev 2")
     n = line_of(tmp_path / "vault", HARBOUR, "- A new printer was decided.")
-    tree = page(client, f"/briefs?brief={HARBOUR}")
-    assert [s.text() for s in lines(tree)[n].find_all("span", class_="flag")] == ["not a confirmed decision"]
-    assert "a Decisions line cites no confirmed decision" in tree.find("main").text()
-    listed = {r.find("a").text(): r for r in page(client, "/briefs").find_all("li", class_="brief-row")}
-    assert listed["Harbour site"].attrs["data-state"] == "stale"
+    found = view(client, f"brief={HARBOUR}")
+    assert (lines(found)[n]["unconfirmed"], lines(found)[n]["flagged"]) == (True, False)
+    assert any("a Decisions line cites no confirmed decision" in notice for notice in found["notices"])
+    assert by_name(view(client))["Harbour site"]["state"] == "stale"

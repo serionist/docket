@@ -19,29 +19,3 @@
 {% macro copy(value) %}
 <button type="button" class="icon-button" data-action="copy" data-locator="{{ value }}" title="Copy {{ value }}">{{ icon('copy') }}<span class="visually-hidden">Copy the locator {{ value }}</span></button>
 {% endmacro %}
-
-{% macro span(s) %}
-<article class="span{% if s.mark %} mark{% endif %}">
-  <header class="span-head">{{ locator(s.anchor) }}<span class="meta" dir="auto">{{ s.head }}</span>{% if s.versions %}<span class="badge">{{ s.versions }}</span>{% endif %}</header>
-  {% if s.problem %}{{ notice('error', s.problem) }}{% endif %}
-  {% if s.note %}{{ notice('info', s.note) }}{% endif %}
-  {% if s.segments %}
-  <ol class="segments">
-    {% for seg in s.segments %}
-    <li class="segment{% if seg.mark %} mark{% endif %}">
-      <button type="button" class="time" data-action="copy" data-locator="{{ seg.locator }}" title="Copy {{ seg.locator }}">{{ seg.at }}</button>
-      <span class="speaker" dir="auto">{{ seg.speaker }}</span>
-      <span class="text" dir="auto">{% if seg.mark %}<mark>{{ seg.text }}</mark>{% else %}{{ seg.text }}{% endif %}</span>
-    </li>
-    {% endfor %}
-  </ol>
-  {% endif %}
-  {% if s.paragraphs %}
-  <ol class="paragraphs">
-    {% for p in s.paragraphs %}
-    <li class="paragraph{% if p.mark %} mark{% endif %}" value="{{ p.n }}"><span class="text" dir="auto">{% if p.mark %}<mark>{{ p.text }}</mark>{% else %}{{ p.text }}{% endif %}</span></li>
-    {% endfor %}
-  </ol>
-  {% endif %}
-</article>
-{% endmacro %}

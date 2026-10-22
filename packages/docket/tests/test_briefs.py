@@ -5,12 +5,13 @@ its entity gone or listed. On a copy of the index fixture, with invented people 
 from __future__ import annotations
 
 import shutil
+from collections import OrderedDict
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from docket_testkit import git, index_template, make_record
+from docket_testkit import git, git_calls, index_template, make_record
 
 from docket import briefs, recall, render
 from docket.cli import main
@@ -296,6 +297,68 @@ def test_one_brief_s_missing_commit_leaves_the_others_as_they_are(
 
     monkeypatch.setattr(DocStore, "histories", lambda _store, _ids: {})
     assert {b.why for b in briefs.report(vault, stale_only=False).briefs} == {briefs.HISTORY_NOT_HERE}
+
+
+def keeps_emptied(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The report's keeps, empty for this test alone: other tests of the worker filled them."""
+    monkeypatch.setattr(briefs, "_TREES", OrderedDict())
+    monkeypatch.setattr(briefs, "_RAW_TREES", {})
+    monkeypatch.setattr(briefs, "_TIMES", {})
+
+
+def asked(calls: list[str]) -> list[str]:
+    """What a report asked git of a commit: its raw/ tree, its time, a raw/ tree's listing."""
+    return [c.split()[0] for c in calls if c.startswith(("cat-file --batch-check", "log --no-walk", "ls-tree"))]
+
+
+def test_commits_that_share_raw_share_one_listing_and_the_keep_holds_the_last_few(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A commit's raw/ tree and time never change, so the next report asks git for neither, which keeps the Briefs
+    page's read from a git call a brief; the commits that share a raw/ tree share one listing, and the keep holds the
+    last TREES_KEPT listed, so a service running for weeks keeps a few, never one for each brief rev it read."""
+    keeps_emptied(monkeypatch)
+    put_ben(vault)
+    recall.doc_put(vault, brief("northwind", "Northwind", changed=[f"- Above the budget. {cite(vault, TEN)}"]))
+    before = briefs.report(vault, stale_only=False)
+    assert len(briefs._TREES) == 1, "both briefs' commits share raw/"  # pyright: ignore[reportPrivateUsage]
+    with git_calls(monkeypatch) as calls:
+        assert briefs.report(vault, stale_only=False) == before
+    assert asked(calls) == []
+    # A new raw/, then Ben's next rev on it: its time, its raw/ tree and that tree's listing. A keep of one holds one
+    # listing, so Northwind's is listed again too when Ben's commit comes first, as the commits' ids order them.
+    monkeypatch.setattr(briefs, "TREES_KEPT", 1)
+    vault.write_run("chat", [make_record(902, text="Ben Sample asked for the drawings.")])
+    vault.commit([], "Raw: a chat about Ben")
+    put_ben(vault, rev="1", said=[f"- Cleo sends the offer by Friday. {cite(vault, FRIDAY)}"])
+    with git_calls(monkeypatch) as calls:
+        briefs.report(vault, stale_only=False)
+    assert asked(calls) in (["log", "cat-file", "ls-tree"], ["log", "cat-file", "ls-tree", "ls-tree"])
+    assert len(briefs._TREES) == 1  # pyright: ignore[reportPrivateUsage]
+    # The commits' keep holds small strings, and empties when it would pass its own cap.
+    monkeypatch.setattr(briefs, "COMMITS_KEPT", 1)
+    monkeypatch.setattr(briefs, "_RAW_TREES", {"0" * 40: ""})
+    monkeypatch.setattr(briefs, "_TIMES", {"0" * 40: "2026-10-01T09:00:00+00:00"})
+    assert briefs.report(vault, stale_only=False) == briefs.report(vault, stale_only=False)
+    assert "0" * 40 not in briefs._RAW_TREES and "0" * 40 not in briefs._TIMES  # pyright: ignore[reportPrivateUsage]
+
+
+def test_a_raw_tree_that_doesn_t_list_here_leaves_its_brief_stale(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A commit whose raw/ can't be listed on this clone, as one a partial clone lacks the objects of, is a brief whose
+    history isn't here, never current."""
+    keeps_emptied(monkeypatch)
+    put_ben(vault)
+    head = vault.git.head_id()
+    assert head is not None
+    briefs._RAW_TREES[head] = "0" * 40  # pyright: ignore[reportPrivateUsage]
+    found = state(vault)
+    assert (found.state, found.why) == ("stale", briefs.HISTORY_NOT_HERE)
+    # A commit with no raw/ at all held no run file, so every record about Ben came after it.
+    briefs._RAW_TREES[head] = ""  # pyright: ignore[reportPrivateUsage]
+    empty = state(vault)
+    assert (empty.state, empty.why) == ("stale", None) and empty.new.count > 0
 
 
 def test_a_merge_in_the_briefs_history_reads_each_brief_s_own_log(vault: Vault) -> None:

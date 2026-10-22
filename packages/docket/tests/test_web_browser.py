@@ -10,7 +10,6 @@ can't start fails the test. CI runs it in its own Linux job; `DOCKET_TEST_SCREEN
 from __future__ import annotations
 
 import os
-import re
 import shutil
 from collections.abc import Iterator
 from dataclasses import replace
@@ -18,10 +17,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from briefs_kit import NORTHWIND, briefs_template
 from browser_kit import live
 from curate_kit import curate_vault
-from decisions_kit import BRIEF, decisions_template
 from playwright.sync_api import Page, expect, sync_playwright
 from settings_kit import settings_template
 from staging_kit import staging_vault
@@ -71,30 +68,6 @@ def settings_service(settings_project: Path, tmp_path: Path) -> Iterator[tuple[i
 def curate_service(tmp_path: Path) -> Iterator[tuple[int, str]]:
     """The real service over the invented curate vault: recordings, notes and mail, no entity yet."""
     yield from _serve(curate_vault(tmp_path).root)
-
-
-@pytest.fixture(scope="module")
-def briefs_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return briefs_template(tmp_path_factory)
-
-
-@pytest.fixture
-def briefs_service(briefs_project: Path, tmp_path: Path) -> Iterator[tuple[int, str]]:
-    """The real service over the invented briefs vault: four briefs, stale, current and orphaned."""
-    shutil.copytree(briefs_project, tmp_path / "vault")
-    yield from _serve(tmp_path / "vault")
-
-
-@pytest.fixture(scope="module")
-def decisions_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return decisions_template(tmp_path_factory)
-
-
-@pytest.fixture
-def decisions_service(decisions_project: Path, tmp_path: Path) -> Iterator[tuple[int, str]]:
-    """The real service over the invented decisions vault: decided, superseded, rejected and waiting decisions."""
-    shutil.copytree(decisions_project, tmp_path / "vault")
-    yield from _serve(tmp_path / "vault")
 
 
 _serve = live
@@ -454,142 +427,6 @@ def test_windows_paths_wrap_on_the_settings_page_at_phone_width(
         _fits(page, "#source-documents", "section[aria-labelledby='models-title']")
         page.screenshot(path=str(shots / "settings-windows-390.png"), full_page=True)
         browser.close()
-
-
-def test_the_briefs_page_in_a_browser(briefs_service: tuple[int, str], tmp_path: Path) -> None:
-    port, token = briefs_service
-    shots = Path(os.environ.get("DOCKET_TEST_SCREENSHOTS") or tmp_path)
-    shots.mkdir(parents=True, exist_ok=True)
-    link = client.call("POST", "/api/session", token=token, at=port)
-    assert link is not None
-    errors: list[str] = []
-    base = f"http://127.0.0.1:{port}"
-    northwind = f"{base}/briefs?brief={NORTHWIND}"
-    with sync_playwright() as p:
-        browser = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
-        page = browser.new_page(viewport={"width": 1440, "height": 900})
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        page.on("requestfailed", lambda r: errors.append(f"request failed: {r.method} {r.url} ({r.failure})"))
-        page.on(
-            "response", lambda r: errors.append(f"{r.status} {r.request.method} {r.url}") if r.status >= 400 else None
-        )
-        page.goto(f"{link.body['url']}&next=/briefs")
-        page.wait_for_url(f"{base}/briefs")
-
-        # The briefs by entity type, then one opened, then one of its lines beside its raw.
-        expect(page.locator(".brief-group h2")).to_have_text(["person", "customer", "site", "orphaned"])
-        page.screenshot(path=str(shots / "briefs.png"), full_page=True)
-        page.click("a.brief-name:has-text('Northwind')")
-        page.wait_for_url(northwind)
-        expect(page.locator("h1")).to_have_text("Northwind")
-        page.click("a.line-link:has-text('supplier call')")
-        page.wait_for_url(re.compile(r"&line=\d+#raw$"))
-        expect(page.locator("#raw article.span")).to_contain_text("offer in writing")
-        expect(page.locator(".line.cited")).to_contain_text("supplier call")
-        # A flagged line says what changed under it, and the line it was built from as it reads now.
-        page.click("a.line-link:has-text('above the budget')")
-        expect(page.locator("#raw .cited-line")).to_contain_text("reads otherwise")
-        page.screenshot(path=str(shots / "briefs-open.png"), full_page=True)
-
-        # At phone width the columns stack, a line's link lands on its raw, and nothing scrolls sideways.
-        page.set_viewport_size({"width": 390, "height": 844})
-        page.goto(northwind)
-        page.click("a.line-link:has-text('supplier call')")
-        page.wait_for_url(re.compile(r"&line=\d+#raw$"))
-        expect(page.locator("#raw")).to_be_in_viewport()
-        _fits(page, ".briefs-locator", ".brief-column", "#raw")
-        page.screenshot(path=str(shots / "briefs-390.png"))
-        page.set_viewport_size({"width": 1440, "height": 900})
-        page.click('[data-action="theme"]')
-        page.click('[data-action="theme"]')
-        page.reload()
-        assert page.evaluate("document.documentElement.dataset.theme") == "dark"
-        page.screenshot(path=str(shots / "briefs-dark.png"), full_page=True)
-        assert not errors, errors
-        browser.close()
-
-        # Without JavaScript the page and its links work the same.
-        again = client.call("POST", "/api/session", token=token, at=port)
-        assert again is not None
-        scriptless = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
-        bare = scriptless.new_context(java_script_enabled=False, viewport={"width": 1280, "height": 900})
-        plain = bare.new_page()
-        plain.goto(f"{again.body['url']}&next=/briefs")
-        plain.wait_for_url(f"{base}/briefs")
-        plain.click("a.type-chip:has-text('customer')")
-        plain.wait_for_url(f"{base}/briefs?type=customer")
-        plain.click("a.brief-name")
-        plain.wait_for_url(f"{northwind}&type=customer")
-        plain.click("a.line-link:has-text('by mail')")
-        expect(plain.locator("#raw article.span")).to_contain_text("The consultant's offer")
-        plain.screenshot(path=str(shots / "briefs-no-script.png"), full_page=True)
-        scriptless.close()
-
-
-def test_the_decisions_on_the_briefs_page_in_a_browser(decisions_service: tuple[int, str], tmp_path: Path) -> None:
-    port, token = decisions_service
-    shots = Path(os.environ.get("DOCKET_TEST_SCREENSHOTS") or tmp_path)
-    shots.mkdir(parents=True, exist_ok=True)
-    link = client.call("POST", "/api/session", token=token, at=port)
-    assert link is not None
-    errors: list[str] = []
-    base = f"http://127.0.0.1:{port}"
-    fleet = f"{base}/briefs?brief={BRIEF}"
-    with sync_playwright() as p:
-        browser = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
-        page = browser.new_page(viewport={"width": 1440, "height": 900})
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        page.on("requestfailed", lambda r: errors.append(f"request failed: {r.method} {r.url} ({r.failure})"))
-        page.on(
-            "response", lambda r: errors.append(f"{r.status} {r.request.method} {r.url}") if r.status >= 400 else None
-        )
-        page.goto(f"{link.body['url']}&next=/briefs")
-        page.wait_for_url(f"{base}/briefs")
-
-        # What waits shows on the list; its page has the candidate that contradicts beside what it contradicts.
-        page.click(".waiting-list a")
-        page.wait_for_url(fleet)
-        expect(page.locator(".waiting").first.locator("h4").first).to_have_text("the pilot comes first after all")
-        expect(page.locator(".waiting.paired .against h4")).to_have_text("the dashboard ships before the pilot")
-        page.screenshot(path=str(shots / "decisions.png"), full_page=True)
-
-        # A click confirms, and the page says so once and shows it decided.
-        page.locator(".waiting", has_text="a review every week").get_by_role("button", name="Confirm").click()
-        page.wait_for_url(f"{fleet}&done=confirm")
-        expect(page.locator("main .notice").first).to_contain_text("Confirmed: it is a decision now.")
-        expect(page.locator(".decisions > article h4").first).to_have_text("a review every week")
-        page.screenshot(path=str(shots / "decisions-confirmed.png"), full_page=True)
-
-        # At phone width the pair stacks and nothing scrolls sideways.
-        page.set_viewport_size({"width": 390, "height": 844})
-        page.goto(fleet)
-        _fits(page, ".decisions", ".waiting.paired")
-        page.screenshot(path=str(shots / "decisions-390.png"), full_page=True)
-        page.set_viewport_size({"width": 1440, "height": 900})
-        page.click('[data-action="theme"]')
-        page.click('[data-action="theme"]')
-        page.reload()
-        assert page.evaluate("document.documentElement.dataset.theme") == "dark"
-        page.screenshot(path=str(shots / "decisions-dark.png"), full_page=True)
-        assert not errors, errors
-        browser.close()
-
-        # Without JavaScript the picks are plain form posts and work the same.
-        again = client.call("POST", "/api/session", token=token, at=port)
-        assert again is not None
-        scriptless = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
-        bare = scriptless.new_context(java_script_enabled=False, viewport={"width": 1280, "height": 900})
-        plain = bare.new_page()
-        plain.goto(f"{again.body['url']}&next=/briefs")
-        plain.wait_for_url(f"{base}/briefs")
-        plain.goto(fleet)
-        plain.get_by_role("button", name="The old one stands").click()
-        plain.wait_for_url(f"{fleet}&done=stand")
-        expect(plain.locator(".decisions details.folded summary", has_text="it stands")).to_have_count(1)
-        plain.screenshot(path=str(shots / "decisions-no-script.png"), full_page=True)
-        scriptless.close()
 
 
 def _add(page: Page, base: str, value: str, shot: Path) -> None:

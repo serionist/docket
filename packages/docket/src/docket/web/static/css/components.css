@@ -243,7 +243,7 @@
     .paste .button { width: 100%; justify-content: center; }
   }
 
-  /* -- a doc's lines, raw spans, verified pairs ----------------------------------------------------------------- */
+  /* -- a line of a value, such as the Settings page's line in vault.yaml ------------------------------------- */
   .line {
     display: grid;
     grid-template-columns: 2.6em 1fr;
@@ -252,28 +252,8 @@
     border-left: 3px solid transparent;
     border-radius: 0 4px 4px 0;
   }
-  .line .n { grid-row: span 2; font-size: var(--text-xs); color: var(--muted); text-align: right; padding-top: 2px; }
-  .line.heading .body { font-weight: 650; }
-  .line.bullet .body::before { content: "\2022"; margin-right: 6px; color: var(--muted); }
-  .line.blank { display: none; }
-  .line.cited { background: var(--cited); border-left-color: var(--warn); }
-  .anchor { grid-column: 2; justify-self: start; font-family: var(--font-mono); font-size: var(--text-xs); }
 
-  .span {
-    padding: var(--space-2) var(--space-3);
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-  }
-  .span + .span { margin-top: var(--space-2); }
-  .span.mark { border-color: var(--warn); box-shadow: inset 3px 0 0 var(--warn); }
-  .span-head { display: flex; flex-wrap: wrap; gap: 4px var(--space-2); align-items: baseline; margin-bottom: 6px; font-size: var(--text-xs); }
-  .segment { display: grid; grid-template-columns: auto auto 1fr; gap: var(--space-2); padding: 2px 0; align-items: baseline; }
-  .segment .speaker { font-weight: 600; white-space: nowrap; }
-  .segment.mark, .paragraph.mark { background: var(--cited); border-radius: 4px; box-shadow: inset 3px 0 0 var(--warn); }
-  .segment.mark mark, .paragraph.mark mark { background: transparent; padding: 0; }
-  .segment.mark { padding-left: 6px; }
-  .segment .text, .paragraph .text { white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* -- a time beside an utterance, as Staging's cuts list them ---------------------------------------------- */
   .time {
     padding: 0 4px;
     font-size: var(--text-xs);
@@ -284,12 +264,6 @@
     cursor: copy;
   }
   .time:hover { border-color: var(--line-strong); color: var(--ink); }
-  .paragraphs { list-style: decimal; padding-left: 2.4em; }
-  .paragraph { padding: 2px 0; }
-  .paragraph::marker { color: var(--muted); font-family: var(--font-mono); font-size: var(--text-xs); }
-
-  .pairs { display: grid; gap: var(--space-2); }
-  .problem { display: flex; gap: 6px; margin-top: 4px; color: var(--error); font-size: var(--text-sm); }
 
   /* -- the empty state any page shows -------------------------------------------------------------------------- */
   .empty { padding: var(--space-5); color: var(--ink); background: var(--surface); border: 1px dashed var(--line-strong); border-radius: var(--radius-lg); }

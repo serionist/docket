@@ -3,7 +3,7 @@
 `rebuild` is the contract: it reads the working tree (`raw/`, `processed/`, `entities/`; never `staging/`, never git
 objects) into a new file, sorted, and replaces the old one, so two rebuilds of one vault give the same database.
 A decision is the one exception: its status is read from git, and a confirmed or rejected one is indexed as its
-last commit holds it, the file noted when it says otherwise (DR-0603).
+last commit holds it, the file noted when it says otherwise (DR-0782).
 `update` runs the same indexer on the live file for what changed since: new run files, docs whose bytes changed, the
 entity files and the ledger's op files (DR-0616); anything it can't follow (a run file changed or removed, another
 schema or set of languages) makes it rebuild. Raw lines are read leniently: a line that doesn't load is a problem and
@@ -517,7 +517,7 @@ class Indexer:
         return self._head[rel]
 
     def _decision(self, rel: str, doc: ProcessedDoc, data: bytes) -> ProcessedDoc:
-        """A decision as every read takes it, from its last commit (DR-0603); a final one whose file says otherwise is
+        """A decision as every read takes it, from its last commit (DR-0782); a final one whose file says otherwise is
         noted as edited on disk, not taken in."""
         text = self._committed(rel)
         found = decision_form.as_committed(doc, decision_form.committed_doc(text))

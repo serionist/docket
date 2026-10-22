@@ -53,6 +53,13 @@ def cite(vault: Vault, text: str) -> str:
 
 def build_briefs_vault(root: Path) -> Vault:
     vault = build_index_vault(root)
+    fill_briefs(vault)
+    return vault
+
+
+def fill_briefs(vault: Vault) -> None:
+    """The four briefs, the supplier note's next rev, a chat about Ben after his brief and Dóra's entity gone, into a
+    vault the index fixture filled."""
     briefs = [
         brief(
             "northwind",
@@ -112,7 +119,6 @@ def build_briefs_vault(root: Path) -> Vault:
     cleo.write_text(cleo.read_text(encoding="utf-8") + "aliases:\n  - {text: Dóra Minta}\n", encoding="utf-8")
     (people / "dora-minta.yaml").unlink()
     vault.commit(["entities/person/cleo-test.yaml", "entities/person/dora-minta.yaml"], "Dóra is Cleo")
-    return vault
 
 
 def briefs_template(factory: pytest.TempPathFactory) -> Path:

@@ -302,6 +302,11 @@ Unreleased in the same PR.
 
 ### Changed
 
+- The Briefs page moves into the web app's shell. The decisions waiting for you lead the list; a brief's line opens
+  its raw in the panel beside it, and `j` and `k` carry it along; a decision's buttons confirm, reject or settle a
+  contradiction as before, and one that changed since you opened the page, in another tab or by Claude, is refused
+  and shown as it stands. Its URLs and the links from Claude and Meetings open as before. The list opens faster on
+  many briefs: what git says of each brief's commit is read once.
 - Search and the Recording page move into the web app's shell. Search keeps its box, its URL, so Claude's links and
   your bookmarks open as before, and its keys; its facets are menus over the results, the words it found are
   highlighted, and with a hit open `j` and `k` carry it along. The Recording page plays a line from its time as

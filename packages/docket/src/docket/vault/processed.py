@@ -42,7 +42,7 @@ from docket.vault.records import RID
 log = logging.getLogger(__name__)
 
 DOC_TYPES = ("recording-note", "thread-summary", "digest", "minutes", "brief", "correction", "legacy-note", "decision")
-# A decision's status: only the Briefs page or docket decision set writes the last two (DR-0603).
+# A decision's status: only the Briefs page or docket decision set writes the last two (DR-0782).
 STATUSES = ("proposed", "confirmed", "rejected")
 # The keys only a decision has (DR-0563).
 DECISION_KEYS = ("status", "subject", "replaces", "contradicts")

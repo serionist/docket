@@ -1,4 +1,4 @@
-/* The list and the panel beside it, which the server's pages share: Staging, Curate and Briefs. */
+/* The list and the panel beside it, which the server's pages share: Staging and Curate. */
 @layer pages {
   main { min-width: 0; padding: var(--space-3) var(--space-4) var(--space-4); }
 
@@ -48,15 +48,6 @@
   /* The heading takes the focus when the panel opens, for screen readers; it isn't a control, so no ring. */
   .panel-head h2:focus { outline: none; }
   .panel-locator { grid-column: 1 / -1; display: flex; gap: 4px; align-items: center; }
-  .columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-3); margin-top: var(--space-2); }
-  .column h3 { font-size: var(--text-xs); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
-  .column > .meta { font-size: var(--text-xs); margin-bottom: 4px; }
-  .empty-note { color: var(--muted); font-style: normal; }
-  .doc { display: grid; gap: 1px; }
-
-  @media (max-width: 1100px) {
-    .columns { grid-template-columns: minmax(0, 1fr); }
-  }
 
   @media (max-width: 900px) {
     .layout, .layout:has(.panel) { grid-template-columns: minmax(0, 1fr); }

@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0780
+    title: "The Briefs page is the app's: one JSON read for its URL, the list by entity type or a brief with its open line's raw in the panel, its links as they were"
+    status: proposed
+    at: "2026-10-21"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#252", "#161"]
+    supersedes: [DR-0557]
+    description: "DR-0557's page, in the app (#252). GET /api/web/briefs reads what the page shows for its URL, briefs_view's view as before with values ready to show (DR-0709), the entity's decisions (DR-0781) and the canonical URL, which the page writes back keeping the URL's hash (DR-0704); an index still being built answers waiting, and the page asks again every 5 s; a value the URL can't hold answers 400 with its words. /briefs lists the briefs grouped by entity type, in the order entity types are known, orphans last, each with its entity's name, state, rev, age since that rev, new records, flagged lines and why it is stale; tabs narrow it to one type with their counts, and the entities with decisions waiting are named first. /briefs?brief=<id> shows the brief's lines, flagged ones marked; a line that cites is a link to the same page with line, ending in #raw, and its raw opens in the panel beside the brief (over it below 1024 px, the whole screen below 768 with the way back to the brief): its spans as verify gives them, and the doc lines it cites followed one level with their own spans. A time anchor links to the Recording page at that time, any other anchor to the Search page, and a ref to the cited doc on the Search page at its line; a stale brief's newest new records link to the Search page, and a person's brief to their items on the Ledger (DR-0669). The URL holds brief, line and type, in that order, defaults left out, unknown parameters ignored; line is read only with a brief; done, from a URL before the app, says what a click did once and is left out of the canonical URL. The keys: j and k move through the briefs, or a brief's lines that cite, and with a line's raw open open the next line's in its place with no new history entry; o opens; Esc closes the raw, the focus back on its line. A brief, a line or a cited line a never-store list now names is hidden as DR-0558 says, by URL too."
+    binds:
+      - The page's URL only gains optional parameters whose default keeps today's meaning, so a bookmark or a link from Claude keeps opening.
+      - The read answers GET only and writes nothing.
+    not_chosen:
+      - "The list beside an open brief: a brief's lines and its raw in the panel take the width at 1440 px, and the way back to the list is one link."
+      - "Plain links and a page per state, as the Jinja page had: the pages need JavaScript now (DR-0704)."

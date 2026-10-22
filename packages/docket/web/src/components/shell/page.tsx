@@ -68,12 +68,15 @@ export function Panel({
   header,
   children,
   footer,
+  back = "Back to the list",
 }: {
   label: string;
   onClose: () => void;
   header?: React.ReactNode;
   children: React.ReactNode;
   footer?: React.ReactNode;
+  /** The back button's words below 768 px, naming what the panel covers. */
+  back?: string;
 }) {
   const band = useBand();
   const narrow = band === "narrow";
@@ -94,7 +97,7 @@ export function Panel({
         {narrow ? (
           <Button variant="ghost" size="sm" onClick={onClose} className="-ml-1">
             <ArrowLeftIcon />
-            Back to the list
+            {back}
           </Button>
         ) : null}
         <div className="flex min-w-0 flex-1 items-center gap-2">{header}</div>

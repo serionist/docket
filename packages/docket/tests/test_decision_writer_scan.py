@@ -1,4 +1,4 @@
-"""A decision's status has one writer (DR-0603), scanned over the whole package as test_settings_scan.py scans for
+"""A decision's status has one writer (DR-0782), scanned over the whole package as test_settings_scan.py scans for
 vault.yaml's: `DocStore.decide`, which the Briefs page's click and `docket decision set` call, writes the next rev
 `decision_form.status_rev` builds, and nothing else calls either. doc_put writes proposed decisions only, and the
 take-in refuses a status edited by hand; test_decisions.py holds those."""

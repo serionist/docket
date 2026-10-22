@@ -15,6 +15,8 @@ it (its own config and state folders, the failing keyring), which is where the f
 | `search` | the index fixture: calls, chat, mail and the calendar with their minutes, notes and entities, indexed |
 | `recording` | recording_kit's calls, one held, the yard tour's audio stored with Whisper's transcript beside the |
 | | recorder's and a stretch cut, a correction on it, indexed |
+| `briefs` | the index fixture with briefs_kit's four briefs, stale, current and orphaned, and decisions_kit's on |
+| | fleet management: two waiting, one current over the one it superseded, one rejected; indexed |
 
 Invented people only: Ada Example, Ben Sample and Cleo Example.
 """
@@ -29,8 +31,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from briefs_kit import brief
+from briefs_kit import brief, fill_briefs
 from day_kit import ZONE, add, day, seed
+from decisions_kit import fill_decisions
 from docket_testkit import fill_index_vault, fixture_records, index_config, make_config, make_record
 from ledger_kit import write_ops
 from recording_kit import TOUR_POLISHED, doc, fill_recording_vault, recording_sources, with_audio
@@ -46,7 +49,7 @@ from docket.vault.docstore import DocStore
 from docket.vault.gate import Gate
 from docket.vault.vault import Vault
 
-WORLDS = ("empty", "week", "meetings", "today", "stale", "search", "recording")
+WORLDS = ("empty", "week", "meetings", "today", "stale", "search", "recording", "briefs")
 # The worlds Today is shot on: the meetings world, a second live source and the day's syncs.
 DAYS = ("today", "stale")
 MACHINE = "ui-box"
@@ -61,7 +64,7 @@ Book the room first, then the caterer.
 
 
 def config(world: str = "week") -> VaultConfig:
-    if world == "search":
+    if world in ("search", "briefs"):
         found = index_config()
         found.primary_machine = MACHINE
         return found
@@ -280,8 +283,11 @@ def build(folder: Path, world: str) -> Vault:
         meetings(vault)
     if world in DAYS:
         the_day(vault, world)
-    if world == "search":
+    if world in ("search", "briefs"):
         fill_index_vault(vault)
+    if world == "briefs":
+        fill_briefs(vault)
+        fill_decisions(vault)
     if world == "recording":
         recordings(vault)
     if world in ("meetings", *DAYS):
@@ -290,7 +296,7 @@ def build(folder: Path, world: str) -> Vault:
         hour_ago = time.time_ns() - 3600 * 10**9
         for path in (vault.root / ops.OPS_DIR).iterdir():
             os.utime(path, ns=(hour_ago, hour_ago))
-    if world in ("meetings", "search", "recording", *DAYS):
+    if world in ("meetings", "search", "recording", "briefs", *DAYS):
         index_build.rebuild(vault)
     return vault
 

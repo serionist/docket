@@ -40,7 +40,6 @@ STYLESHEETS = (
     "css/staging.css",
     "css/curate.css",
     "css/settings.css",
-    "css/briefs.css",
 )
 # A page that posts a form says so: under the service's floor, no-referrer, a browser sends Origin: null on a
 # same-origin post (Fetch's rule for serializing a request's origin), and the Guard refuses that as cross-origin.

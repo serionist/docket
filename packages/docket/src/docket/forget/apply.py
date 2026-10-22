@@ -511,7 +511,7 @@ def _docs(
     taken: list[str] = []
     for doc_id, fate in sorted(fates.items()):
         if _final(fate):
-            # Read whole from its last commit, so an edit on disk is never taken in (DR-0603): left for its owner.
+            # Read whole from its last commit, so an edit on disk is never taken in (DR-0782): left for its owner.
             if decision_form.edited(store.read_file(store.file(doc_id)), store.committed_text(doc_id)):
                 out.left.append(doc_id)
             continue

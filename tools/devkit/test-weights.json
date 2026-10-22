@@ -209,6 +209,7 @@
     "packages/docket/tests/test_web_audio.py": 5.7,
     "packages/docket/tests/test_web_briefs.py": 6.8,
     "packages/docket/tests/test_web_browser.py": 0.0,
+    "packages/docket/tests/test_web_browser_briefs.py": 0.0,
     "packages/docket/tests/test_web_browser_design.py": 0.0,
     "packages/docket/tests/test_web_browser_ledger.py": 0.0,
     "packages/docket/tests/test_web_browser_meetings.py": 0.0,
@@ -464,6 +465,7 @@
     "packages/docket/tests/test_web_audio.py": 3.5,
     "packages/docket/tests/test_web_briefs.py": 3.9,
     "packages/docket/tests/test_web_browser.py": 0.0,
+    "packages/docket/tests/test_web_browser_briefs.py": 0.0,
     "packages/docket/tests/test_web_browser_design.py": 0.0,
     "packages/docket/tests/test_web_browser_ledger.py": 0.0,
     "packages/docket/tests/test_web_browser_meetings.py": 0.0,
@@ -509,7 +511,8 @@
     "tools/devkit/tests/test_yamlio.py": 0.0
   },
   "Linux browser": {
-    "packages/docket/tests/test_web_browser.py": 51.1,
+    "packages/docket/tests/test_web_browser.py": 37.0,
+    "packages/docket/tests/test_web_browser_briefs.py": 22.0,
     "packages/docket/tests/test_web_browser_design.py": 27.1,
     "packages/docket/tests/test_web_browser_ledger.py": 55.4,
     "packages/docket/tests/test_web_browser_meetings.py": 30.4,
@@ -728,6 +731,7 @@
     "packages/docket/tests/test_web_audio.py": 7.0,
     "packages/docket/tests/test_web_briefs.py": 10.7,
     "packages/docket/tests/test_web_browser.py": 0.0,
+    "packages/docket/tests/test_web_browser_briefs.py": 0.0,
     "packages/docket/tests/test_web_browser_design.py": 0.0,
     "packages/docket/tests/test_web_browser_ledger.py": 0.0,
     "packages/docket/tests/test_web_browser_meetings.py": 0.0,
