@@ -117,7 +117,7 @@ def report(
     commits = {d.meta.id: histories[d.meta.id][0][1] for d in shown if histories.get(d.meta.id)}
     times = commit_times(git, sorted(set(commits.values())))
     standing = decision_form.standings(store.decisions())
-    trees = run_files(git, sorted({c for c in commits.values() if c in times}))
+    trees = raw_listings(git, sorted({c for c in commits.values() if c in times}))
     conn = open_index(vault)
     try:
         reader = _Reader(by_id, known, languages, commits, times, trees, conn, flags.from_index(conn), standing)
@@ -201,7 +201,7 @@ def _parse_times(out: str) -> dict[str, str]:
     return found
 
 
-def run_files(git: Git, commits: Sequence[str]) -> dict[str, frozenset[str] | None]:
+def raw_listings(git: Git, commits: Sequence[str]) -> dict[str, frozenset[str] | None]:
     """The run files each commit's tree holds under raw/, as vault paths; None for a commit not on this clone, or one
     whose raw/ can't be listed here."""
     raw = _raw_trees(git, commits)
