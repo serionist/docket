@@ -199,7 +199,7 @@ class CardRow(BaseModel):
     title: str
     spellings: list[SpellingView]
     missed: str
-    # The URL that opens it beside the list, written by the server (DR-0704).
+    # The URL that opens it beside the list, written by the server (DR-0792).
     url: str
 
 

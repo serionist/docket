@@ -1,4 +1,4 @@
-"""Adding a never-store value from the Settings page (DR-0509, DR-0602, DR-0790): two JSON writes, the add only after
+"""Adding a never-store value from the Settings page (DR-0509, DR-0791, DR-0790): two JSON writes, the add only after
 the question naming what the value drops now and what already stored holds it; the list only grows; the value travels
 in the writes' bodies alone, never in a URL, an answer, an error, the log or a commit message. Invented people only:
 Dora Example, Cleo Test."""

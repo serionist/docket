@@ -1,4 +1,4 @@
-"""One encoding for every page link the service builds (DR-0704): urlencode with one URL_SAFE, which the React app's
+"""One encoding for every page link the service builds (DR-0792): urlencode with one URL_SAFE, which the React app's
 router writes by too. The canonical strings here are the ones its Vitest round-trip holds byte for byte."""
 
 from __future__ import annotations

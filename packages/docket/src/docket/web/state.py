@@ -176,7 +176,7 @@ class SearchState:
         return out
 
     def url(self) -> str:
-        """This state's canonical URL, which the app writes back as the server wrote it (DR-0704)."""
+        """This state's canonical URL, which the app writes back as the server wrote it (DR-0792)."""
         return urls.link(PATH, self.pairs())
 
     def but(self, **changes: object) -> SearchState:

@@ -63,7 +63,7 @@ class Facts:
 
 class BriefLink(BaseModel):
     text: str
-    # The link's URL, written by the server (DR-0704); "" for an anchor that names no record.
+    # The link's URL, written by the server (DR-0792); "" for an anchor that names no record.
     url: str
     title: str = ""
 

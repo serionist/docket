@@ -1,7 +1,7 @@
 /**
  * The Sync page's reads under /api/web (DR-0788): the whole page for the URL's source, run and k, and its runs part,
  * which the page asks again every 5 seconds while a run is open. Each answers the canonical URL for what it read
- * (DR-0704). A value the URL can't hold throws an HttpError with the server's words.
+ * (DR-0792). A value the URL can't hold throws an HttpError with the server's words.
  */
 import type { components } from "@/api/schema";
 import { api } from "@/lib/api";

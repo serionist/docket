@@ -1,5 +1,5 @@
 /**
- * A link to a URL the server wrote (DR-0704): a plain click on one of the app's own pages opens it in place, through
+ * A link to a URL the server wrote (DR-0792): a plain click on one of the app's own pages opens it in place, through
  * the router, which writes the same bytes back (lib/search.ts); a click with a key held, or a link to one of the
  * server's own pages, is the browser's. `replace` keeps the history entry, as a step within a page does. A link to
  * the URL the page is on, such as the anchor of the stretch the Recording page marks, brings its hash into view, as

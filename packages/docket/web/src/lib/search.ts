@@ -1,5 +1,5 @@
 /**
- * A page's state is its URL as a plain query string (DR-0704). The router reads it as URLSearchParams does, every
+ * A page's state is its URL as a plain query string (DR-0792). The router reads it as URLSearchParams does, every
  * value a string and a repeated key repeated, never JSON, and writes it as the server's urlencode does with its one
  * URL_SAFE (docket/web/urls.py): ASCII letters and digits, `_ . - ~` and `: @ / ,` as they are, a space as `+`, and
  * every other byte of the UTF-8 percent-encoded in upper-case hex, `* ! ' ( )` included. So a URL the app writes is

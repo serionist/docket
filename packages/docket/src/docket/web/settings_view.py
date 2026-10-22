@@ -31,7 +31,7 @@ from docket.vault.settings import BUILTIN_RULES, LISTS, RANK, item_line, key_lin
 PATH = "/settings"
 ADD = "/settings/never-store"
 SHOWS = ("lists",)
-# What the last post did, by kind and count only: never a value (DR-0512).
+# What the last post did, by kind and count only: never a value (DR-0789).
 DONE = re.compile(
     r"^(?:(?P<listed>listed|unlisted)-(?P<list>people|containers|keywords)-(?P<count>[01])"
     r"|(?P<rule>credentials|phone|pattern)-(?P<state>on|off)"
@@ -130,7 +130,7 @@ class Facts:
     service: list[str] = field(default_factory=list[str])
     service_errors: list[str] = field(default_factory=list[str])
     vectors: list[VectorCoverage] = field(default_factory=list[VectorCoverage])
-    # vault.yaml's hash as read, which the page's forms carry back (DR-0602).
+    # vault.yaml's hash as read, which the page's forms carry back (DR-0791).
     shown: str = ""
 
 
@@ -628,7 +628,7 @@ class SettingsPage(BaseModel):
     """The page for a URL (DR-0789): what vault.yaml says about the sources, the never-store lists and redaction, and
     this machine's models; each change's button, command or line."""
 
-    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0704); never `done`.
+    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0792); never `done`.
     canonical: str
     # vault.yaml as this read found it, which each write carries back (DR-0790): a keyed hash, never the file's own.
     token: str

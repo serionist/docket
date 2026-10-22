@@ -1,7 +1,7 @@
 /**
  * The Search page's reads under /api/web (DR-0709, DR-0775): the results for the page's query string with the panel's
  * parameters left out, and the open hit's panel for the whole of it. Each answers the canonical URL for what it read,
- * which the page writes back (DR-0704). A value the URL can't hold throws an HttpError with the server's words.
+ * which the page writes back (DR-0792). A value the URL can't hold throws an HttpError with the server's words.
  */
 import type { components } from "@/api/schema";
 import { api } from "@/lib/api";

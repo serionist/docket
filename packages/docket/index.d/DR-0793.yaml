@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0793
+    title: The sign-in, used-link and failure pages are plain HTML the service writes, with no script, and static files need no session
+    status: proposed
+    at: "2026-10-22"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#252", "#9"]
+    supersedes: [DR-0177]
+    description: "The pages a browser reaches without a session, and the one a failure on a page path answers, must work before and without the app's script: a stranger's page names the one command to run, a used or stale one-time link names it again for the page asked, and a failure says that something failed and where its words are. docket/web/bare.py writes each as plain HTML, escaped, with no template: the brand, an h1, the command selected whole on a click, no navigation and no footer, so they name neither the vault's folder nor the machine. They link the app's stylesheet and the icon, whose plain rules for these pages live in app.css on the tokens, and carry Content-Security-Policy: default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none', with Cache-Control: no-store. The Guard answers the sign-in page with 401; /session answers the used-link page with 401 and no cookie, and a good code the page that moves on, setting the HttpOnly, SameSite=Strict cookie for / as before; next refuses another origin and any control character. A failure on a page path answers the failure page with 500, one on /api or /mcp its JSON; neither names the error, the path or a trace. GET and HEAD under /static/ pass the Guard's session check; the Host check still applies, and a write there still needs the session; a static miss is a plain-text 404. It narrows DR-0152's rule that the pages take the cookie to the pages themselves."
+    binds:
+      - The sign-in, used-link and failure pages run no script and name neither the vault nor the machine.
+      - The one-time code, the cookie's flags and the page that moves on stay as DR-0152 has them.
+    not_chosen:
+      - "The app's document with the command in a meta element, as DR-0704 had it: a stranger's page would need 240 KB of script to say one line, and a broken or stale build would leave it blank."
+      - "Static files behind the session: the sign-in page can't load its stylesheet."
+      - "A stylesheet of their own: two copies of the tokens."

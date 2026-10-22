@@ -824,7 +824,7 @@ class SyncPage(BaseModel):
     """The whole page for a URL (DR-0788): its lead and notes, what needs a session, the failures, the runs and each
     machine's cursors, in the order the page shows them (DR-0304, DR-0305)."""
 
-    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0704).
+    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0792).
     canonical: str
     lead: str
     chips: list[SyncChip]

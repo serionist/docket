@@ -47,7 +47,7 @@ from docket.web.decisions_view import DONE, DecisionDoc, DecisionsPart, part
 
 
 class BriefsRead(BaseModel):
-    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0704); never `done`.
+    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0792); never `done`.
     canonical: str
     # None while the index is being built.
     view: BriefsView | None

@@ -1,5 +1,5 @@
 """The Search page's reads under /api/web (DR-0709): the results for the page's own query string, and the open hit's
-panel beside them, each answering the canonical URL for what it read (DR-0174, DR-0704).
+panel beside them, each answering the canonical URL for what it read (DR-0174, DR-0792).
 
 | Route | What |
 |---|---|
@@ -36,7 +36,7 @@ from docket.web.views import Results
 class SearchRead(BaseModel):
     """The results the Search page lists for its URL, with what the start and the waiting state say."""
 
-    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0704).
+    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0792).
     canonical: str
     # None when nothing is asked: the start, or a query that is one locator.
     results: Results | None

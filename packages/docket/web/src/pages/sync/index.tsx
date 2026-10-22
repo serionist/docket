@@ -1,5 +1,5 @@
 /**
- * /sync (DR-0300's page, now DR-0788's): what needs the owner or a Claude session, with the words to paste; what
+ * /sync (DR-0788): what needs the owner or a Claude session, with the words to paste; what
  * failed and what to do; the runs open and recent; each machine's cursors. Read-only: nothing here opens, closes or
  * drops a run. While a run is open the runs part is read again every 5 seconds, and when the last one closes the page
  * reads itself again, with the sidebar's due mark. A run in the URL opens its card in the panel. Every state is the

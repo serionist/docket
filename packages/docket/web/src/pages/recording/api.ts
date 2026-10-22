@@ -1,6 +1,6 @@
 /**
  * The Recording page's read under /api/web (DR-0709, DR-0776): the recording its URL names, its summary and
- * transcripts, and why no audio plays or the player's source, with the canonical URL for what it read (DR-0704). A
+ * transcripts, and why no audio plays or the player's source, with the canonical URL for what it read (DR-0792). A
  * value the URL can't hold throws an HttpError with the server's words.
  */
 import type { components } from "@/api/schema";

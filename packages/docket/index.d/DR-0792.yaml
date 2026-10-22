@@ -1,0 +1,20 @@
+decisions:
+  - id: DR-0792
+    title: Each page path answers the app's one document, data comes only from /api/web as JSON, and no route reads a header to choose its answer
+    status: proposed
+    at: "2026-10-22"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources:
+      - "#252"
+      - 19 Oct, confirmed by the maintainer
+      - "#252 PR 9: DR-0704 restated, the sign-in pages plain HTML"
+    supersedes: [DR-0704, DR-0170]
+    description: "The service answers each of the app's paths, the routes its build lists in routes.json, with index.html and 200, and any other page path with the same document and 404, which the app shows as not found; /api and /mcp keep JSON 404s. A page's state is its URL as a plain query string. The router's parseSearch reads it as URLSearchParams does, every value a string and a repeated key (Search's people, entities and sources) repeated, never JSON; its stringifySearch encodes as the server's urlencode does with the one URL_SAFE that every link builder takes in PR 1 (each page's state, Curate's /search?hit= link and the Recording page's audio link), state.py's \":@/,\": a space as +, ASCII letters and digits, _ . - ~ and : @ / , raw, and everything else percent-encoded in upper-case hex, * ! ' ( ) included. The app sends the URL's query string to the page's read as it is; the server's state parsers (state.py, day_state.py and the other pages') stay the one parser and answer the canonical query string, which the app writes back with router.history.replace(canonical), as the server sent it, never with navigate({href}), which would encode it again. Paths and parameter names stay today's (Search's are the search tool's, DR-0174; the day pages' only gain optional ones, DR-0669), so a reload, a bookmark, back, Claude's links and the tasks skill open the same state, and a Vitest round-trip on the server's own canonical strings, DR-0174's locator forms included, holds them byte for byte. No route reads HX-Request, Accept or a header of its own to choose between a page and data: a path is a page or JSON, never both. Pages need JavaScript: the maintainer accepted that nothing renders without it. A browser without a session gets the sign-in page with the command and 401, a used link the used-link page and 401, each plain HTML the service writes with no script (DR-0793), so a stranger's page names neither the vault nor the machine; static files need no session (as DR-0793)."
+    binds:
+      - A path answers the document or JSON, never one or the other by a header.
+      - A page's URL keeps its parameter names as plain strings, repeated keys repeated, and only gains optional ones.
+    not_chosen:
+      - "One URL answering a page or JSON by a header: a reload or back can get data."
+      - "Hash routing: Claude's links and the tasks skill name real paths."
+      - "A parser of the URL in the app beside the server's: two copies of one rule."

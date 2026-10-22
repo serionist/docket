@@ -6,6 +6,7 @@ decisions:
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#252"]
+    supersedes: [DR-0546]
     description: The sidebar, shadcn's Sidebar, lists Today, Queue with its untriaged count, Ledger and Meetings; a separator; Search, Briefs, Staging with its waiting count, Curate and Sync with a mark when a sync is due; and Settings at its foot, with the theme and keys switches and the vault, machine and index line. It lists built pages only, each joining in its PR; the Recording page and decisions are reached by their links, and pages to come aren't shown. A page not yet in the app is a plain link that loads its Jinja page. The counts come from GET /api/web/shell, read at load and when the poll sees a change. The list fills the middle, and the open item's or meeting's panel sits on the right and follows the selection (DR-0711). From 1280 px all three stand side by side, the sidebar 224 px and the panel 480 px; from 1024 the sidebar folds to its icons; from 768 it opens as a sheet from a menu button and the panel slides over the list from the right, Esc closing it; below 768 the list is one column and an open item takes the screen with a back button, open= in the URL so the browser's back closes it too. No page scrolls sideways at 390 px.
     binds:
       - The sidebar lists only built pages; each page joins it in the PR that builds or moves it.

@@ -1,0 +1,18 @@
+decisions:
+  - id: DR-0788
+    title: "The Sync page is the app's: one read for the page and one for its runs, asked every 5 seconds while a run is open, its URL as before"
+    status: proposed
+    at: "2026-10-22"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#252", "#72"]
+    supersedes: [DR-0300, DR-0303, DR-0306]
+    description: "DR-0300's, DR-0303's and DR-0306's page, in the app (#252). GET /api/web/sync reads the whole page for the URL's source, run and k: in this order, what needs the owner or a Claude session with the words to paste (DR-0304), the failures still current with what to do (DR-0305), the open and recent runs, and each machine's cursor of each source, as values ready to show, times in the owner's zone (DR-0709), with the canonical URL, which the page writes back (DR-0704). Its sources are those whose vault.yaml entry lists tools, and any other a cursor file or the run history names. It reads the open runs in the service's memory, the run history (DR-0301), the cursor files and run_open's own checks, in the service's process. GET /api/web/sync/runs reads the runs part alone, from the service's memory, no cursor file and no check; while a run is open the page asks it every 5 seconds, not while the tab is hidden, and when the last open run closes the page reads itself again, with the sidebar's due mark. The URL holds source (one source's name: every part narrows to it, and an empty part says so with the way back to every source), run (a run's id: its card opens in the shell's panel, open or in the history) and k (how many recent runs: 20, Show more adds 20, up to 500), in that order, defaults left out; a malformed value answers 400 with its words, a well-formed source or run the page doesn't know says so with 200, unknown parameters are ignored. The keys: j and k through the runs, an open run following, Enter or o opens, Esc closes. The page's script loads when it is first opened, after the build's stamp (DR-0784)."
+    binds:
+      - "Nothing from a capture's arguments or result, and no session or agent id, reaches a read: ids, counts, times and Docket's own messages only."
+      - "Both reads answer GET only: nothing on the page opens, closes or drops a run or edits a cursor, and the run routes keep the bearer token only (DR-0243)."
+      - The URL only gains optional parameters, so Today's sync links and a bookmark of a run keep opening.
+    not_chosen:
+      - "Every part read again every 5 seconds: the cursor files and run_open's checks for each, where a run's captures are all that moves."
+      - "A button that drops an open run: a write from the browser for what the run's limits already do, and the run routes take no session."
+      - "The runs part as an htmx fragment, as the Jinja page had: the pages need JavaScript now (DR-0704)."

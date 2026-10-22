@@ -1,5 +1,5 @@
 /**
- * The Search page's URL (DR-0174, DR-0704): the search tool's parameters, then the panel's, in the order the server's
+ * The Search page's URL (DR-0174, DR-0792): the search tool's parameters, then the panel's, in the order the server's
  * SearchState writes them; src/test/canonical.json holds this order to the server's. The results are read for the
  * search alone, so opening, moving or closing a hit asks no new search.
  */

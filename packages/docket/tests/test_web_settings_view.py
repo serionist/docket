@@ -1,4 +1,4 @@
-"""The Settings page's parts on invented settings (DR-0505, DR-0601, DR-0510 to DR-0512): the URL, each source's
+"""The Settings page's parts on invented settings (DR-0789, DR-0601, DR-0510 to DR-0789): the URL, each source's
 changes stricter first with their lines, the never-store values only when asked, the rules' commands, the models."""
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
-"""The Sync page's rules on invented facts and a fixed clock (DR-0303 to DR-0305): the URL, what is due, what failed
-and what to do, the run cards and the cursors."""
+"""The Sync page's rules on invented facts and a fixed clock (DR-0304, DR-0305, DR-0788): the URL, what is due, what
+failed and what to do, the run cards and the cursors."""
 
 from __future__ import annotations
 

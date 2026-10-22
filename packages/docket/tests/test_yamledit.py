@@ -1,4 +1,4 @@
-"""A vault.yaml laid out by hand, edited in place (DR-0602): each change Docket's writers make lands where the value
+"""A vault.yaml laid out by hand, edited in place (DR-0791): each change Docket's writers make lands where the value
 stands, every other byte kept, comments, order, indentation and line endings; a change with no place, or one that
 doesn't read back as asked, writes nothing and leaves the line. Invented settings only."""
 
@@ -245,7 +245,7 @@ BLOCK = TEXT.replace('        - "Dora #2"\n', "        - |-\n            Dora #2
 )
 def test_a_change_touching_a_block_scalar_has_no_place(text: str, change: Change) -> None:
     """A block scalar's text runs on to the next line, here `containers: []` or a key of the parent: a splice at its end
-    would take that line too, and the file would still read the same (DR-0602)."""
+    would take that line too, and the file would still read the same (DR-0791)."""
     before = read(text)
     assert yamledit.patch(text, before, change(before)) is None
 

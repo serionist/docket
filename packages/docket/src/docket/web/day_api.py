@@ -74,7 +74,7 @@ class Filters(BaseModel):
 class Ledger(BaseModel):
     """The Ledger's list (DR-0666), as the page shows it, with what its bars need."""
 
-    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0704).
+    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0792).
     canonical: str
     # The op files' version, taken before the read: what the poll compares (DR-0711).
     version: str

@@ -28,7 +28,7 @@ from docket.sync import block as sync_block
 from docket.sync import folder as sync_folder
 from docket.vault.vault import Vault
 from docket.vault.wizard import KNOWN_SOURCES
-from docket.web.pages import NAV
+from docket.web.frontend import BUILD
 
 REPO = Path(__file__).resolve().parents[3]
 PLUGIN = REPO / "plugin"
@@ -625,7 +625,7 @@ def test_tasks_opens_a_page_of_the_web_app_and_its_name_door_holds() -> None:
     (path,) = set(paths)
     assert path == "/queue"
     assert sessions.safe_next(path) == path
-    assert path in {page.path for group in NAV for page in group.pages}
+    assert path in BUILD.routes
 
 
 def queue_vault(tmp_path: Path) -> Vault:

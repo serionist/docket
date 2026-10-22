@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0789
+    title: "The Settings page is the app's: one read of vault.yaml, the user's config and the models, never-store values only with show=lists"
+    status: proposed
+    at: "2026-10-22"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#252", "#73"]
+    supersedes: [DR-0505, DR-0512]
+    description: "DR-0505's and DR-0512's page, in the app (#252). GET /api/web/settings writes nothing and reads beside the writer: vault.yaml and whether its text is Docket's own form; each source's sensitivity, on or off, tools, mapper (checked as find_mapper checks it), media folders, and a folder source's folder, this machine's folder from config.yaml and exclude; each never-store list's count and what it matches; the redaction rules and the user's patterns with the rows docket redaction prints and the warnings docket redaction set prints; this machine's models (DR-0510); and a token for vault.yaml as read, which each write carries (DR-0790). It answers what the Jinja page showed and nothing more: no change's line or where it goes, no list's example, no command beside a rule's button, no hash of the file. The never-store values are in the read only with show=lists, so a page read for anything else, on a shared screen or by a browser agent, carries none. Every change the page doesn't make shows its command or its vault.yaml line, quoted as the CLI prints it. The URL holds show; done, from a URL before the app, says what a write did once by kind and count only and is left out of the canonical URL; a bad value answers 400. The page reads as one column: the lead, a notice of an edit not in force, the sources with their changes folded, stricter first and a looser one marked, the lists, redaction and the models; its script loads when first opened, after the build's stamp (DR-0784)."
+    binds:
+      - Never-store values are in a read only with show=lists.
+      - "Every line to paste is built with yaml.safe_dump, as scaffold.block builds a source's entry, so a value such as Project: Phoenix or Dora #2 stays one value; the one line the page writes itself, an add Docket can't place, is single-quoted with its quotes doubled."
+      - An error from reading vault.yaml names the problem by line and column, never the text of the line.
+    not_chosen:
+      - "The values always in the read: a page read for its sources would carry every value into a browser agent's context."
+      - "The read as the Jinja page's context: it held lines and examples the page never drew."

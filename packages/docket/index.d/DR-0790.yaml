@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0790
+    title: Settings' three writes are JSON writes carrying a keyed token for vault.yaml, and a never-store value is in no answer, error or hash
+    status: proposed
+    at: "2026-10-22"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#252", "#73"]
+    supersedes: [DR-0508]
+    description: "DR-0508's add and DR-0601's writes, as JSON (DR-0709). POST /api/web/settings/never-store takes act, name, value and token: ask answers the add's question (DR-0509), what the value drops now and what already stored holds it, and the token the add carries, never the value, which the page holds and shows itself; add adds it and answers its notice; off takes one off. A value already on its list as the matcher folds it is a no-op, nothing written and the same notice, so a write sent twice writes nothing. POST /api/web/settings/redaction turns a rule on or off, and POST /api/web/settings/source sets a source's sensitivity or turns it on or off, private only confirmed, after its question naming what waits from it. Each runs on the writer thread through vault.yaml's writer (DR-0602), with the browser's session only, the body exact. The token is vault.yaml's bytes hashed with a key the service makes at start and keeps in memory: the page never holds the file's own sha256, which with the lines the page shows would let a short value be guessed. A write's token that names the file as it stands lets the writer check that file's sha256 under the lock; any other names no file, so a change answers 409 and the page reads itself again, or asks the question again, and a change already made is still no write. A refusal answers 400 with the writer's words, which never quote the value; a body that doesn't read answers 422 with where and why only, never the value given or a key the model doesn't have. The value is refused when empty, past 200 characters or holding a control character, its refusal on the field, which keeps it and takes the focus. The commit says Config: never-store <list>, 1 added, via page. Turning credentials redaction off has no button and is refused from any body, from the change or from an uncommitted edit (DR-0601)."
+    binds:
+      - A never-store value never appears in a URL, a log line, a commit message, done, an answer, an error or a hash a page holds.
+      - No route turns credentials redaction off or forgets, whatever the body; a test sends every write route bodies that ask for either.
+    not_chosen:
+      - "The question answering the value back, as the Jinja confirm page drew it: the page has it already."
+      - "vault.yaml's own sha256 as the token: it hashes the values with lines the page shows."
+      - "A table of tokens to the hashes they stand for: a cache to bound, where a keyed hash checks itself."

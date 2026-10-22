@@ -2,7 +2,7 @@
 
 `rewrite` is the general entry: under the vault lock it reads vault.yaml, asks for the change, and commits the file
 rewritten whole when its text is what Docket writes for it, or edited in place, its comments and layout kept, when it
-isn't (DR-0602). `docket redaction set`, `docket source new` and every page write through it.
+isn't (DR-0791). `docket redaction set`, `docket source new` and every page write through it.
 
 It makes any change its caller asks for, the CLI's and a page's alike (DR-0601): the owner says yes before the command,
 at their own terminal or in chat to Claude. The one change kept at the owner's console is turning credentials redaction
@@ -86,7 +86,7 @@ class _Held:
 
 
 def file_hash(data: bytes) -> str:
-    """vault.yaml as a page read it, which its form carries back, so a change made since is seen (DR-0602)."""
+    """vault.yaml as a page read it, which its form carries back, so a change made since is seen (DR-0791)."""
     return hashlib.sha256(data).hexdigest()
 
 
@@ -115,7 +115,7 @@ def rewrite(
 
     A file in Docket's form, now or before the redaction switches were split, is rewritten whole; any other is edited in
     place, and only when that reads back as exactly the settings asked for, else nothing is written and the caller
-    gives the line (DR-0602). An uncommitted edit goes in first, in a commit of its own. The change is read back
+    gives the line (DR-0791). An uncommitted edit goes in first, in a commit of its own. The change is read back
     through the schema, written through a temp file and a rename, and committed alone; a failure puts the file back."""
     path = vault.root / CONFIG_FILE
     with vault.writing():
@@ -163,7 +163,7 @@ def rewrite(
 
 
 def _in_place(text: str, before: VaultConfig, after: VaultConfig, path: Path) -> str | None:
-    """The file edited in place, its comments and layout kept (DR-0602), when that reads back as exactly `after`."""
+    """The file edited in place, its comments and layout kept (DR-0791), when that reads back as exactly `after`."""
     patched = yamledit.patch(text, before, after)
     if patched is None:
         return None
@@ -277,7 +277,7 @@ def checked_value(value: str) -> str:
 def add_listed(vault: Vault, name: ListName, value: str, *, shown: str) -> Added:
     """Add a value to a never-store list from a page. A value the list already holds, as the matcher reads it, is no
     write at all, so a post sent twice adds it once. The commit names the list and the count, never the value
-    (DR-0508)."""
+    (DR-0790)."""
     _list_name(name)
     value = checked_value(value)
     already = False

@@ -1,4 +1,4 @@
-"""vault.yaml's one writer (DR-0601, DR-0602): the settings in force over every field, through `loosens` here, a
+"""vault.yaml's one writer (DR-0601, DR-0791): the settings in force over every field, through `loosens` here, a
 change that waits for its commit (DR-0521); `rewrite` in Docket's form and not; a page's changes both ways but
 credentials off; and the lines to paste, quoted so each reads back as one value."""
 

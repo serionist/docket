@@ -1,9 +1,10 @@
 decisions:
   - id: DR-0512
     title: The Settings page's URL holds show and done
-    status: proposed
+    status: superseded
     at: "2026-10-16"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#73"]
+    superseded_by: [DR-0789]
     description: show=lists shows the never-store values; done says what the last post did by kind and count only (listed-people-1, phone-on, pattern-on, calls-private), never a value or a pattern's name, and is never in a link the page makes. One canonical form, unknown parameters ignored, parameters only gain; a bad value is the page's own 400.

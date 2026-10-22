@@ -64,7 +64,7 @@ class Lift(BaseModel):
 
 
 class CurateRead(BaseModel):
-    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0704); never `done`.
+    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0792); never `done`.
     canonical: str
     view: CurateView
     lifts: list[Lift]

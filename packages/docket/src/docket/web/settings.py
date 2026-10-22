@@ -9,7 +9,7 @@
 
 The read writes nothing: it reads vault.yaml, the user's config, the runner's mapper check, this machine's models and
 the service's own models state, in this process, beside the writer. Every write goes through vault.yaml's one writer
-on the service's writer thread (DR-0153, DR-0602), as JSON with the browser's session only (DR-0709). Turning
+on the service's writer thread (DR-0153, DR-0791), as JSON with the browser's session only (DR-0709). Turning
 credentials redaction off is the one change no page makes: the writer refuses it, from the change or from an
 uncommitted edit it would take in.
 
@@ -94,7 +94,7 @@ def token_of(data: bytes) -> str:
 
 
 def shown_by(vault: Vault, token: str) -> str:
-    """The sha256 the writer checks under the vault's lock (DR-0602): the file's as it stands when the token names it,
+    """The sha256 the writer checks under the vault's lock (DR-0791): the file's as it stands when the token names it,
     else one that names no file, so a change is refused as stale and a change already made is still no write."""
     data = (vault.root / CONFIG_FILE).read_bytes()
     return file_hash(data) if hmac.compare_digest(token_of(data), token) else ""

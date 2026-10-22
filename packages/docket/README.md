@@ -1030,7 +1030,7 @@ list, one click and one key at a time, and the first page of the web app's React
 
 ### The Sync page
 
-`/sync` shows how syncs went without a log, what to do first (DR-0300 to DR-0306). It only reads: nothing on it opens,
+`/sync` shows how syncs went without a log, what to do first (DR-0304, DR-0305, DR-0788). It only reads: nothing on it opens,
 drops or closes a run.
 
 | Part | Shows |
@@ -1092,7 +1092,7 @@ DR-0382, DR-0383, DR-0784, DR-0785).
 
 ### The Settings page
 
-`/settings` shows what the gate obeys and this machine's models (DR-0505, DR-0510). Its buttons make changes both
+`/settings` shows what the gate obeys and this machine's models (DR-0789, DR-0510). Its buttons make changes both
 ways (DR-0601): a never-store value added or taken off, a redaction rule turned on or off, a source's sensitivity, a
 source on or off. Turning credentials redaction off it names, for your own terminal; a new source, a media folder and
 the api provider it names as commands.
@@ -1116,7 +1116,7 @@ the api provider it names as commands.
   chunks already stored hold it, with their share of the index, so a word that would take half of everything shows
   it (DR-0509). They stay in raw; from the next sync, what it names is dropped before it is stored.
 - The value goes in a form's body only: never in the address bar, the service's log or a commit message, which says
-  `Config: never-store people, 1 added`. The field asks the browser to keep nothing and check no spelling (DR-0508).
+  `Config: never-store people, 1 added`. The field asks the browser to keep nothing and check no spelling (DR-0790).
   Sending the same add twice adds it once.
 - A never-store value is committed in `vault.yaml` as you write it, so it is in your repo's history and goes wherever
   the vault is pushed.

@@ -1,5 +1,5 @@
 """Turning a redaction rule on or off, setting a source's sensitivity, turning it on or off, and taking a never-store
-value off, from the Settings page (DR-0509, DR-0601, DR-0602, DR-0790): one JSON write each, a source made private
+value off, from the Settings page (DR-0509, DR-0601, DR-0791, DR-0790): one JSON write each, a source made private
 only after its question naming what waits from it; each through vault.yaml's one writer, credentials off refused,
 refused when the page is older than the file, no write when sent twice. Invented records only: Ada Example, Ben
 Sample."""
@@ -286,7 +286,7 @@ def test_a_change_docket_can_t_place_gets_the_line(
 
 
 def test_a_value_docket_can_t_take_off_in_place_is_left_to_the_owner(client: TestClient, vault: Vault) -> None:
-    """An alias anywhere in the file: no splice may change what else reads it (DR-0602), so the page says which line to
+    """An alias anywhere in the file: no splice may change what else reads it (DR-0791), so the page says which line to
     delete and writes nothing."""
     path = vault.root / CONFIG_FILE
     text = path.read_text(encoding="utf-8")
