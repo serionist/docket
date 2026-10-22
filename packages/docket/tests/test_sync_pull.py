@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from docket_testkit import make_record
+from recording_kit import lines
 from starlette.testclient import TestClient
 from sync_kit import BEARER, app_of, as_structured, memo, service_client, sync_template, sync_vault
 
@@ -246,3 +248,84 @@ def test_a_pull_that_ends_before_it_reads_its_request_says_its_exit(tmp_path: Pa
     script.write_text("import sys\nsys.exit(4)\n", encoding="utf-8")
     with pytest.raises(pull.PullStoppedError, match=r"the pull failed \(exit 4\)"):
         list(pull.child(script, {"contract": 1, "pad": "x" * 2_000_000}))
+
+
+def test_a_final_run_due_is_pulled_by_id_and_a_pull_with_nothing_fetched_says_nothing_waits(
+    vault: Vault, client: TestClient, tmp_path: Path
+) -> None:
+    """The final run the service would open for ids that waited a week, stood in for here: its own run, its ids by
+    id, its close final; and media due with nothing fetched puts nothing."""
+    started = start.start(vault, [], datetime.now(UTC))
+    lines_are(tmp_path, run=[RUN[0]], final=[RUN[1]], media=[])
+    real = post_to(client)
+    final: list[str] = []
+
+    def post(path: str, body: dict[str, Any], timeout: float) -> tuple[int, dict[str, Any]] | None:
+        if path == "/api/runs" and body.get("final"):
+            return 200, {"run": "run-final", "since": None, "until": None, "waiting": [{"id": "m1"}], "retry": []}
+        if path.startswith("/api/runs/run-final/"):
+            final.append(path.rpartition("/")[2] + ("+final" if body.get("final") else ""))
+            return 200, {}
+        answer = real(path, body, timeout)
+        if path == "/api/runs" and answer is not None and answer[0] == 200:
+            answer = (200, answer[1] | {"steps": answer[1]["steps"] + "\n8. Media: media_put(rid, url)"})
+        return answer
+
+    pulled = pull.pull(vault, started.info.sync, "memo", post=post)
+    assert final == ["captures", "close+final"]
+    assert asked(tmp_path)[1]["ids"] == ["m1"] and asked(tmp_path)[1]["phase"] == "final"
+    assert pulled.final == "run-final, 1 captures"
+    # Media is due, but nothing was fetched: no media phase.
+    assert len(asked(tmp_path)) == 2
+    assert pull.lines(pulled)[-1] == "nothing waits to be classified"
+
+
+def test_a_run_the_service_refuses_to_open_says_why(vault: Vault) -> None:
+    started = start.start(vault, [], datetime.now(UTC))
+    with pytest.raises(DocketError, match="the run didn't open: memo isn't live"):
+        pull.pull(vault, started.info.sync, "memo", post=lambda *_: (400, {"error": "memo isn't live"}))
+
+
+def test_a_line_past_the_cap_stops_the_pull(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pull, "LINE_CAP", 100)
+    script = tmp_path / "pull.py"
+    script.write_text("import sys\nsys.stdin.read()\nprint('{\"skip\": \"' + 'x' * 500 + '\"}')\n", encoding="utf-8")
+    with pytest.raises(pull.PullStoppedError, match="a line of the pull passed"):
+        list(pull.child(script, {"contract": 1}))
+
+
+def test_a_transcript_waiting_is_written_a_segment_a_line_with_the_times_a_cut_takes() -> None:
+    record = make_record(rid="memo:m1/transcript", source="memo", kind="transcript", container="memo:m1",
+                         segments=lines([("Ben Sample", "the dates"), ("", "a  pause")]))  # fmt: skip
+    assert pull._segments(record) == [  # pyright: ignore[reportPrivateUsage]
+        "== memo:m1/transcript | transcript | a segment a line; a cut is the times at its start, mm:ss-mm:ss",
+        "@00:00-00:19 Ben Sample: the dates",
+        "@00:20-00:39 a pause",
+    ]
+
+
+def test_the_http_post_asks_the_service_with_its_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    from docket.service import client as service_client_module
+
+    seen: list[tuple[str, str, Any, Any]] = []
+
+    def call_json(method: str, path: str, body: Any, *, token: str, timeout: float) -> Any:
+        seen.append((method, path, body, token))
+        return None if path == "/gone" else service_client_module.Answer(200, {"run": "r"})
+
+    monkeypatch.setattr(service_client_module, "call_json", call_json)
+    post = pull.http("t0ken")
+    assert post("/api/runs", {"source": "memo"}, 1.0) == (200, {"run": "r"})
+    assert post("/gone", {}, 1.0) is None
+    assert seen[0] == ("POST", "/api/runs", {"source": "memo"}, "t0ken")
+
+
+def test_the_media_route_puts_what_media_put_puts(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from docket.service import calls
+
+    async def media_put(service: Any, rid: str, *, path: str | None, url: str | None) -> tuple[Any, str]:
+        return calls.MediaPut(rid=rid, ext="m4a", bytes=12), "put"
+
+    monkeypatch.setattr(calls, "media_put", media_put)
+    answer = client.post("/api/media", json={"rid": "memo:m1", "url": "https://example.invalid/a"}, headers=BEARER)
+    assert answer.status_code == 200 and answer.json() == {"rid": "memo:m1", "ext": "m4a", "bytes": 12}

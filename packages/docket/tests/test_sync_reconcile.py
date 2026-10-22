@@ -1298,9 +1298,14 @@ def test_a_stream_s_lines_are_one_set_and_a_field_it_holds_or_two_values_for_one
 def test_a_prep_candidate_taken_by_the_settle_is_a_point_the_writer_takes(
     vault: Vault, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    # A daily gets no candidates, though Ben, who has items, organises it.
+    daily = {"subject": "Pilot daily", "organiser": "Ben Sample", "start": "2026-10-22T09:00+02:00",
+             "end": "2026-10-22T09:15+02:00"}  # fmt: skip
+    store.write(vault, [{"op": "meeting", "fields": daily}], by="claude", now=NOW)
     done, lines = run(vault)
     taken = [n for n, line in enumerate(lines, start=1) if line.startswith("# + ")]
-    assert len(taken) == 3
+    assert len(taken) == 3 and all('"item": "M-0002"' in lines[n - 1] for n in taken)
+    assert any(line.startswith("#   M-0007 | 10-22 09:00-09:15 | Pilot daily") for line in lines)
     sync = done.path.parent.name
     assert main(["sync", "settle", sync, f"{taken[0]}-{taken[1]}=take", "--rev", "1", "--vault", str(vault.root)]) == 0
     assert "took 2 prep candidate(s)" in capsys.readouterr().out

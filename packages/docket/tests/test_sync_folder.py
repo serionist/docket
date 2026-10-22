@@ -22,7 +22,7 @@ from docket.cli import main
 from docket.errors import DocketError
 from docket.index import build as index_build
 from docket.ledger import store, views
-from docket.sync import block, folder, start
+from docket.sync import block, folder, slices, start
 from docket.vault import cursors
 from docket.vault.config import SourceConfig
 from docket.vault.vault import Vault
@@ -417,3 +417,13 @@ def test_fill_keeps_a_part_by_its_flag_or_its_absence() -> None:
     text = "a\n[[if CLASSIFY]]\nb {X}\n[[end]]\n[[if !CLASSIFY]]\nc\n[[end]]\nd\n"
     assert start.fill(text, {"X": "{Y}"}, frozenset({"CLASSIFY"})) == "a\nb {Y}\nd\n"
     assert start.fill(text, {}) == "a\nc\nd\n"
+
+
+def test_a_slice_past_the_read_tool_s_room_is_written_in_parts(tmp_path: Path) -> None:
+    long = ["x" * 999] * 100
+    files = slices.write(tmp_path, "slack", "the ledger for slack", long)
+    assert [f.name for f in files] == ["slack.1.md", "slack.2.md", "slack.3.md"]
+    texts = [f.read_text(encoding="utf-8") for f in files]
+    assert texts[0].startswith("the ledger for slack | part 1 of 3\n") and all(len(t.encode()) <= 40_000 for t in texts)
+    assert sum(t.count("x" * 999) for t in texts) == 100
+    assert slices.listed(files) == ", ".join(str(f) for f in files)

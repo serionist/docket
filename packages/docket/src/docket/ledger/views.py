@@ -417,9 +417,8 @@ def read(
 def brief(found: LedgerRead) -> LedgerRead:
     """A show cut for a quick look (#305): its free text and a point's answer at 300 characters, a meeting's open
     items only, and the newest 5 lines of its history, the count of the rest in `history_left`."""
-    detail = found.detail
-    if detail is None:
-        return found
+    # Show always gives its object's detail.
+    detail = cast(Detail, found.detail)
     history = detail.history[-BRIEF_HISTORY:]
     texts = {name: cut(text, BRIEF_TEXT) for name in ("description", "notes", "outcome")
              if (text := getattr(detail, name)) is not None}  # fmt: skip

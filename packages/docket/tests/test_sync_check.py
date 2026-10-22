@@ -107,3 +107,28 @@ def test_learned_lines_go_to_the_skill_or_its_sync_md_and_a_copied_example_s_rou
     ((source, (route, other)),) = check.learned(memo, started.info.sync)
     assert (source, route.file, route.part, other.part) == ("memo", skills / "sync.md", "Route", None)
     assert check.learned_lines([]) == ["no block holds a LEARNED line"]
+
+
+def test_a_stream_the_ledger_doesn_t_hold_and_a_minutes_state_are_said(vault: Vault) -> None:
+    sync = written(vault, "slack", f"STREAMS:  ops | status=waiting | the room | {SENT}",
+                   f"MINUTES:  M-0001 | 01M4QJ9FZ000X93GNMW1YNY5N8 | maybe | the 28th | {SENT}")  # fmt: skip
+    assert check.check(vault, sync, "slack")[1] == [
+        "blocks/slack.txt:1 STREAMS: the stream 'ops' isn't one the ledger holds: one of pilot",
+        "blocks/slack.txt:2 MINUTES: 'maybe' is answered, dropped or open",
+    ]
+
+
+def test_a_learned_line_of_a_source_with_no_skill_folder_or_no_skill_says_so(
+    vault: Vault, tmp_path_factory: pytest.TempPathFactory, tmp_path: Path
+) -> None:
+    sync = written(vault, "slack", "LEARNED:  sync.md | Ben writes late")
+    assert check.learned_lines(check.learned(vault, sync)) == [
+        "slack (1)", "  no skill folder: Ben writes late  [blocks/slack.txt:1]",
+    ]  # fmt: skip
+    memo = sync_vault(sync_template(tmp_path_factory), tmp_path / "memo")
+    started = start.start(memo, [], datetime.now(UTC))
+    (started.folder / "blocks" / "memo.txt").write_text("LEARNED:  SKILL.md | pages by 20\n", encoding="utf-8")
+    skills = memo.root.parent / ".claude" / "skills" / "sources" / "memo"
+    (skills / "SKILL.md").unlink()
+    ((_, (line,)),) = check.learned(memo, started.info.sync)
+    assert (line.file, line.part) == (skills / "SKILL.md", None)
