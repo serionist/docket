@@ -16,7 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from docket.service import client, install
+from docket import userconfig
+from docket.service import client, install, server
 from docket.service.platforms import Installer, Linux, Mac, Windows
 from docket.service.system import SYSTEM, run
 from docket.service.token import Tokens
@@ -72,6 +73,18 @@ def wait_until(check: object, seconds: float) -> bool:
     return False
 
 
+def why_not_back(installer: Installer) -> str:
+    """What a service that didn't come back is read by: on Windows the task's own state (its status, last run, last
+    result and next run), and everywhere the end of the service's log, which holds no content (DR-0155)."""
+    said = [f"registered as: {installer.installed()}"]
+    if isinstance(installer, Windows):
+        query = run(["schtasks", "/Query", "/TN", installer.name, "/V", "/FO", "LIST"])
+        said += [line.strip() for line in (query.stdout + query.stderr).splitlines() if line.strip()]
+    log = userconfig.log_dir() / server.LOG_FILE
+    lines = log.read_text(encoding="utf-8", errors="replace").splitlines()[-20:] if log.is_file() else ["(no log)"]
+    return "\n".join([*said, f"the end of {log.name}:", *lines])
+
+
 def test_installed_killed_back_stopped_and_uninstalled(tmp_path: Path, config: VaultConfig) -> None:
     root = Vault.init(tmp_path / "vault", config, "test-box").root
     port = free_port()
@@ -93,7 +106,9 @@ def test_installed_killed_back_stopped_and_uninstalled(tmp_path: Path, config: V
             answer = client.call("GET", "/api/status", token=token, at=port)
             return answer is not None and answer.status == 200 and answer.body.get("pid") != pid
 
-        assert wait_until(back, BACK_SECONDS), "the service didn't come back after it was killed"
+        assert wait_until(back, BACK_SECONDS), (
+            f"the service didn't come back after it was killed\n{why_not_back(installer)}"
+        )
 
         installer.stop()
         assert wait_until(lambda: client.call("GET", "/api/health", at=port) is None, 30)

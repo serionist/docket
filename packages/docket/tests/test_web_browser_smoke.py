@@ -31,8 +31,8 @@ pytestmark = [
 
 @pytest.fixture(scope="module")
 def browser() -> Iterator[Browser]:
-    """One browser for the module, open until after the service stops, as the browser files have it: closing it under a
-    running service resets the service's connections, and on Windows the service then outlives its stop."""
+    """One browser for the module, as the browser files have it. A connection it resets is closed all the same on
+    Windows (docket.service.accepts), and `live` fails a test whose service doesn't stop."""
     with sync_playwright() as p:
         launched = p.chromium.launch(channel=None if BROWSER == "chromium" else BROWSER)
         yield launched

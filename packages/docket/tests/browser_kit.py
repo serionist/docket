@@ -4,6 +4,7 @@ rules in each theme."""
 
 from __future__ import annotations
 
+import gc
 import os
 import threading
 import time
@@ -39,11 +40,14 @@ AXE_RUN = """async () => {
 
 
 def live(vault: Path) -> Iterator[tuple[int, str]]:
-    """The real service over the vault on a free port, in a thread: its port and its token."""
+    """The real service over the vault on a free port, in a thread: its port and its token. Its stop is part of the
+    test: a service that hasn't stopped 30 seconds after it was asked fails it, and so does a connection it left open,
+    once the collector finds it."""
     token = Tokens().ensure().value
     servers: list[uvicorn.Server] = []
+    # A daemon, so a service that never stops fails its test here instead of holding pytest's exit for good.
     runner = threading.Thread(
-        target=server.serve, args=(vault, 0), kwargs={"said": lambda _: None, "running": servers.append}
+        target=server.serve, args=(vault, 0), kwargs={"said": lambda _: None, "running": servers.append}, daemon=True
     )
     runner.start()
     deadline = time.monotonic() + 60
@@ -59,6 +63,9 @@ def live(vault: Path) -> Iterator[tuple[int, str]]:
             time.sleep(0.05)
         servers[0].should_exit = True
         runner.join(30)
+    assert not runner.is_alive(), "the service didn't stop in 30 s"
+    # A transport the service left open is collected now, so the test that made it fails, not a later one.
+    gc.collect()
 
 
 def sign_in(port: int, token: str, after: str) -> str:

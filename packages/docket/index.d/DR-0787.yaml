@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0787
+    title: On Windows the service's accepted sockets pass over a shutdown error from a connection already broken off, so a reset connection closes and the service's stop ends
+    status: proposed
+    at: "2026-10-22"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#295"]
+    description: "On Windows the service's proactor, KeepAccepting in docket.service.accepts, makes each accepted connection's socket an Accepted: a socket.socket whose shutdown passes over a ConnectionError, as Windows raises one (WinError 10054) on a connection its client reset. asyncio's proactor transport shuts its socket down before it closes it and detaches it from its server, so a shutdown that raised left the socket open for as long as the process ran and the server's wait_closed() waiting for good: uvicorn's stop never ended and the service outlived it. A browser resets connections as it closes a page. Every other error of a shutdown still goes on. test_service_accepts pins the CPython order this relies on, with the reset's error made, as a real one comes only in a race; the nightly runs it on the newest CPython too."
+    binds:
+      - Accepted is reached through IocpProactor._get_accept_socket, where the proactor makes every socket it accepts into; a test fails when CPython stops shutting a socket down before it closes it, or when the service's loop leaves a reset connection open.
+      - "Only a ConnectionError is passed over: any other error of a shutdown goes on as it is."
+    not_chosen:
+      - "A copy of _ProactorBasePipeTransport._call_connection_lost with its shutdown guarded, through the loop's _make_socket_transport: CPython's private transport code to keep in step with each release."
+      - "A timeout on uvicorn's graceful shutdown: the stop would end, but each reset connection's socket would still stay open while the service runs."
+      - "A daemon thread or a longer join in the tests alone: the service's own stop, and its sockets, would stay broken."
