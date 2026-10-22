@@ -3,11 +3,12 @@
 It seeds an invented world into a folder of its own, starts a throwaway service on a free port with config, state and
 models folders of its own, a file token and the failing keyring, and drives the built app in Chrome: each of the
 page's states, light and dark, at 1440x900 and 390x844, with the clock, zone and motion fixed. A state opens a URL,
-then presses keys, clicks, fills a field, waits for a part to show, writes from the page as another tab would or
-clicks in another tab of the owner's on the same URL, and may undo its own write once shot, so the next shot finds the
-world as it was; one may ask for another world, such as the empty one, or a world of its own for each shot, for a
-write no undo takes back. The shots and the machine
-checks go to `.local/ui/<page>/r<n>/`, a new round each run.
+signed in or as a stranger, then presses keys, clicks, fills a field, waits for a part to show, writes from the page
+as another tab would or clicks in another tab of the owner's on the same URL, opens a sync run as Claude's session
+would, fails or holds one of the page's reads and reloads, and may undo its own write once shot, so the next shot
+finds the world as it was; one may ask for another world, such as the empty one, or a world of its own for each shot,
+for a write no undo takes back, or be served the page a failure answers. The shots and the machine checks go to
+`.local/ui/<page>/r<n>/`, a new round each run.
 
 | Check | Fails on |
 |---|---|
@@ -66,9 +67,11 @@ DROPPED = frozenset({"PYTHON_KEYRING_BACKEND", "PYTHONPATH"})
 
 
 # What a state's step does: press a key, click a selector, fill a field, `selector|text`, wait for a selector to
-# show, such as a write's notice, post JSON from the page, `path|body`, as another tab of the owner's would, or click
-# a selector in another tab of the owner's opened on the page's URL, for a write that comes first.
-VERBS = ("press", "click", "fill", "wait", "post", "other")
+# show, such as a write's notice, post JSON from the page, `path|body`, as another tab of the owner's would, click
+# a selector in another tab of the owner's opened on the page's URL, for a write that comes first, open a run of a
+# source and bind it as Claude's session does (`run`), answer a read's path with a failure (`fail`) or never (`hang`),
+# and reload the page.
+VERBS = ("press", "click", "fill", "wait", "post", "other", "run", "fail", "hang", "reload")
 # A post from the page: its session's cookie, and the Origin and Fetch Metadata the browser adds, as the app's own.
 POST = """async ([path, body]) => {
   const answer = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body});
@@ -78,6 +81,9 @@ POST = """async ([path, body]) => {
 # refused as the decision moved since the page showed it.
 REFUSED = "the server responded with a status of 400"
 MOVED = "the server responded with a status of 409"
+FAILED_READ = "the server responded with a status of 500"
+STRANGER = "the server responded with a status of 401"
+MISSING = "the server responded with a status of 404"
 # The supplier call's hit in the index fixture, and the harbour crane check's recording note in recording_kit's.
 CALL_HIT = "r:calls:rec-0100@01:50-03:20"
 CRANE_NOTE = "recording-note:2026-10-12-harbour-crane-check"
@@ -99,6 +105,15 @@ WORK = 'button:has-text("Work,")'
 ALIAS_ROW = '[data-row] a:has-text("Alias for Northwind")'
 CLEO_ROW = '[data-row] a:has-text("Cleo Test")'
 ACCEPT = 'role=button[name="Accept"]'
+# ui_world's sync: the calls run an hour ago, and memo's run that its mapper dropped.
+CALLS_RUN = "run-20261020T081500-a1b2c3d4e5f60718"
+MAPPER_RUN = "run-20261020T063000-0f1e2d3c4b5a6978"
+# ui_world's settings: the add's field, its submit, and the add's own question.
+ADD_PEOPLE = (
+    ("click", "#list-people summary"),
+    ("fill", "#add-people|Ada Example"),
+    ("click", "#list-people form button"),
+)
 
 
 @dataclass(frozen=True)
@@ -117,6 +132,10 @@ class State:
     after: tuple[tuple[str, str], ...] = ()
     expects: tuple[str, ...] = ()
     fresh: bool = False
+    # Opened by a stranger, with no session: the sign-in and used-link pages.
+    signed: bool = True
+    # Served the page a failure on a page path answers, as the service writes it, in place of the URL's own.
+    failed: bool = False
 
 
 @dataclass(frozen=True)
@@ -436,6 +455,108 @@ PAGES: dict[str, Page] = {
             State("empty", "/staging", world="empty"),
         ),
     ),
+    # ui_world's sync: calls synced an hour ago, memo dropped twice since its whole run and owing ids, chat refused
+    # for want of its skill, another machine's mark, a folder source.
+    "sync": Page(
+        world="sync",
+        states=(
+            State("page", "/sync"),
+            State("run", f"/sync?run={CALLS_RUN}"),
+            State("dropped", f"/sync?run={MAPPER_RUN}"),
+            State("ids", "/sync", (("click", '[data-machine="ui-box"] summary'),)),
+            State("narrowed", "/sync?source=calls"),
+            State("none-of", "/sync?source=chat"),
+            State("keys", "/sync", (("press", "j"), ("press", "j"), ("press", "Enter"), ("wait", "#panel-title"))),
+            State("live", "/sync", (("run", "memo"), ("reload", ""), ("wait", '[data-state="open"]')), fresh=True),
+            State(
+                "failed",
+                "/sync",
+                (("fail", "/api/web/sync"), ("reload", ""), ("wait", "role=alert")),
+                expects=(FAILED_READ,),
+            ),
+            State("loading", "/sync", (("hang", "/api/web/sync"), ("reload", ""), ("wait", "[data-slot=skeleton]"))),
+            State("refused", "/sync?k=0", expects=(REFUSED,)),
+            State("empty", "/sync", world="empty"),
+        ),
+    ),
+    # ui_world's settings: settings_kit's sources, lists and pattern, Ada's memos stored and two waiting; `edited` has
+    # credentials off by hand, not committed.
+    "settings": Page(
+        world="settings",
+        states=(
+            State("page", "/settings"),
+            State("values", "/settings?show=lists"),
+            State("change", "/settings", (("click", "#source-calls summary"),)),
+            State("question", "/settings", (*ADD_PEOPLE, ("wait", "[data-question=add]"))),
+            State(
+                "added",
+                "/settings",
+                (*ADD_PEOPLE, ("click", "text=Add it to people"), ("wait", "role=status >> text=Added one value")),
+                fresh=True,
+            ),
+            State(
+                "field-error",
+                "/settings",
+                (
+                    ("click", "#list-people summary"),
+                    ("click", "#list-people form button"),
+                    ("wait", "#add-people-error"),
+                ),
+                expects=(REFUSED,),
+            ),
+            State(
+                "private",
+                "/settings",
+                (
+                    ("click", "#source-memo summary"),
+                    ("click", "#source-memo li:first-child button"),
+                    ("wait", "[data-question=private]"),
+                ),
+            ),
+            State(
+                "rule",
+                "/settings",
+                (("click", 'role=button[name="Turn it on: phone"]'), ("wait", "role=status >> text=Phone numbers")),
+                fresh=True,
+            ),
+            # Another tab turns phone redaction on first: this page's change, on the file it read, writes nothing.
+            State(
+                "conflict",
+                "/settings",
+                (
+                    ("click", "#source-calls summary"),
+                    ("other", 'role=button[name="Turn it on: phone"]'),
+                    ("click", 'role=button[name="Make it work: calls"]'),
+                    ("wait", "role=alert"),
+                ),
+                expects=(MOVED,),
+                fresh=True,
+            ),
+            State(
+                "failed",
+                "/settings",
+                (("fail", "/api/web/settings"), ("reload", ""), ("wait", "role=alert")),
+                expects=(FAILED_READ,),
+            ),
+            State(
+                "loading",
+                "/settings",
+                (("hang", "/api/web/settings"), ("reload", ""), ("wait", "[data-slot=skeleton]")),
+            ),
+            State("edited", "/settings", world="edited"),
+            State("empty", "/settings", world="empty"),
+        ),
+    ),
+    # The pages a stranger reaches, the not-found page in the shell, and the page a failure on a page path answers.
+    "signin": Page(
+        world="empty",
+        states=(
+            State("sign-in", "/settings?show=lists", signed=False, expects=(STRANGER,)),
+            State("used", "/session?code=used-already&next=/sync", signed=False, expects=(STRANGER,)),
+            State("not-found", "/nowhere", expects=(MISSING,)),
+            State("error", "/today", failed=True, expects=(FAILED_READ,)),
+        ),
+    ),
     # ui_world's curate: Northwind's alias card, new people and terms, one accepted and one rejected.
     "curate": Page(
         world="curate",
@@ -680,7 +801,46 @@ def unexpected(lines: Sequence[str], expects: Sequence[str]) -> list[str]:
     return [line for line in lines if not any(expected in line for expected in expects)]
 
 
-def _steps(page: Any, steps: Sequence[tuple[str, str]]) -> None:
+def open_run(port: int, token: str, source: str) -> None:
+    """A run of the source opened and bound as Claude's session binds it, so the Sync page shows it open."""
+
+    def call(path: str, body: dict[str, Any]) -> dict[str, Any]:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}{path}",
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=30) as answer:  # noqa: S310 - the throwaway service here
+            found: dict[str, Any] = json.loads(answer.read())
+            return found
+
+    run = call("/api/runs", {"source": source})["run"]
+    call(f"/api/runs/{run}/session", {"session": "ui-session", "agent": None})
+
+
+def _on_path(path: str) -> Callable[[str], bool]:
+    return lambda url: urllib.parse.urlsplit(url).path == path
+
+
+def _failed_read(route: Any) -> None:
+    from docket.web.display import FAILED  # noqa: PLC0415 - the service's own words, read where they are used
+
+    route.fulfill(status=500, content_type="application/json", body=json.dumps({"error": FAILED}))
+
+
+def _never(_route: Any) -> None:
+    """A read left unanswered, so the page's loading state stays to be shot."""
+
+
+def _failed_page(route: Any) -> None:
+    from docket.web import bare  # noqa: PLC0415 - the page as the service writes it
+
+    headers = {"Content-Security-Policy": bare.CSP, "Cache-Control": "no-store"}
+    route.fulfill(status=500, content_type="text/html; charset=utf-8", headers=headers, body=bare.failed_page())
+
+
+def _steps(page: Any, steps: Sequence[tuple[str, str]], opens: Callable[[str], None] | None = None) -> None:
     for verb, arg in steps:
         if verb == "press":
             page.keyboard.press(arg)
@@ -701,13 +861,24 @@ def _steps(page: Any, steps: Sequence[tuple[str, str]]) -> None:
             other.click(arg)
             other.wait_for_load_state("networkidle")
             other.close()
+        elif verb == "run":
+            if opens is None:
+                raise KitError("a state's run step needs the service's token")
+            opens(arg)
+        elif verb == "fail":
+            page.route(_on_path(arg), _failed_read)
+        elif verb == "hang":
+            # Never answered: the page stays as it is while its read is on its way.
+            page.route(_on_path(arg), _never)
+        elif verb == "reload":
+            page.reload(wait_until="domcontentloaded")
         else:
             page.click(arg)
         page.wait_for_timeout(150)
 
 
-def _shoot(page: Any, state: State, out: Path, shot: Shot) -> None:
-    _steps(page, state.steps)
+def _shoot(page: Any, state: State, out: Path, shot: Shot, opens: Callable[[str], None] | None = None) -> None:
+    _steps(page, state.steps, opens)
     page.wait_for_timeout(250)
     page.screenshot(path=str(out / shot.file))
     measured = page.evaluate(MEASURE, TARGET)
@@ -772,14 +943,18 @@ def shoot(
                 tab.on("console", errors.message)
                 tab.on("pageerror", errors.error)
                 tab.clock.set_fixed_time(CLOCK)
-                tab.goto(sign_in_link(port, token, state.url))
+                if state.failed:
+                    tab.route(_on_path(state.url.split("?")[0]), _failed_page)
+                tab.goto(
+                    sign_in_link(port, token, state.url) if state.signed else f"http://localhost:{port}{state.url}"
+                )
                 # A query may hold a slash, such as a material's path, which one star doesn't match.
                 tab.wait_for_url(f"**{state.url.split('?')[0]}**")
                 tab.wait_for_selector("#main")
                 # The page's reads answered, so a key pressed next finds its rows.
                 tab.wait_for_load_state("networkidle")
                 tab.evaluate("document.fonts.ready")
-                _shoot(tab, state, out, shot)
+                _shoot(tab, state, out, shot, lambda source: open_run(port, token, source))
                 shot.problems["console"] = unexpected(errors.lines, state.expects)
                 shots.append(shot)
                 context.close()
