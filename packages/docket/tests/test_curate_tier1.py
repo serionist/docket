@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 import yaml
 from docket_testkit import commit_config, copied, empty_vault, make_config, make_record
-from docket_webkit import OURS, parse
+from docket_webkit import OURS
 from staging_kit import signed_in
 from starlette.testclient import TestClient
 
@@ -282,16 +282,15 @@ def test_the_page_and_show_list_what_tier1_did(
     client: TestClient, vault: Vault, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config(vault, never_store={"keywords": ["Benny"]})
-    assert client.post("/curate/round", headers=SAME).status_code == 303
-    html = client.get("/curate").text
-    applied = parse(html).find_all("ol", class_="log-lines")[0]
-    assert len(applied.find_all("li")) == 4 and len(applied.find_all("form")) == 4
+    assert client.post("/api/web/curate/round", json={}, headers=SAME).status_code == 200
+    view = client.get("/api/web/curate").json()["view"]
+    assert len(view["applied"]) == 4 and all(line["undo"] for line in view["applied"])
     assert all(ln.via == "page" for ln in read_all(vault.root).lines)
-    assert "shown name for ben-sample: a value is on the never-store keywords list" in html
+    assert view["skipped"][0].startswith("shown name for ben-sample: a value is on the never-store keywords list")
     rita = next(c for c in batch.load(vault).cards if c.entity == "rita-sample")  # type: ignore[union-attr]
-    panel = client.get(f"/curate?open={rita.id}").text
-    assert parse(panel).find("h2", id="panel-title").text().endswith("Id for Rita Sample: email rita@example.com")
-    assert "Edit" not in [a.text() for a in parse(panel).find_all("a", class_="button")]
+    panel = client.get(f"/api/web/curate/panel?open={rita.id}").json()["panel"]
+    assert f"{panel['kind']}: {panel['title']}" == "Id for Rita Sample: email rita@example.com"
+    assert not panel["editable"]
     monkeypatch.setenv("DOCKET_VAULT", str(vault.root))
     assert main(["curate", "show"]) == 0
     out = capsys.readouterr().out
@@ -302,8 +301,8 @@ def test_the_page_and_show_list_what_tier1_did(
 
 def test_another_machine_s_round_says_why_tier1_didn_t_run(client: TestClient, vault: Vault) -> None:
     config(vault, primary_machine="laptop")
-    assert client.post("/curate/round", headers=SAME).status_code == 303
-    assert "Tier 1 runs on the primary machine, laptop; this is test-box." in client.get("/curate").text
+    assert client.post("/api/web/curate/round", json={}, headers=SAME).status_code == 200
+    assert "Tier 1 runs on the primary machine, laptop; this is test-box." in client.get("/api/web/curate").text
     assert read_all(vault.root).lines == ()
 
 
@@ -399,15 +398,15 @@ def test_the_round_lists_what_tier1_took_back_a_never_store_value_hidden(
 ) -> None:
     v, _ = taken_back_vault(tmp_path)
     with signed_in(v) as client:
-        assert client.post("/curate/round", headers=SAME).status_code == 303
-        assert f"taken back: now shared, id:ada-example:email={SHARED}" in client.get("/curate").text
+        assert client.post("/api/web/curate/round", json={}, headers=SAME).status_code == 200
+        assert f"taken back: now shared, id:ada-example:email={SHARED}" in client.get("/api/web/curate").text
         monkeypatch.setenv("DOCKET_VAULT", str(v.root))
         assert main(["curate", "show"]) == 0
         shown = rf"taken back by itself: \S+  ada-example  now shared, id:ada-example:email={re.escape(SHARED)}\n"
         assert re.search(shown, capsys.readouterr().out)
         # Once a never-store list holds the value, neither shows it.
         config(v, never_store={"keywords": ["notifications"]})
-        page = client.get("/curate").text
+        page = client.get("/api/web/curate").text
         assert "taken back: now shared, id:ada-example:email=(on a never-store list)" in page
         assert main(["curate", "show"]) == 0
         out = capsys.readouterr().out
@@ -423,14 +422,14 @@ def test_show_hides_a_value_tier1_applied_once_a_list_holds_it(
 ) -> None:
     monkeypatch.setenv("DOCKET_VAULT", str(vault.root))
     with signed_in(vault) as client:
-        assert client.post("/curate/round", headers=SAME).status_code == 303
+        assert client.post("/api/web/curate/round", json={}, headers=SAME).status_code == 200
         assert main(["curate", "show"]) == 0
         out = capsys.readouterr().out
         assert re.search(r"applied  by itself: \S+  add northwind  alias Nortwind \(asr\)\n", out)
         assert re.search(r"applied  by itself: \S+  add ada-example  id chat U0ADA\n", out)
         # Listed after the round: tier 1 applied both while no list held them.
         config(vault, never_store={"keywords": ["Nortwind", "U0ADA"]})
-        page = client.get("/curate").text
+        page = client.get("/api/web/curate").text
         assert "alias (on a never-store list) (asr)" in page and "id chat (on a never-store list)" in page
         assert main(["curate", "show"]) == 0
         out = capsys.readouterr().out
@@ -463,13 +462,13 @@ def test_show_hides_what_a_list_gains_on_a_card_after_the_round(
 ) -> None:
     monkeypatch.setenv("DOCKET_VAULT", str(vault.root))
     with signed_in(vault) as client:
-        assert client.post("/curate/round", headers=SAME).status_code == 303
+        assert client.post("/api/web/curate/round", json={}, headers=SAME).status_code == 200
         rita = next(c for c in batch.load(vault).cards if c.entity == "rita-sample")  # type: ignore[union-attr]
         out, _ = show(capsys)
         assert "id for Rita Sample (rita-sample): email rita@example.com" in out and "Here is the invoice." in out
         # The address and a word of the snippet listed after the round: the page and show hide both.
         config(vault, never_store={"keywords": ["rita@example.com", "invoice"]})
-        assert "rita@example.com" not in client.get(f"/curate?open={rita.id}").text
+        assert "rita@example.com" not in client.get(f"/api/web/curate/panel?open={rita.id}").text
         out, shown = show(capsys)
         assert "id for Rita Sample (rita-sample): email (on a never-store list)" in out
         for text in (out, json.dumps(shown)):
@@ -482,7 +481,7 @@ def test_show_hides_what_a_list_gains_on_a_card_after_the_round(
         # second Rita Sample's.
         config(vault, never_store={"keywords": ["rita@example.com"], "people": ["Rita Sample"]})
         second = next(c for c in batch.load(vault).cards if c.entity == "rita-sample-2")  # type: ignore[union-attr]
-        panels = [client.get(f"/curate?open={c.id}").text for c in (rita, second)]
+        panels = [client.get(f"/api/web/curate/panel?open={c.id}").text for c in (rita, second)]
         out, shown = show(capsys)
     hidden = re.escape(batch.HIDDEN)
     for card in (rita, second):
@@ -509,13 +508,13 @@ def test_the_log_hides_an_entity_whose_slug_spells_a_listed_name(
     index.update(vault)
     monkeypatch.setenv("DOCKET_VAULT", str(vault.root))
     with signed_in(vault) as client:
-        assert client.post("/curate/round", headers=SAME).status_code == 303
+        assert client.post("/api/web/curate/round", json={}, headers=SAME).status_code == 200
         out, _ = show(capsys)
         assert re.search(r"applied  by itself: \S+  add rita-sample-2  alias R\. Sample\n", out)
-        assert "rita-sample-2" in client.get("/curate").text
+        assert "rita-sample-2" in client.get("/api/web/curate").text
         # Her name, and the address both Rita cards of the round hold, so nothing of hers is left to show.
         config(vault, never_store={"keywords": ["rita@example.com"], "people": ["Rita Sample"]})
-        page = client.get("/curate").text
+        page = client.get("/api/web/curate").text
         out, shown = show(capsys)
     hidden = re.escape(batch.HIDDEN)
     assert re.search(rf"applied  by itself: \S+  add {hidden}  alias R\. Sample\n", out)

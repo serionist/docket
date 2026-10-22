@@ -556,7 +556,7 @@ def test_no_batch_reader_outlives_its_command_or_its_service_call(tmp_path: Path
     vault.git.show_at_head(".gitattributes")
     assert vault.git in open_batches()
     with signed_in(vault) as client:
-        assert client.get("/staging").status_code == 200
+        assert client.get("/api/web/staging").status_code == 200
     assert open_batches() == []
 
 

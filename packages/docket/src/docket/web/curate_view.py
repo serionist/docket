@@ -530,7 +530,8 @@ def build(facts: Facts) -> CurateView:
         view.left_out = ", ".join(f"{n} {why}" for why, n in b.left_out.items() if n)
         view.measures = measures(b.before, b.after)
         view.skipped = list(b.skipped)
-        view.tier1 = b.tier1
+        # Said as a sentence, as the page shows it.
+        view.tier1 = f"{b.tier1[:1].upper()}{b.tier1[1:]}." if b.tier1 else None
     view.dropped = [f"{entity}: {term} is {WHY_DROPPED[how]}" for entity, term, how in facts.dropped]
     view.log = [log_row(ln, facts) for ln in reversed(facts.lines[-LOG_LINES:])]
     return view

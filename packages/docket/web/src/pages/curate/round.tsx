@@ -230,11 +230,7 @@ export function Applied({
           </ul>
         </div>
       )}
-      {view.tier1 && (
-        <p className="px-3 py-2 text-xs text-ink-muted sm:px-4">
-          {view.tier1.charAt(0).toUpperCase() + view.tier1.slice(1)}.
-        </p>
-      )}
+      {view.tier1 && <p className="px-3 py-2 text-xs text-ink-muted sm:px-4">{view.tier1}</p>}
     </section>
   );
 }

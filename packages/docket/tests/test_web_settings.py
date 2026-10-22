@@ -254,11 +254,17 @@ def test_a_vault_yaml_that_doesnt_parse_names_the_place_never_the_line(client: T
     lines.insert(at + 1, f"{indent}- @dora.secret\n")
     path.write_text("".join(lines), encoding="utf-8", newline="\n")
     where = f"found character '@' that cannot start any token at line {at + 2}, column {len(indent) + 3}"
-    for route in ("/settings", "/settings?show=lists", "/staging", "/curate"):
+    for route in ("/settings", "/settings?show=lists"):
         answer = client.get(route)
         assert answer.status_code == 400, route
         assert "dora.secret" not in answer.text, route
         assert where in said(answer.text), route
+    # The app's pages read the same vault.yaml through their JSON routes.
+    for route in ("/api/web/staging", "/api/web/curate"):
+        answer = client.get(route)
+        assert answer.status_code == 400, route
+        assert "dora.secret" not in answer.text, route
+        assert where in answer.json()["error"], route
 
 
 def test_an_edit_not_in_force_is_said_at_the_top_and_credentials_off_is_for_your_own_terminal(
