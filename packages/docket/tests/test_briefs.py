@@ -354,6 +354,10 @@ def test_a_raw_tree_that_doesn_t_list_here_leaves_its_brief_stale(
     briefs._RAW_TREES[head] = "0" * 40  # pyright: ignore[reportPrivateUsage]
     found = state(vault)
     assert (found.state, found.why) == ("stale", briefs.HISTORY_NOT_HERE)
+    # A commit with no raw/ at all held no run file, so every record about Ben came after it.
+    briefs._RAW_TREES[head] = ""  # pyright: ignore[reportPrivateUsage]
+    empty = state(vault)
+    assert (empty.state, empty.why) == ("stale", None) and empty.new.count > 0
 
 
 def test_a_merge_in_the_briefs_history_reads_each_brief_s_own_log(vault: Vault) -> None:
