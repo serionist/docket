@@ -3,9 +3,10 @@
 It seeds an invented world into a folder of its own, starts a throwaway service on a free port with config, state and
 models folders of its own, a file token and the failing keyring, and drives the built app in Chrome: each of the
 page's states, light and dark, at 1440x900 and 390x844, with the clock, zone and motion fixed. A state opens a URL,
-then presses keys, clicks, fills a field, waits for a part to show or writes from the page as another tab would, and
-may undo its own write once shot, so the next shot finds the world as it was; one may ask for another world, such as
-the empty one, or a world of its own for each shot, for a write no undo takes back. The shots and the machine
+then presses keys, clicks, fills a field, waits for a part to show, writes from the page as another tab would or
+clicks in another tab of the owner's on the same URL, and may undo its own write once shot, so the next shot finds the
+world as it was; one may ask for another world, such as the empty one, or a world of its own for each shot, for a
+write no undo takes back. The shots and the machine
 checks go to `.local/ui/<page>/r<n>/`, a new round each run.
 
 | Check | Fails on |
@@ -65,8 +66,9 @@ DROPPED = frozenset({"PYTHON_KEYRING_BACKEND", "PYTHONPATH"})
 
 
 # What a state's step does: press a key, click a selector, fill a field, `selector|text`, wait for a selector to
-# show, such as a write's notice, or post JSON from the page, `path|body`, as another tab of the owner's would.
-VERBS = ("press", "click", "fill", "wait", "post")
+# show, such as a write's notice, post JSON from the page, `path|body`, as another tab of the owner's would, or click
+# a selector in another tab of the owner's opened on the page's URL, for a write that comes first.
+VERBS = ("press", "click", "fill", "wait", "post", "other")
 # A post from the page: its session's cookie, and the Origin and Fetch Metadata the browser adds, as the app's own.
 POST = """async ([path, body]) => {
   const answer = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body});
@@ -88,6 +90,15 @@ WEEKLY_BY_ANOTHER_TAB = (
     "/api/web/briefs/decision|"
     '{"brief": "brief:fleet-management", "decision": "decision:2026-10-14-weekly-review", "rev": 1, "pick": "confirm"}'
 )
+# ui_world's staging: the supplier call to cut, its second utterance, the typed field, and a write's notice.
+CALL_ROW = '[data-row] a:has-text("Supplier call")'
+SECOND = 'role=checkbox[name="Cut 00:12-00:31"]'
+TYPED = 'input[placeholder="12:30-14:05"]'
+WORK = 'button:has-text("Work,")'
+# ui_world's curate: the alias card for Northwind, Cleo Test's new card, and the round's log.
+ALIAS_ROW = '[data-row] a:has-text("Alias for Northwind")'
+CLEO_ROW = '[data-row] a:has-text("Cleo Test")'
+ACCEPT = 'role=button[name="Accept"]'
 
 
 @dataclass(frozen=True)
@@ -347,6 +358,144 @@ PAGES: dict[str, Page] = {
             State("empty", "/briefs", world="empty"),
         ),
     ),
+    # ui_world's staging: the calls source mixed, memos work; a mail redacted since, a cut by Claude, a memo held
+    # back, a call on hold and the held recordings.
+    "staging": Page(
+        world="staging",
+        states=(
+            State("list", "/staging"),
+            State("record", "/staging", (("click", CALL_ROW), ("wait", "[data-actions]"))),
+            State("redacted", "/staging", (("click", '[data-row] a:has-text("Ring Ben")'), ("wait", "[data-actions]"))),
+            State("held", "/staging", (("click", '[data-held="rec-cut-03"] summary'),)),
+            State(
+                "preview",
+                "/staging",
+                (
+                    ("click", CALL_ROW),
+                    ("click", SECOND),
+                    ("click", 'role=button[name="Preview"]'),
+                    ("wait", "[data-preview]"),
+                ),
+            ),
+            State(
+                "work",
+                "/staging",
+                (
+                    ("click", CALL_ROW),
+                    ("click", SECOND),
+                    ("click", WORK),
+                    ("wait", "role=status >> text=classified work"),
+                ),
+                fresh=True,
+            ),
+            State(
+                "private",
+                "/staging",
+                (
+                    ("click", '[data-row] a:has-text("The offer")'),
+                    ("click", "text=Private: drop it"),
+                    ("wait", "[data-confirm]"),
+                ),
+            ),
+            State(
+                "dropped",
+                "/staging",
+                (
+                    ("click", '[data-row] a:has-text("The offer")'),
+                    ("click", "text=Private: drop it"),
+                    ("click", "text=Drop it as private"),
+                    ("wait", "role=status >> text=dropped as private"),
+                ),
+                fresh=True,
+            ),
+            State(
+                "promoted",
+                "/staging",
+                (("click", 'role=button[name="Promote memo"]'), ("wait", "role=status >> text=Promoted")),
+                fresh=True,
+            ),
+            State(
+                "refused",
+                "/staging",
+                (("click", CALL_ROW), ("fill", f"{TYPED}|12:30"), ("click", WORK), ("wait", "role=alert")),
+                expects=(REFUSED,),
+            ),
+            # Another tab classifies the call first: this page's Work, on the record as it read it, writes nothing.
+            State(
+                "conflict",
+                "/staging",
+                (("click", CALL_ROW), ("other", WORK), ("click", WORK), ("wait", "text=This record changed")),
+                expects=(MOVED,),
+                fresh=True,
+            ),
+            State("filtered", "/staging?source=memo"),
+            State("empty", "/staging", world="empty"),
+        ),
+    ),
+    # ui_world's curate: Northwind's alias card, new people and terms, one accepted and one rejected.
+    "curate": Page(
+        world="curate",
+        states=(
+            State("list", "/curate"),
+            State("card", "/curate", (("click", ALIAS_ROW), ("wait", "[data-actions]"))),
+            State(
+                "edit", "/curate", (("click", CLEO_ROW), ("click", 'role=button[name="Edit"]'), ("wait", "#edit-id"))
+            ),
+            State(
+                "accepted",
+                "/curate",
+                (("click", ALIAS_ROW), ("click", ACCEPT), ("wait", "role=status >> text=accepted")),
+                fresh=True,
+            ),
+            State(
+                "round",
+                "/curate",
+                (("click", "text=Start a new round"), ("wait", "role=status >> text=A new round")),
+                fresh=True,
+            ),
+            State(
+                "undone",
+                "/curate",
+                (
+                    ("click", '[aria-labelledby="log-title"] >> role=button[name^="Undo"]'),
+                    ("wait", "role=status >> text=Undone"),
+                ),
+                fresh=True,
+            ),
+            State(
+                "lifted",
+                "/curate",
+                (("click", 'role=button[name^="Lift"]'), ("wait", "role=status >> text=Lifted")),
+                fresh=True,
+            ),
+            State(
+                "refused",
+                "/curate",
+                (
+                    ("click", CLEO_ROW),
+                    ("click", 'role=button[name="Edit"]'),
+                    ("fill", "#edit-id|Not An Id"),
+                    ("click", 'role=button[name="Accept as edited"]'),
+                    ("wait", "role=alert"),
+                ),
+                expects=(REFUSED,),
+            ),
+            # Another tab accepts the card first: this page's Accept, on the entity file it showed, writes nothing.
+            State(
+                "conflict",
+                "/curate",
+                (
+                    ("click", CLEO_ROW),
+                    ("other", ACCEPT),
+                    ("click", ACCEPT),
+                    ("wait", "text=changed since the page showed"),
+                ),
+                expects=(MOVED,),
+                fresh=True,
+            ),
+            State("empty", "/curate", world="empty"),
+        ),
+    ),
 }
 
 CHECKS = ("axe", "console", "csp", "sideways", "targets")
@@ -541,6 +690,13 @@ def _steps(page: Any, steps: Sequence[tuple[str, str]]) -> None:
             status = page.evaluate(POST, [path, body])
             if status != 200:
                 raise KitError(f"the state's post to {path} answered {status}")
+        elif verb == "other":
+            other = page.context.new_page()
+            other.goto(page.url)
+            other.wait_for_load_state("networkidle")
+            other.click(arg)
+            other.wait_for_load_state("networkidle")
+            other.close()
         else:
             page.click(arg)
         page.wait_for_timeout(150)

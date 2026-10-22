@@ -1,10 +1,12 @@
-"""The Staging page's parts (DR-0380 to DR-0384): what waits at the staging gate by source and age, an open record as
-promotion would write it, the cuts chosen on it, and the held recordings with the commands that release them, run by
-the owner or by Claude on their yes (DR-0600).
+"""The Staging page's parts (DR-0380, DR-0382, DR-0383, DR-0784): what waits at the staging gate by source and age,
+an open record as promotion would write it, the cuts chosen on it, and the held recordings with the commands that
+release them, run by the owner or by Claude on their yes (DR-0600).
 
 `StagingState` is the URL. `build_list`, `build_panel` and `build_held` take what the gate and the vault said and do
-no I/O, so every rule here is tested on invented records. Nothing here releases a hold or shows a held recording's
-text (DR-0382): a held id is shown by its id alone, and a staged record a hold covers by its key, rid, kind and time.
+no I/O, so every rule here is tested on invented records. Their models are what `GET /api/web/staging` and its panel
+answer (DR-0709): values ready to show, times in the owner's zone, links as the server's URLs. Nothing here releases a
+hold or shows a held recording's text (DR-0382): a held id is shown by its id alone, and a staged record a hold covers
+by its key, rid, kind and time.
 """
 
 from __future__ import annotations
@@ -13,9 +15,11 @@ import json
 import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
+from pydantic import BaseModel
 from starlette.datastructures import QueryParams
 
 from docket.copied import filled
@@ -31,11 +35,9 @@ from docket.vault.releaselog import Releases
 from docket.vault.segments import segments
 from docket.vault.staging import Entry, Staged, State
 from docket.web import urls
+from docket.web.display import at
 
 PATH = "/staging"
-PANEL = "/staging/panel"
-CLASSIFY = "/staging/classify"
-PROMOTE = "/staging/promote"
 DEFAULT_K = 50
 MORE = 50
 MAX_K = 1000
@@ -45,6 +47,8 @@ MAX_PICK = 100_000
 # The most typed cuts, and the longest one, a URL may hold.
 MAX_TYPED = 200
 MAX_SPEC = 40
+
+UTC_ZONE = ZoneInfo("UTC")
 
 KEY = re.compile(r"^[0-9a-f]{32}$")
 DONE = re.compile(
@@ -75,7 +79,7 @@ WHY_LINE: dict[str, str] = {
 
 
 class StagingStateError(DocketError):
-    """A parameter of the Staging page's URL, or of a form it posts, that can't be read; the message names it."""
+    """A parameter of the Staging page's URL, or of a write it posts, that can't be read; the message names it."""
 
 
 Pick = tuple[tuple[int, int], ...]
@@ -83,7 +87,7 @@ Pick = tuple[tuple[int, int], ...]
 
 @dataclass(frozen=True)
 class StagingState:
-    """The Staging page's URL (DR-0384), in one canonical form, defaults left out."""
+    """The Staging page's URL (DR-0784), in one canonical form, defaults left out."""
 
     source: str | None = None
     state: State | None = None
@@ -203,17 +207,6 @@ def _pick(p: tuple[int, int]) -> str:
 
 def numbers(picks: Pick) -> list[int]:
     return sorted({n for first, last in picks for n in range(first, last + 1)})
-
-
-def canonical(url: str) -> str | None:
-    """A Staging page URL in its canonical form, or None for one that isn't the page's or doesn't read."""
-    path, _, query = url.partition("?")
-    if not (path.endswith(PATH) or path.endswith(PANEL)):
-        return None
-    try:
-        return StagingState.read(QueryParams(query)).url()
-    except DocketError:
-        return None
 
 
 # -- the record as the page shows it ---------------------------------------------------------------------------------
@@ -353,27 +346,33 @@ def _runs(numbers_: list[int]) -> list[list[int]]:
     return runs
 
 
-def seen(staged: Staged) -> dict[str, str]:
-    """What a panel showed of a staged record, posted back with a classification so a change since is caught."""
-    return {
-        "shown_state": staged.state,
-        "shown_by": staged.classified_by or "",
-        "shown_cuts": ",".join(f"{c.unit}:{c.start}-{c.end}" for c in staged.cuts),
-    }
+class Seen(BaseModel):
+    """What a panel showed of a staged record: its state, who classified it and its cuts, posted back with a
+    classification so a change since is caught (DR-0785)."""
+
+    state: str
+    by: str
+    cuts: str
+
+
+def seen(staged: Staged) -> Seen:
+    return Seen(
+        state=staged.state,
+        by=staged.classified_by or "",
+        cuts=",".join(f"{c.unit}:{c.start}-{c.end}" for c in staged.cuts),
+    )
 
 
 # -- the list --------------------------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class Chip:
+class StageChip(BaseModel):
     label: str
     url: str
     on: bool
 
 
-@dataclass(frozen=True)
-class Row:
+class StagedRow(BaseModel):
     key: str
     short: str
     rid: str
@@ -381,34 +380,43 @@ class Row:
     kind: str
     icon: str
     title: str
-    when: datetime
+    # The record's own time, in the owner's zone.
+    when: str
     waited: str
     state: str
     why: Why
     line: str
     on_hold: bool
-    open: bool
+    # The URL that opens it beside the list, written by the server (DR-0704).
     url: str
-    fragment: str
 
 
-@dataclass(frozen=True)
-class Group:
+class StagedGroup(BaseModel):
     source: str
-    rows: list[Row]
+    rows: list[StagedRow]
     counts: str
 
 
-@dataclass(frozen=True)
-class ListView:
+class ReadyCount(BaseModel):
+    """A source with records ready to promote, and how many."""
+
+    source: str
+    n: int
+
+
+class Unreadable(BaseModel):
+    path: str
+    message: str
+
+
+class StagingList(BaseModel):
     lead: str
-    source_chips: list[Chip]
-    state_chips: list[Chip]
-    ready: list[tuple[str, int]]
-    groups: list[Group]
+    source_chips: list[StageChip]
+    state_chips: list[StageChip]
+    ready: list[ReadyCount]
+    groups: list[StagedGroup]
     more: str | None
-    unreadable: list[tuple[str, str]]
-    done: str | None
+    unreadable: list[Unreadable]
     narrowed: bool
 
 
@@ -417,37 +425,37 @@ def build_list(
     redactor: Redactor,
     state: StagingState,
     now: datetime,
+    tz: ZoneInfo = UTC_ZONE,
     *,
     held_ids: int = 0,
     held_sources: Sequence[str] = (),
-) -> ListView:
+) -> StagingList:
     entries = listing.entries
     why = listing.why
     pending = sum(1 for e in entries if e.staged.state == "pending" and why.get(e.key) != "on-hold")
     ready_entries = [e for e in entries if e.staged.state == "ready" and why.get(e.key) != "on-hold"]
     on_hold = sum(1 for e in entries if why.get(e.key) == "on-hold")
     shown = [e for e in entries if _keeps(e, state)]
-    rows = [_row(e, why.get(e.key, "mixed"), redactor, state, now) for e in shown[: state.k]]
-    groups: dict[str, list[Row]] = {}
+    rows = [_row(e, why.get(e.key, "mixed"), redactor, state, now=now, tz=tz) for e in shown[: state.k]]
+    groups: dict[str, list[StagedRow]] = {}
     for row in sorted(rows, key=lambda r: r.source):
         groups.setdefault(row.source, []).append(row)
     sources = sorted({e.staged.record.source for e in entries} | set(held_sources))
     ready = Counter(e.staged.record.source for e in ready_entries if state.source in (None, e.staged.record.source))
-    return ListView(
+    return StagingList(
         lead=_lead(pending, len(ready_entries), on_hold, held_ids),
         source_chips=[
-            Chip("All sources", replace(state.listing(), source=None).url(), state.source is None),
-            *(Chip(s, replace(state.listing(), source=s).url(), state.source == s) for s in sources),
+            StageChip(label="All sources", url=replace(state.listing(), source=None).url(), on=state.source is None),
+            *(StageChip(label=s, url=replace(state.listing(), source=s).url(), on=state.source == s) for s in sources),
         ],
         state_chips=[
-            Chip(label, replace(state.listing(), state=value).url(), state.state == value)
+            StageChip(label=label, url=replace(state.listing(), state=value).url(), on=state.state == value)
             for label, value in (("Pending and ready", None), ("Pending", "pending"), ("Ready", "ready"))
         ],
-        ready=sorted(ready.items()),
-        groups=[Group(s, rs, _group_counts(rs)) for s, rs in groups.items()],
+        ready=[ReadyCount(source=s, n=n) for s, n in sorted(ready.items())],
+        groups=[StagedGroup(source=s, rows=rs, counts=_group_counts(rs)) for s, rs in groups.items()],
         more=replace(state, k=min(MAX_K, state.k + MORE)).url() if len(shown) > state.k else None,
-        unreadable=[(str(path), message) for path, message in listing.unreadable],
-        done=done_line(state.done),
+        unreadable=[Unreadable(path=str(path), message=message) for path, message in listing.unreadable],
         narrowed=state.source is not None or state.state is not None,
     )
 
@@ -470,17 +478,16 @@ def _lead(pending: int, ready: int, on_hold: int, held: int) -> str:
     return f"{head}; {held} recording{_s(held)} held" if held else head
 
 
-def _group_counts(rows: list[Row]) -> str:
+def _group_counts(rows: list[StagedRow]) -> str:
     counts = Counter(r.state for r in rows)
     return ", ".join(f"{counts[s]} {s}" for s in ("pending", "ready") if counts[s])
 
 
-def _row(entry: Entry, why: Why, redactor: Redactor, state: StagingState, now: datetime) -> Row:
+def _row(entry: Entry, why: Why, redactor: Redactor, state: StagingState, *, now: datetime, tz: ZoneInfo) -> StagedRow:
     staged = entry.staged
     record = staged.record
     held = why == "on-hold"
-    target = state.opened(entry.key)
-    return Row(
+    return StagedRow(
         key=entry.key,
         short=entry.key[:12],
         rid=record.rid,
@@ -489,15 +496,13 @@ def _row(entry: Entry, why: Why, redactor: Redactor, state: StagingState, now: d
         icon=KIND_ICON.get(record.kind, "record"),
         # Nothing that reports a hold names a title (DR-0121); the rest as promotion would write it, one line.
         title="" if held else _one_line(redactor.text(record.title or "")),
-        when=record.ts,
+        when=at(record.ts, tz),
         waited=waited(now - staged.staged_at),
         state=staged.state,
         why=why,
         line=why_line(why, staged),
         on_hold=held,
-        open=entry.key == state.open,
-        url=target.url(),
-        fragment=target.url(PANEL),
+        url=state.opened(entry.key).url(),
     )
 
 
@@ -549,8 +554,7 @@ def _s(n: int) -> str:
 # -- the panel -------------------------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class Utterance:
+class Utterance(BaseModel):
     n: int
     span: str
     speaker: str
@@ -562,29 +566,39 @@ class Utterance:
     released: bool = False
 
 
-@dataclass(frozen=True)
-class TextLine:
+class TextLine(BaseModel):
     n: int
     offset: int
     text: str
     checked: bool
 
 
-@dataclass(frozen=True)
-class Preview:
+class CutPreview(BaseModel):
     summary: str
     text: str | None
 
 
-@dataclass(frozen=True)
-class Panel:
+class Fact(BaseModel):
+    name: str
+    value: str
+
+
+class CutBefore(BaseModel):
+    """The version in raw that was cut before: its run and its text."""
+
+    run: str
+    text: str
+
+
+class StagingPanel(BaseModel):
     key: str
     rid: str
     kind: str
     title: str
     source: str
-    when: datetime
-    staged_at: datetime
+    # The record's own time and when it was staged, in the owner's zone.
+    when: str
+    staged_at: str
     state: str
     by: str
     cuts: list[str]
@@ -593,43 +607,39 @@ class Panel:
     utterances: list[Utterance] | None
     lines: list[TextLine] | None
     text: str
-    facts: list[tuple[str, str]]
+    facts: list[Fact]
     native: str
-    cut_before: tuple[str, str] | None
+    cut_before: CutBefore | None
     notes: list[str]
     problem: str | None
-    preview: Preview | None
+    preview: CutPreview | None
     typed: str
     work_label: str
     can_work: bool
     confirm: bool
-    hidden: list[tuple[str, str]]
-    close_url: str
-    close_fragment: str
+    # What a classification carries back, so a change since is caught (DR-0381).
+    seen: Seen
+    # The list with nothing open, the drop's question, and the record without it: URLs the server wrote.
+    close: str
     confirm_url: str
-    confirm_fragment: str
-    back_url: str
-    back_fragment: str
+    back: str
 
 
-@dataclass(frozen=True)
-class Missing:
+class Missing(BaseModel):
     """An open key nothing is staged under any more."""
 
     key: str
     note: str
-    close_url: str
-    close_fragment: str
+    close: str
 
 
 def missing(state: StagingState) -> Missing:
     key = state.open or ""
     note = f"Nothing is staged as {key[:12]} any more: it was promoted, dropped, or swept by a never-store list."
-    closed = state.listing()
-    return Missing(key, note, closed.url(), closed.url(PANEL))
+    return Missing(key=key, note=note, close=state.listing().url())
 
 
-def build_panel(shown: Shown, redactor: Redactor, state: StagingState) -> Panel:
+def build_panel(shown: Shown, redactor: Redactor, state: StagingState, tz: ZoneInfo = UTC_ZONE) -> StagingPanel:
     staged = shown.entry.staged
     record = staged.record
     key = shown.entry.key
@@ -660,7 +670,7 @@ def build_panel(shown: Shown, redactor: Redactor, state: StagingState) -> Panel:
         chosen = chosen_cuts(reading, state)
     except DocketError as e:
         problem = str(e)
-    preview: Preview | None = None
+    preview: CutPreview | None = None
     going: set[int] = set()
     if chosen and problem is None:
         try:
@@ -698,17 +708,14 @@ def build_panel(shown: Shown, redactor: Redactor, state: StagingState) -> Panel:
     if not said and reading.lines is None and not held:
         notes.append(_JOINED[0].upper() + _JOINED[1:] + ".")
     n = len(chosen) if problem is None else 0
-    closed = state.listing()
-    confirm = replace(state.opened(key), confirm=True)
-    back = state.opened(key)
-    return Panel(
+    return StagingPanel(
         key=key,
         rid=record.rid,
         kind=record.kind,
         title="" if held else " ".join((view.title or "").split()),
         source=record.source,
-        when=record.ts,
-        staged_at=staged.staged_at,
+        when=at(record.ts, tz),
+        staged_at=at(staged.staged_at, tz),
         state=staged.state,
         by={"user": "you", "claude": "Claude"}.get(staged.classified_by or "", "nobody yet"),
         cuts=[_cut_text(c) for c in staged.cuts],
@@ -717,9 +724,11 @@ def build_panel(shown: Shown, redactor: Redactor, state: StagingState) -> Panel:
         utterances=utterances,
         lines=lines,
         text="" if held or said else view.text,
-        facts=[] if held else _facts(view),
+        facts=[] if held else [Fact(name=n, value=v) for n, v in _facts(view)],
         native="" if held or not view.native else json.dumps(view.native, indent=2, ensure_ascii=False, default=str),
-        cut_before=None if held or shown.cut_before is None else (shown.cut_before.run, shown.cut_before.text),
+        cut_before=None
+        if held or shown.cut_before is None
+        else CutBefore(run=shown.cut_before.run, text=shown.cut_before.text),
         notes=notes,
         problem=problem,
         preview=preview,
@@ -727,19 +736,16 @@ def build_panel(shown: Shown, redactor: Redactor, state: StagingState) -> Panel:
         work_label=f"Work, with {n} cut{_s(n)}" if n else "Work, whole",
         can_work=not held and problem is None,
         confirm=state.confirm and not held,
-        hidden=[("open", key), *seen(staged).items(), *state.listing().pairs()],
-        close_url=closed.url(),
-        close_fragment=closed.url(PANEL),
-        confirm_url=confirm.url(),
-        confirm_fragment=confirm.url(PANEL),
-        back_url=back.url(),
-        back_fragment=back.url(PANEL),
+        seen=seen(staged),
+        close=state.listing().url(),
+        confirm_url=replace(state.opened(key), confirm=True).url(),
+        back=state.opened(key).url(),
     )
 
 
 def _preview(
     reading: Reading, chosen: list[Cut], redactor: Redactor, release: Sequence[Cut] = ()
-) -> tuple[Preview, set[int]]:
+) -> tuple[CutPreview, set[int]]:
     """Promotion's order: cut, the release's cuts with the chosen ones as classification and promotion add them, then
     redact. A transcript names the utterances the chosen cuts take, those an overlapping one takes along included; a
     text shows what stays."""
@@ -750,10 +756,10 @@ def _preview(
         going = {n for n, s in enumerate(said, start=1) if id(s) in gone}
         spans = [_range(c.start, c.end) for c in chosen]
         summary = f"Removes {len(going)} utterance{_s(len(going))}: {', '.join(spans)}."
-        return Preview(summary, None), going
+        return CutPreview(summary=summary, text=None), going
     removed = sum(c.end - c.start for c in chosen)
     summary = f"Cuts {removed} character{_s(removed)} in {len(chosen)} stretch{'es' if len(chosen) != 1 else ''}."
-    return Preview(summary, after.text), set()
+    return CutPreview(summary=summary, text=after.text), set()
 
 
 def _facts(view: RawRecord) -> list[tuple[str, str]]:
@@ -779,25 +785,29 @@ def _cut_text(cut: Cut) -> str:
 # -- held recordings -------------------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class Command:
+class HeldCommand(BaseModel):
     label: str
     text: str
 
 
-@dataclass(frozen=True)
-class HeldId:
+class HeldId(BaseModel):
     id: str
     again: str | None
-    commands: list[Command]
+    commands: list[HeldCommand]
 
 
-@dataclass(frozen=True)
-class HeldSource:
+class Unfilled(BaseModel):
+    """A placeholder a command keeps, and the value it stands for: one a shell would act on."""
+
+    name: str
+    value: str
+
+
+class HeldSource(BaseModel):
     source: str
     ids: list[HeldId]
     on_hold: int
-    unfilled: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    unfilled: list[Unfilled] = []
     paste: str = ""
 
 
@@ -831,21 +841,24 @@ def build_held(
             if again is not None:
                 first = again.first
                 note = f"released {first.at:%Y-%m-%d %H:%M} UTC on {first.machine}, and held again after a merge"
-                commands = [Command("take the hold off", f'docket hold release {source} "{name}" {where}')]
+                release = f'docket hold release {source} "{name}" {where}'
+                commands = [HeldCommand(label="take the hold off", text=release)]
             else:
                 note = None
                 commands = [
-                    Command("read it", f'docket hold show {source} "{name}" {where}'),
-                    Command("release it", f'docket hold release {source} "{name}" {where} --cut <mm:ss-mm:ss>'),
+                    HeldCommand(label="read it", text=f'docket hold show {source} "{name}" {where}'),
+                    HeldCommand(
+                        label="release it", text=f'docket hold release {source} "{name}" {where} --cut <mm:ss-mm:ss>'
+                    ),
                 ]
-            ids.append(HeldId(native, note, commands))
+            ids.append(HeldId(id=native, again=note, commands=commands))
         out.append(
             HeldSource(
-                source,
-                ids,
-                on_hold.get(source, 0),
-                sorted(set(unfilled)),
-                f"Go through my held {source} recordings with /docket:cuts.",
+                source=source,
+                ids=ids,
+                on_hold=on_hold.get(source, 0),
+                unfilled=[Unfilled(name=n, value=v) for n, v in sorted(set(unfilled))],
+                paste=f"Go through my held {source} recordings with /docket:cuts.",
             )
         )
     return out

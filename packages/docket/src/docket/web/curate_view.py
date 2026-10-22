@@ -1,9 +1,10 @@
-"""The Curate page's view (DR-0473): its URL, what one read gathers, and what the templates show.
+"""The Curate page's view (DR-0786): its URL, what one read gathers, and what the page shows.
 
 Everything here reads: this machine's round, the curate log, the entity files and, for the open card only, its snippets,
 cut from the index's chunks when the card is shown and never kept (DR-0468). Nothing of a card's snippets shows before
 it is opened. Names are shown as they are, never redacted; a value a never-store list holds never shows, nor a snippet
-that names one.
+that names one (DR-0464, DR-0501). The models are what `GET /api/web/curate` and its panel answer (DR-0709): values
+ready to show, times in the owner's zone, links as the server's URLs.
 """
 
 from __future__ import annotations
@@ -13,10 +14,11 @@ import re
 import sqlite3
 from collections.abc import Mapping
 from contextlib import closing
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from pydantic import BaseModel
 from starlette.datastructures import QueryParams
 
 from docket.curate import batch, schedule
@@ -32,13 +34,9 @@ from docket.vault.entities import ENTITY_TYPES, entity_rel, load_entities
 from docket.vault.neverstore import listed
 from docket.vault.vault import Vault
 from docket.web import urls
+from docket.web.display import at
 
 PATH = "/curate"
-PANEL = "/curate/panel"
-ROUND = "/curate/round"
-DECIDE = "/curate/decide"
-UNDO = "/curate/undo"
-LIFT = "/curate/lift"
 CARD = re.compile(r"^[0-9a-f]{6}$")
 DONE = re.compile(
     r"^(?:(?P<act>accepted|rejected|edited)-(?P<card>[0-9a-f]{6})|(?P<what>undone|lifted)-(?P<n>\d{1,4})"
@@ -54,7 +52,7 @@ WHY_DROPPED = {"short": "under three letters", "common": "in too many chunks"}
 
 
 class CurateStateError(DocketError):
-    """A parameter of the Curate page's URL, or of a form it posts, that can't be read; the message names it."""
+    """A parameter of the Curate page's URL, or of a write it posts, that can't be read; the message names it."""
 
 
 @dataclass(frozen=True)
@@ -91,17 +89,6 @@ class CurateState:
 
     def url(self, path: str = PATH, *, done: bool = False) -> str:
         return urls.link(path, self.pairs(done=done))
-
-
-def canonical(url: str) -> str | None:
-    """A Curate page URL in its canonical form, or None for one that isn't the page's or doesn't read."""
-    path, _, query = url.partition("?")
-    if not (path.endswith(PATH) or path.endswith(PANEL)):
-        return None
-    try:
-        return CurateState.read(QueryParams(query)).url()
-    except DocketError:
-        return None
 
 
 # -- what one read gathers -------------------------------------------------------------------------------------------
@@ -197,39 +184,35 @@ def _dropped(conn: sqlite3.Connection) -> tuple[tuple[str, str, str], ...]:
 # -- what the page shows ---------------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class SpellingView:
+class SpellingView(BaseModel):
     text: str
     trust: str
     add: str
     chunks: int
 
 
-@dataclass(frozen=True)
-class CardRow:
+class CardRow(BaseModel):
     id: str
     n: int
     state: State
     kind: str
     title: str
-    spellings: tuple[SpellingView, ...]
+    spellings: list[SpellingView]
     missed: str
+    # The URL that opens it beside the list, written by the server (DR-0704).
     url: str
-    fragment: str
-    open: bool
 
 
-@dataclass(frozen=True)
-class SnippetView:
+class SnippetView(BaseModel):
     locator: str
     before: str
     mark: str
     after: str
+    # The snippet's place on the Search page, `/search?hit=<locator>`.
     search: str
 
 
-@dataclass(frozen=True)
-class EditSpelling:
+class EditSpelling(BaseModel):
     i: int
     text: str
     trust: str
@@ -237,21 +220,27 @@ class EditSpelling:
     kind: str
 
 
-@dataclass(frozen=True)
-class EditForm:
-    """The edit form, as the card proposes it or as the user typed it into a form the page refused."""
+class EditName(BaseModel):
+    """A new card's name in one of the owner's languages."""
+
+    code: str
+    value: str
+
+
+class EditForm(BaseModel):
+    """The edit form as the card proposes it: for a new card its type, id, a name per language and role; the
+    spellings to keep, each plain or asr."""
 
     new: bool
-    types: tuple[str, ...]
+    types: list[str]
     type: str
     id: str
-    names: tuple[tuple[str, str], ...]
-    spellings: tuple[EditSpelling, ...]
+    names: list[EditName]
+    spellings: list[EditSpelling]
     role: str
 
 
-@dataclass(frozen=True)
-class Panel:
+class CardPanel(BaseModel):
     id: str
     n: int
     new: bool
@@ -262,24 +251,24 @@ class Panel:
     state: State
     type: str
     entity: str
-    spellings: tuple[SpellingView, ...]
+    spellings: list[SpellingView]
     missed: str
     newest: str
-    snippets: tuple[SnippetView, ...]
-    hidden: tuple[tuple[str, str], ...]
-    close_url: str
-    close_fragment: str
+    snippets: list[SnippetView]
+    # What a decision carries back: the round and the hash of the entity file it writes, as the card was shown.
+    round: str
+    hash: str
+    # The list with no card open, the card's edit form, and the card without it: URLs the server wrote.
+    close: str
     edit_url: str
-    edit_fragment: str
-    back_url: str
-    back_fragment: str
+    back: str
     form: EditForm | None
 
 
-@dataclass(frozen=True)
-class LogRow:
+class LogRow(BaseModel):
     id: str
-    at: datetime
+    # When, in the owner's zone.
+    at: str
     op: str
     entity: str
     part: str
@@ -290,28 +279,33 @@ class LogRow:
     unfinished: bool = False
 
 
-@dataclass(frozen=True)
-class Measures:
-    rows: tuple[tuple[str, str, str], ...]
+class MeasureRow(BaseModel):
+    """A kind of question, its recall at 10 and MRR before the round and after its last card."""
+
+    kind: str
+    before: str
+    after: str
 
 
-@dataclass
-class View:
+class Measures(BaseModel):
+    rows: list[MeasureRow]
+
+
+class CurateView(BaseModel):
     lead: str
     due: str
     minutes: str
     round: str | None
-    cards: list[CardRow] = field(default_factory=list[CardRow])
+    cards: list[CardRow] = []
     left_out: str = ""
-    applied: list[LogRow] = field(default_factory=list[LogRow])
+    applied: list[LogRow] = []
     measures: Measures | None = None
-    dropped: list[str] = field(default_factory=list[str])
-    log: list[LogRow] = field(default_factory=list[LogRow])
-    stoplist: list[str] = field(default_factory=list[str])
-    problems: tuple[str, ...] = ()
-    skipped: list[str] = field(default_factory=list[str])
+    dropped: list[str] = []
+    log: list[LogRow] = []
+    stoplist: list[str] = []
+    problems: list[str] = []
+    skipped: list[str] = []
     tier1: str | None = None
-    done: str | None = None
 
 
 def _s(n: int) -> str:
@@ -351,8 +345,8 @@ def missed_of(card: Card) -> str:
     return f"search finds it already, in {card.chunks} chunk{_s(card.chunks)}"
 
 
-def _spellings(card: Card, lists: NeverStore) -> tuple[SpellingView, ...]:
-    return tuple(
+def _spellings(card: Card, lists: NeverStore) -> list[SpellingView]:
+    return [
         SpellingView(
             text=shown(s.text, lists),
             trust=TRUST.get(s.trust, s.trust),
@@ -360,11 +354,10 @@ def _spellings(card: Card, lists: NeverStore) -> tuple[SpellingView, ...]:
             chunks=s.chunks,
         )
         for s in card.spellings
-    )
+    ]
 
 
-def row(card: Card, state: State, lists: NeverStore, opened: str | None) -> CardRow:
-    open_ = CurateState(open=card.id)
+def row(card: Card, state: State, lists: NeverStore) -> CardRow:
     return CardRow(
         id=card.id,
         n=card.n,
@@ -373,9 +366,7 @@ def row(card: Card, state: State, lists: NeverStore, opened: str | None) -> Card
         title=title_of(card, lists),
         spellings=_spellings(card, lists),
         missed=missed_of(card),
-        url=open_.url(),
-        fragment=open_.url(PANEL),
-        open=card.id == opened,
+        url=CurateState(open=card.id).url(),
     )
 
 
@@ -390,47 +381,35 @@ def snippet(s: Snippet) -> SnippetView:
     )
 
 
-def edit_form(card: Card, langs: tuple[str, ...], typed: QueryParams | None, lists: NeverStore) -> EditForm:
-    """The form as the card proposes it, or with what the user typed; a never-store value hidden either way. The form
-    posts its spellings by their place, so a hidden one is still ticked or not."""
+def edit_form(card: Card, langs: tuple[str, ...], lists: NeverStore) -> EditForm:
+    """The form as the card proposes it, a never-store value hidden. A decision names its spellings by their place,
+    so a hidden one is still kept or not."""
     adds = [s for s in card.spellings if s.add in ("plain", "asr")]
-
-    def given(name: str, proposed: str) -> str:
-        return shown((typed.get(name) or "") if typed is not None else proposed, lists)
-
-    kept = set(typed.getlist("keep")) if typed is not None else {str(i) for i in range(len(adds))}
-    spellings = tuple(
-        EditSpelling(
-            i=i,
-            text=shown(s.text, lists),
-            trust=TRUST.get(s.trust, s.trust),
-            checked=str(i) in kept,
-            kind=given(f"kind.{i}", s.add),
-        )
+    spellings = [
+        EditSpelling(i=i, text=shown(s.text, lists), trust=TRUST.get(s.trust, s.trust), checked=True, kind=s.add)
         for i, s in enumerate(adds)
-    )
-    names = tuple((code, given(f"name.{code}", card.name if code == card.lang else "")) for code in langs)
+    ]
+    names = [EditName(code=code, value=shown(card.name, lists) if code == card.lang else "") for code in langs]
     return EditForm(
         new=card.kind == "new",
-        types=ENTITY_TYPES,
-        type=given("type", card.type),
-        id=given("id", shown_id(card, lists)),
+        types=list(ENTITY_TYPES),
+        type=card.type,
+        id=shown_id(card, lists),
         names=names,
         spellings=spellings,
-        role=given("role", ""),
+        role="",
     )
 
 
-def panel(facts: Facts, state: CurateState, typed: QueryParams | None = None) -> Panel | None:
+def panel(facts: Facts, state: CurateState) -> CardPanel | None:
     opened = facts.opened
     if opened is None or facts.batch is None:
         return None
     card = opened.card
-    closed, editing, shown = CurateState(), CurateState(open=card.id, edit=True), CurateState(open=card.id)
     newest = ""
     if card.newest:
         newest = f"{datetime.fromisoformat(card.newest.replace('Z', '+00:00')).astimezone(facts.tz):%d %b %Y}"
-    return Panel(
+    return CardPanel(
         id=card.id,
         n=card.n,
         new=card.kind == "new",
@@ -443,15 +422,13 @@ def panel(facts: Facts, state: CurateState, typed: QueryParams | None = None) ->
         spellings=_spellings(card, facts.lists),
         missed=missed_of(card),
         newest=newest,
-        snippets=tuple(snippet(s) for s in opened.snippets),
-        hidden=(("round", facts.batch.round), ("card", card.id), ("hash", opened.hash)),
-        close_url=closed.url(),
-        close_fragment=closed.url(PANEL),
-        edit_url=editing.url(),
-        edit_fragment=editing.url(PANEL),
-        back_url=shown.url(),
-        back_fragment=shown.url(PANEL),
-        form=edit_form(card, facts.langs, typed, facts.lists)
+        snippets=[snippet(s) for s in opened.snippets],
+        round=facts.batch.round,
+        hash=opened.hash,
+        close=closed(state).url(),
+        edit_url=CurateState(open=card.id, edit=True).url(),
+        back=CurateState(open=card.id).url(),
+        form=edit_form(card, facts.langs, facts.lists)
         if state.edit and opened.state == "open" and card.kind != "id"
         else None,
     )
@@ -480,7 +457,7 @@ def describe(line: Line, lists: NeverStore) -> str:
 def log_row(line: Line, facts: Facts) -> LogRow:
     return LogRow(
         id=line.id,
-        at=line.at,
+        at=at(line.at, facts.tz),
         op=line.op,
         entity=shown_entity(line.entity, facts.lists) or "-",
         part=describe(line, facts.lists),
@@ -511,7 +488,7 @@ def measures(before: Measure | None, after: Measure | None) -> Measures | None:
 
     kinds = sorted(set(before.kinds) | (set(after.kinds) if after is not None else set[str]()))
     rows = [("all", pair(before, None), pair(after, None)), *((k, pair(before, k), pair(after, k)) for k in kinds)]
-    return Measures(tuple(rows))
+    return Measures(rows=[MeasureRow(kind=k, before=b, after=a) for k, b, a in rows])
 
 
 def minutes_line(lines: tuple[Line, ...]) -> str:
@@ -532,15 +509,14 @@ def due_line(facts: Facts) -> str:
     return f"The next round is due on {due.astimezone(facts.tz):%d %b}."
 
 
-def build(facts: Facts, state: CurateState) -> View:
+def build(facts: Facts) -> CurateView:
     b = facts.batch
-    view = View(
+    view = CurateView(
         lead="No round on this machine yet.",
         due=due_line(facts),
         minutes=minutes_line(facts.lines),
         round=b.round if b is not None else None,
-        problems=facts.problems,
-        done=done_line(state.done),
+        problems=list(facts.problems),
     )
     if b is not None:
         decided = sum(s != "open" for s in facts.states.values())
@@ -551,10 +527,10 @@ def build(facts: Facts, state: CurateState) -> View:
             since = f"{b.started.astimezone(facts.tz):%d %b}"
             view.lead += f" {len(tier1)} change{_s(len(tier1))} applied by themselves since {since}."
         view.applied = [log_row(ln, facts) for ln in reversed(tier1)]
-        view.cards = [row(c, facts.states[c.id], facts.lists, state.open) for c in b.cards]
+        view.cards = [row(c, facts.states[c.id], facts.lists) for c in b.cards]
         view.left_out = ", ".join(f"{n} {why}" for why, n in b.left_out.items() if n)
         view.measures = measures(b.before, b.after)
-        view.skipped = b.skipped
+        view.skipped = list(b.skipped)
         view.tier1 = b.tier1
     view.dropped = [f"{entity}: {term} is {WHY_DROPPED[how]}" for entity, term, how in facts.dropped]
     view.log = [log_row(ln, facts) for ln in reversed(facts.lines[-LOG_LINES:])]

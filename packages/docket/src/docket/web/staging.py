@@ -1,13 +1,20 @@
-"""The Staging page: `/staging` is always a whole page and `/staging/panel` always the open record; `/staging/classify`
-and `/staging/promote` are the page's two writes (DR-0380 to DR-0384).
+"""The Staging page's routes under /api/web (DR-0709, DR-0784, DR-0785): what waits at the gate, the open record, and
+the page's two writes.
+
+| Route | What |
+|---|---|
+| `GET /staging` | the list for the URL's source, state and k, the held recordings, and an old URL's `done` |
+| `GET /staging/panel` | the open record as promotion would write it, with what is checked on it, or that it is gone |
+| `POST /staging/classify` | work, with the cuts checked or typed, or private: `Gate.classify`, as the CLI calls it |
+| `POST /staging/promote` | one source's ready records, or every source's: through `Gate.promote`, via page |
 
 Every act is the CLI's own call on the staging gate, run on the service's writer thread (DR-0153): reads too, since
-every gate call sweeps staging first, which deletes and rewrites files. The writes are plain form posts the Guard
-checks as it checks every write (DR-0152), answered with a 303 to the page so a reload never posts again (DR-0381).
-Nothing here releases a hold or reads an import folder (DR-0382).
-
-A value the URL or a form can't hold, or a `DocketError`, is the page's own error state; anything else is logged as its
-type and frames and answered with the error page, as on Search and Sync (DR-0170).
+every gate call sweeps staging first, which deletes and rewrites files. The writes are JSON writes with the browser's
+session only: the Guard's same-origin check, the token refused, the body checked before any route reads it (DR-0709).
+A classification carries what the panel showed; one from a page the record changed under writes nothing and answers
+409, and the page reads the record again. Nothing here releases a hold or reads an import folder (DR-0382). A value the
+URL or the body can't hold, or a `DocketError`, answers 400 with its words; anything else is logged as its type and
+frames and answers 500 with no detail.
 """
 
 from __future__ import annotations
@@ -15,13 +22,14 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request
-from starlette.responses import RedirectResponse, Response
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
+from starlette.datastructures import QueryParams
+from starlette.responses import Response
 
-from docket.errors import DocketError
 from docket.service.state import Service
 from docket.sources import local
 from docket.vault import holds, releaselog
@@ -29,9 +37,17 @@ from docket.vault.cuts import Cut
 from docket.vault.gate import Gate, Label, Listing, Shown
 from docket.vault.records import source_name_problem
 from docket.vault.redact import Redactor
-from docket.web import display, staging_view, templating
-from docket.web.shell import shell
-from docket.web.staging_view import PANEL, StagingState, StagingStateError
+from docket.web import staging_view
+from docket.web.day_api import Refused, safely
+from docket.web.staging_view import (
+    HeldSource,
+    Missing,
+    Seen,
+    StagingList,
+    StagingPanel,
+    StagingState,
+    StagingStateError,
+)
 
 CHANGED = "This record changed since you opened it: nothing was written. Here it is as it stands now."
 
@@ -71,15 +87,58 @@ def gather(service: Service, state: StagingState, *, held: bool = True) -> Facts
     )
 
 
-def _panel(facts: Facts, state: StagingState) -> dict[str, Any]:
-    if not state.open:
-        return {"panel": None, "missing": None}
-    if facts.shown is None:
-        return {"panel": None, "missing": staging_view.missing(state)}
-    return {"panel": staging_view.build_panel(facts.shown, facts.redactor, state), "missing": None}
+class StagingRead(BaseModel):
+    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0704); never `done`.
+    canonical: str
+    view: StagingList
+    held: list[HeldSource]
+    # What a write did, for a URL from before the app that still names it.
+    notice: str | None
 
 
-def _context(facts: Facts, state: StagingState) -> dict[str, Any]:
+class StagingPanelRead(BaseModel):
+    canonical: str
+    panel: StagingPanel | None
+    # An open key nothing is staged under any more.
+    missing: Missing | None
+
+
+class Classify(BaseModel):
+    """Work or private on a staged record: its key, what is checked on it and typed, as the URL holds them (`u` and
+    `line` each a number from 1 or a range, `cut` as --cut takes it), and what the panel showed of it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    label: str
+    u: list[str] = []
+    line: list[str] = []
+    cut: list[str] = []
+    seen: Seen
+
+
+class Classified(BaseModel):
+    key: str
+    label: str
+    # What it did, in the words the page says it with.
+    notice: str
+
+
+class Promote(BaseModel):
+    """One source's ready records, or every source's when `source` is null."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str | None = None
+
+
+class Promoted(BaseModel):
+    written: int
+    held: int
+    notice: str
+
+
+def listed(facts: Facts, state: StagingState) -> tuple[StagingList, list[HeldSource]]:
     on_hold = Counter(
         e.staged.record.source for e in facts.listing.entries if facts.listing.why.get(e.key) == "on-hold"
     )
@@ -91,141 +150,88 @@ def _context(facts: Facts, state: StagingState) -> dict[str, Any]:
         facts.redactor,
         state,
         facts.now,
+        facts.tz,
         held_ids=sum(len(facts.holds.of(s)) for s in facts.holds.ids),
         held_sources=[s for s in facts.holds.ids if facts.holds.of(s)],
     )
-    return {"view": view, "held": held, "state": state, "tz": facts.tz, "problem": "", "changed": ""} | _panel(
-        facts, state
-    )
-
-
-def _empty(state: StagingState, problem: str) -> dict[str, Any]:
-    return {
-        "view": None,
-        "held": [],
-        "state": state,
-        "tz": ZoneInfo("UTC"),
-        "problem": problem,
-        "changed": "",
-        "panel": None,
-        "missing": None,
-    }
+    return view, held
 
 
 def router(service: Service) -> APIRouter:
-    web = APIRouter()
+    api = APIRouter()
 
-    async def whole(request: Request, state: StagingState, *, status: int = 200, **extra: str) -> Response:
-        """The whole page for a state, read on the writer; a `DocketError` is the page's own error."""
-        context = shell(service, request, "Staging", current="staging")
-        try:
-            facts = await service.writer.run(lambda: gather(service, state))
-        except DocketError as e:
-            page = context | _empty(state, str(e))
-            return templating.page("staging/page.html", page, status=400, referrer=templating.POSTS_FORMS)
-        page = context | _context(facts, state) | extra
-        return templating.page("staging/page.html", page, status=status, referrer=templating.POSTS_FORMS)
+    async def read(request: Request) -> StagingRead:
+        asked = StagingState.read(request.query_params)
+        state, done = asked.listing(), asked.done
+        facts = await service.writer.run(lambda: gather(service, state))
+        view, held = listed(facts, state)
+        return StagingRead(canonical=state.url(), view=view, held=held, notice=staging_view.done_line(done))
 
-    def failed_page(request: Request) -> Response:
-        return templating.page("error.html", shell(None, request, "Something failed", current="staging"), status=500)
+    async def read_panel(request: Request) -> StagingPanelRead:
+        state = StagingState.read(request.query_params)
+        facts = await service.writer.run(lambda: gather(service, state, held=False))
+        if not state.open:
+            return StagingPanelRead(canonical=state.url(), panel=None, missing=None)
+        if facts.shown is None:
+            return StagingPanelRead(canonical=state.url(), panel=None, missing=staging_view.missing(state))
+        panel = staging_view.build_panel(facts.shown, facts.redactor, state, facts.tz)
+        return StagingPanelRead(canonical=state.url(), panel=panel, missing=None)
 
-    @web.get("/staging", include_in_schema=False)
-    async def staging_page(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        async def answer() -> Response:
-            try:
-                state = StagingState.read(request.query_params)
-            except DocketError as e:
-                context = shell(service, request, "Staging", current="staging") | _empty(StagingState(), str(e))
-                return templating.page("staging/page.html", context, status=400, referrer=templating.POSTS_FORMS)
-            return await whole(request, state)
+    async def classify(body: Classify) -> Response | Classified:
+        if body.label not in ("work", "private"):
+            raise StagingStateError(f"label is work or private, not {body.label!r}")
+        label: Label = "work" if body.label == "work" else "private"
+        pairs = [("open", body.key), *(("u", v) for v in body.u), *(("line", v) for v in body.line)]
+        state = StagingState.read(QueryParams([*pairs, *(("cut", v) for v in body.cut)]))
+        key = state.open
+        if key is None:
+            raise StagingStateError("the write names no record: key is missing")
+        if label == "private" and state.selected():
+            raise StagingStateError("cuts go with work; a private record is dropped whole")
+        changed = await service.writer.run(lambda: _classify(service, key, label, state, body.seen))
+        if changed:
+            return JSONResponse(Refused(error=CHANGED).model_dump(mode="json"), status_code=409)
+        notice = staging_view.done_line(f"{label}-{key[:12]}") or ""
+        return Classified(key=key, label=label, notice=notice)
 
-        return await templating.safely(request, "/staging", answer, lambda: failed_page(request))
+    async def promote(body: Promote) -> Promoted:
+        source = (body.source or "").strip() or None
+        if source is not None and source_name_problem(source) is not None:
+            raise StagingStateError(f"source names a source, not {source!r}")
+        result = await service.writer.run(lambda: Gate(service.vault()).promote(source, via="page"))
+        # The calendar step's meetings are a write too, even with no record written: a stopped one replayed.
+        if any(run.written for run in result.runs) or (result.meetings is not None and result.meetings.commits):
+            service.updater.poke()
+        written = sum(run.written for run in result.runs)
+        # A calendar step that stopped is said too: its records wait for the next promotion (DR-0647).
+        stopped = "-stopped" if result.meetings_stopped is not None else ""
+        notice = staging_view.done_line(f"promoted-{written}-{len(result.held)}{stopped}") or ""
+        return Promoted(written=written, held=len(result.held), notice=notice)
 
-    @web.get("/staging/panel", include_in_schema=False)
-    async def staging_panel(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        async def answer() -> Response:
-            try:
-                state = StagingState.read(request.query_params)
-                facts = await service.writer.run(lambda: gather(service, state, held=False))
-            except DocketError as e:
-                return _panel_error(str(e), 400)
-            context = {"state": state, "tz": facts.tz} | _panel(facts, state)
-            headers = templating.history(request, state.url(), staging_view.canonical)
-            return templating.page("staging/_panel.html", context, headers=headers, referrer=templating.POSTS_FORMS)
+    @api.get("/staging", response_model=StagingRead, responses={400: {"model": Refused}})
+    async def staging_read(request: Request) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
+        return await safely(request, lambda: read(request))
 
-        return await templating.safely(request, PANEL, answer, lambda: _panel_error(display.FAILED, 500))
+    @api.get("/staging/panel", response_model=StagingPanelRead, responses={400: {"model": Refused}})
+    async def staging_panel(request: Request) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
+        return await safely(request, lambda: read_panel(request))
 
-    @web.post("/staging/classify", include_in_schema=False)
-    async def staging_classify(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        async def answer() -> Response:
-            form = await templating.read_form(request)
-            if isinstance(form, Response):
-                return form
-            try:
-                back = StagingState.read(form).listing()
-                state = StagingState.read(form)
-                key = state.open
-                if key is None:
-                    raise StagingStateError("the form names no record: open is missing")
-                if form.get("act") == "preview":
-                    # Nothing is written: the preview is the page's own state, at its own URL.
-                    return RedirectResponse(state.chosen().url(), status_code=303)
-                label = form.get("label")
-                if label not in ("work", "private"):
-                    raise StagingStateError(f"label is work or private, not {label!r}")
-                if label == "private" and state.selected():
-                    raise StagingStateError("cuts go with work; a private record is dropped whole")
-                shown = {name: form.get(name) or "" for name in ("shown_state", "shown_by", "shown_cuts")}
-            except DocketError as e:
-                return await whole(request, StagingState(), status=400, problem=str(e))
-            try:
-                changed = await service.writer.run(lambda: _classify(service, key, label, state, shown))
-            except StagingStateError:
-                # What was checked or typed doesn't fit the record: the panel names it, beside every check kept.
-                return await whole(request, state.chosen(), status=400)
-            except DocketError as e:
-                return await whole(request, back.opened(key), status=400, problem=str(e))
-            if changed:
-                return await whole(request, back.opened(key), status=409, changed=CHANGED)
-            done = StagingState(source=back.source, state=back.state, k=back.k, done=f"{label}-{key[:12]}")
-            return RedirectResponse(done.url(done=True), status_code=303)
+    @api.post(
+        "/staging/classify",
+        response_model=Classified,
+        responses={400: {"model": Refused}, 409: {"model": Refused}},
+    )
+    async def staging_classify(request: Request, body: Classify) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
+        return await safely(request, lambda: classify(body))
 
-        return await templating.safely(request, "/staging/classify", answer, lambda: failed_page(request))
+    @api.post("/staging/promote", response_model=Promoted, responses={400: {"model": Refused}})
+    async def staging_promote(request: Request, body: Promote) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
+        return await safely(request, lambda: promote(body))
 
-    @web.post("/staging/promote", include_in_schema=False)
-    async def staging_promote(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        async def answer() -> Response:
-            form = await templating.read_form(request)
-            if isinstance(form, Response):
-                return form
-            try:
-                back = StagingState.read(form).listing()
-                source = (form.get("promote") or "").strip() or None
-                if source is not None and source_name_problem(source) is not None:
-                    raise StagingStateError(f"promote names a source, not {source!r}")
-            except DocketError as e:
-                return await whole(request, StagingState(), status=400, problem=str(e))
-            try:
-                result = await service.writer.run(lambda: Gate(service.vault()).promote(source, via="page"))
-            except DocketError as e:
-                return await whole(request, back, status=400, problem=str(e))
-            # The calendar step's meetings are a write too, even with no record written: a stopped one replayed.
-            if any(run.written for run in result.runs) or (result.meetings is not None and result.meetings.commits):
-                service.updater.poke()
-            written = sum(run.written for run in result.runs)
-            # A calendar step that stopped is said too: its records wait for the next promotion (DR-0647).
-            stopped = "-stopped" if result.meetings_stopped is not None else ""
-            done = StagingState(
-                source=back.source, state=back.state, k=back.k, done=f"promoted-{written}-{len(result.held)}{stopped}"
-            )
-            return RedirectResponse(done.url(done=True), status_code=303)
-
-        return await templating.safely(request, "/staging/promote", answer, lambda: failed_page(request))
-
-    return web
+    return api
 
 
-def _classify(service: Service, key: str, label: Label, state: StagingState, shown: dict[str, str]) -> bool:
+def _classify(service: Service, key: str, label: Label, state: StagingState, shown: Seen) -> bool:
     """Classify a staged record as the CLI does, if it is still as the panel showed it; True when it changed since.
     One vault and its one lock around the check and the call, so nothing writes between them: the gate's own calls
     take the same lock again, which it allows."""
@@ -242,8 +248,3 @@ def _classify(service: Service, key: str, label: Label, state: StagingState, sho
             cuts = staging_view.chosen_cuts(staging_view.read_record(staged.record, redactor), state)
         gate.classify(key, label, cuts, by="user")
     return False
-
-
-def _panel_error(message: str, status: int) -> Response:
-    context = {"panel": None, "missing": None, "error": message, "state": StagingState(), "tz": ZoneInfo("UTC")}
-    return templating.page("staging/_panel.html", context, status=status, referrer=templating.POSTS_FORMS)

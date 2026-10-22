@@ -3,8 +3,9 @@ and answer values ready to show, built by the same Python the pages use; their P
 whose OpenAPI document `uv run devkit web-schema` writes to packages/docket/web/openapi.json for the app's types.
 
 Each page adds its own as it moves: the shell's read, the day pages' (`day_api`), then Search's (`search`), the
-Recording page's with its audio (`recording`) and the Briefs page's with its decisions (`briefs`). A write's body is
-checked by `WriteBodies` before any route reads it.
+Recording page's with its audio (`recording`), the Briefs page's with its decisions (`briefs`), and the Staging and
+Curate pages' with their writes (`staging`, `curate`). A write's body is checked by `WriteBodies` before any route
+reads it.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from docket.ledger import day as ledger_day
 from docket.ledger import views
 from docket.service.state import Service
 from docket.vault.staging import Staging
-from docket.web import briefs, day_api, recording, search
+from docket.web import briefs, curate, day_api, recording, search, staging
 from docket.web import shell as shell_parts
 
 PREFIX = "/api/web"
@@ -170,6 +171,8 @@ def router(service: Service) -> APIRouter:
     api.include_router(search.router(service))
     api.include_router(recording.router(service))
     api.include_router(briefs.router(service))
+    api.include_router(staging.router(service))
+    api.include_router(curate.router(service))
     return api
 
 

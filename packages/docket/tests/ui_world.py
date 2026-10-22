@@ -17,6 +17,11 @@ it (its own config and state folders, the failing keyring), which is where the f
 | | recorder's and a stretch cut, a correction on it, indexed |
 | `briefs` | the index fixture with briefs_kit's four briefs, stale, current and orphaned, and decisions_kit's on |
 | | fleet management: two waiting, one current over the one it superseded, one rejected; indexed |
+| `staging` | staging_kit's sources with more waiting: the supplier call to cut, a mail redacted by a rule turned on |
+| | since, one Claude cut, one held back at the last promotion, a call on hold, memos ready, and the held |
+| | recordings with their import folder, one held again after its release |
+| `curate` | curate_kit's recordings, mail and notes with Northwind a customer, indexed, and a round started on |
+| | this machine: one card accepted, one rejected, the rest open |
 
 Invented people only: Ada Example, Ben Sample and Cleo Example.
 """
@@ -32,24 +37,31 @@ from pathlib import Path
 from typing import Any
 
 from briefs_kit import brief, fill_briefs
+from curate_kit import NORTHWIND, fill_curate
 from day_kit import ZONE, add, day, seed
 from decisions_kit import fill_decisions
 from docket_testkit import fill_index_vault, fixture_records, index_config, make_config, make_record
 from ledger_kit import write_ops
 from recording_kit import TOUR_POLISHED, doc, fill_recording_vault, recording_sources, with_audio
-from staging_kit import mail, memo, transcript
+from staging_kit import PHONE, TALK, mail, memo, transcript
+from staging_kit import config as staging_config
 
 from docket import recall
+from docket.curate import batch
 from docket.index import build as index_build
 from docket.ledger import ops, store
 from docket.service.token import Tokens
-from docket.vault import cursors
+from docket.sources import local
+from docket.vault import cursors, holds, releaselog
 from docket.vault.config import SourceConfig, VaultConfig
+from docket.vault.cuts import Cut
 from docket.vault.docstore import DocStore
 from docket.vault.gate import Gate
+from docket.vault.releaselog import LoggedCut, Release
+from docket.vault.staging import Staging
 from docket.vault.vault import Vault
 
-WORLDS = ("empty", "week", "meetings", "today", "stale", "search", "recording", "briefs")
+WORLDS = ("empty", "week", "meetings", "today", "stale", "search", "recording", "briefs", "staging", "curate")
 # The worlds Today is shot on: the meetings world, a second live source and the day's syncs.
 DAYS = ("today", "stale")
 MACHINE = "ui-box"
@@ -64,6 +76,10 @@ Book the room first, then the caterer.
 
 
 def config(world: str = "week") -> VaultConfig:
+    if world == "staging":
+        found = staging_config()
+        found.primary_machine = MACHINE
+        return found
     if world in ("search", "briefs"):
         found = index_config()
         found.primary_machine = MACHINE
@@ -267,6 +283,62 @@ def recordings(vault: Vault) -> None:
     recall.doc_put(vault, doc(CORRECTION, [TOUR_POLISHED], fix))
 
 
+def staged(vault: Vault, exports: Path) -> None:
+    """What waits at the gate on a working day: a call to cut, mail, a mail a rule turned on since redacts, one Claude
+    cut, one held back at the last promotion, a call on hold, two memos ready; and the held recordings, read from an
+    import folder, one released and held again after a merge."""
+    gate = Gate(vault)
+    ring = mail("mail-2", title=f"Ring Ben on {PHONE}", text=f"Ben,\nRing me on {PHONE} after ten.\nAda")
+    gate.stage([
+        transcript(),
+        mail(),
+        ring,
+        mail("mail-3", title="Badges for the visit", text="Forty badges, printed the day before.\nCleo"),
+        transcript("rec-2", title="Pilot steering call", segments=TALK[:3]),
+        transcript("rec-7", title="A call on hold"),
+        memo(),
+        memo("m-2", title="Venue rates", text="The long hall is 400 a day."),
+        memo("m-3", title="Caterer's menus", text="Two menus, the second vegetarian."),
+    ])  # fmt: skip
+    keys = {e.staged.record.rid: e.key for e in gate.list().entries}
+    gate.classify(keys["calls:rec-2/transcript"], "work", [Cut(start=12_000, end=30_400, unit="ms")], by="claude")
+    shown = gate.show(keys["memo:m-3"])
+    Staging(vault.root, vault.home).write(shown.entry.staged.model_copy(update={"problem": "a cut didn't fit"}))
+    # A rule turned on since the mail was staged: the page shows it as promotion will write it.
+    found = VaultConfig.load(vault.root / "vault.yaml")
+    found.redaction.phone = True
+    (vault.root / "vault.yaml").write_text(found.dump(), encoding="utf-8", newline="\n")
+    vault.commit(["vault.yaml"], "Config: phone redaction on")
+    folder = exports / "calls"
+    folder.mkdir(parents=True)
+    local.record(vault, "calls", folder)
+    line = Release.model_validate(
+        {"id": "rec-cut-03", "cuts": [LoggedCut(start=1000, end=2000)], "keep": [], "at": "2026-10-14T09:00:00Z",
+         "machine": MACHINE}
+    )  # fmt: skip
+    releaselog.add(vault, "calls", line)
+    # A merge brought rec-cut-03's hold back; an add would leave a released id out, so the list is written by hand.
+    (vault.root / holds.HOLDS).mkdir(parents=True, exist_ok=True)
+    (vault.root / holds.HOLDS / "calls.txt").write_text("rec-7\nrec-cut-01\nrec-cut-03\n", encoding="utf-8")
+
+
+NORTHWIND_ENTITY = "id: northwind\ntype: customer\nname: {en: Northwind}\n"
+
+
+def curated(vault: Vault) -> None:
+    """curate_kit's vault with Northwind a customer, so its misheard spelling is an alias card, and a round started on
+    this machine: its first new card accepted and its last rejected, so the log undoes and the stoplist lifts."""
+    fill_curate(vault)
+    path = vault.root / NORTHWIND
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(NORTHWIND_ENTITY, encoding="utf-8", newline="\n")
+    vault.commit([NORTHWIND], "An entity: Northwind")
+    found = batch.start(vault)
+    new = [c for c in found.cards if c.kind == "new"]
+    batch.accept(vault, found, new[:1])
+    batch.reject(vault, found, new[-1:])
+
+
 def build(folder: Path, world: str) -> Vault:
     if world not in WORLDS:
         raise ValueError(f"no world {world!r}; the worlds are {', '.join(WORLDS)}")
@@ -290,6 +362,10 @@ def build(folder: Path, world: str) -> Vault:
         fill_decisions(vault)
     if world == "recording":
         recordings(vault)
+    if world == "staging":
+        staged(vault, folder.parent / "exports")
+    if world == "curate":
+        curated(vault)
     if world in ("meetings", *DAYS):
         # The op files an hour old, as files no write just wrote are, so the index takes them as settled and a read
         # finds nothing to catch up.

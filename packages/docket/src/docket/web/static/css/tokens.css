@@ -25,12 +25,6 @@
     --error: light-dark(#b0261b, #ff9182);
     --error-soft: light-dark(#fcebe9, #3a1d1a);
 
-    --k-recording: light-dark(#7238a8, #c9a2f2);
-    --k-thread: light-dark(#0b6b64, #59d3c7);
-    --k-record: light-dark(#1f4fc4, #8fb4ff);
-    --k-event: light-dark(#8a5300, #e6b54d);
-    --k-doc: light-dark(#1d6f37, #74d08f);
-
     --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, "Liberation Mono", monospace;
     --text-xs: 11.5px;

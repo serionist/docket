@@ -1,7 +1,7 @@
 """The navigation and the keys: every page of the design, by use, with the phase it arrives in, and the keys each
 built page answers to. The shell, the keys dialog and the footer read these, and `docket.js` handles the same keys.
-A page in the React app lists its keys in its own registry (DR-0711), so the day pages, Search, the Recording page
-and Briefs have none here.
+A page in the React app lists its keys in its own registry (DR-0711), so the day pages, Search, the Recording page,
+Briefs, Staging and Curate have none here.
 
 Only built pages are links, first in their group; the others are slots that say when they come (DR-0546).
 """
@@ -114,35 +114,10 @@ Keys = tuple[tuple[tuple[str, ...], str], ...]
 
 # (keys, what they do), in the order the dialog lists them. Each key is one `KeyboardEvent.key` value.
 SYNC_KEYS: Keys = ((("?",), "these keys"),)
-# The Staging page's list and panel answer keys for moving and opening; no key writes.
-STAGING_KEYS: Keys = (
-    (("j", "k"), "next, previous record"),
-    (("Enter", "o"), "open the record beside the list"),
-    (("Escape",), "close the record"),
-    (("?",), "these keys"),
-)
-
-# The Curate page's cards answer the same keys; no key decides a card.
-CURATE_KEYS: Keys = (
-    (("j", "k"), "next, previous card"),
-    (("Enter", "o"), "open the card beside the list"),
-    (("Escape",), "close the card"),
-    (("?",), "these keys"),
-)
 
 # The keys each page answers, which its dialog lists, and the few its footer names, as (keys, a word).
 # The Settings page has nothing to move through; no key writes.
 SETTINGS_KEYS: Keys = ((("?",), "these keys"),)
 
-PAGE_KEYS: dict[str, Keys] = {
-    "sync": SYNC_KEYS,
-    "staging": STAGING_KEYS,
-    "curate": CURATE_KEYS,
-    "settings": SETTINGS_KEYS,
-}
-HINTS: dict[str, Keys] = {
-    "sync": ((("?",), "keys"),),
-    "staging": ((("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
-    "curate": ((("j", "k"), "move"), (("Enter",), "open"), (("?",), "keys")),
-    "settings": ((("?",), "keys"),),
-}
+PAGE_KEYS: dict[str, Keys] = {"sync": SYNC_KEYS, "settings": SETTINGS_KEYS}
+HINTS: dict[str, Keys] = {"sync": ((("?",), "keys"),), "settings": ((("?",), "keys"),)}

@@ -3,7 +3,13 @@
  * parseSearch and stringifySearch (DR-0704), never TanStack Router's JSON. The paths the service answers with the
  * app's document are routes.json's, which a test holds to this tree.
  */
-import { createRootRoute, createRoute, createRouter, type RouterHistory } from "@tanstack/react-router";
+import {
+  createRootRoute,
+  createRoute,
+  createRouter,
+  lazyRouteComponent,
+  type RouterHistory,
+} from "@tanstack/react-router";
 import { NotFound, Shell } from "@/components/shell/shell";
 import { parseSearch, type Search, stringifySearch } from "@/lib/search";
 import { BriefsPage } from "@/pages/briefs";
@@ -73,6 +79,21 @@ export const briefsRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): Search => search as Search,
 });
 
+export const stagingRoute = createRoute({
+  getParentRoute: () => root,
+  path: "/staging",
+  // Staging and Curate load when first opened: the first page's script keeps to its budget (DR-0712).
+  component: lazyRouteComponent(() => import("@/pages/staging"), "StagingPage"),
+  validateSearch: (search: Record<string, unknown>): Search => search as Search,
+});
+
+export const curateRoute = createRoute({
+  getParentRoute: () => root,
+  path: "/curate",
+  component: lazyRouteComponent(() => import("@/pages/curate"), "CuratePage"),
+  validateSearch: (search: Record<string, unknown>): Search => search as Search,
+});
+
 export const routeTree = root.addChildren([
   designRoute,
   todayRoute,
@@ -82,6 +103,8 @@ export const routeTree = root.addChildren([
   searchRoute,
   recordingRoute,
   briefsRoute,
+  stagingRoute,
+  curateRoute,
 ]);
 
 export function createAppRouter(history?: RouterHistory) {
