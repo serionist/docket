@@ -122,10 +122,11 @@ export function SettingsPage() {
   const copy = (text: string) => void navigator.clipboard?.writeText(text).then(() => setCopied(text));
 
   // A write read again: the page, and the sidebar, whose marks a source's change can move.
+  // It answers once the page's read is back, with the token for the file the write left.
   const settle = (where: string) => {
     refocus.current = where;
-    void client.invalidateQueries({ queryKey: SETTINGS });
     void client.invalidateQueries({ queryKey: SHELL_KEY });
+    return client.invalidateQueries({ queryKey: SETTINGS });
   };
 
   /** One write on a row: busy there while it goes, its notice at the foot, a warning or a refusal beside what it was
@@ -142,11 +143,12 @@ export function SettingsPage() {
         (answer) => {
           if (answer.notice) setNotice(answer.notice);
           if (answer.warning) setSaid({ where, words: answer.warning, tone: "warn" });
-          settle(where);
+          // The row stays busy until the page holds the new file's token, so the next write isn't refused as stale.
+          return settle(where);
         },
         (error: unknown) => {
           setSaid({ where, words: wordsOf(error), tone: "refused" });
-          if (moved(error)) settle(where);
+          return moved(error) ? settle(where) : undefined;
         },
       )
       .finally(() => setBusy(null));
@@ -188,15 +190,16 @@ export function SettingsPage() {
     setBusy(where);
     neverStore({ act: "add", name, value, token: question.token }).then(
       (answer) => {
-        setBusy(null);
         if (answer.by_hand) {
+          setBusy(null);
           setAdding({ ...adding, byHand: answer.warning ?? "", refused: "" });
           return;
         }
         setAdding(null);
         if (answer.notice) setNotice(answer.notice);
         setTyped((all) => ({ ...all, [name]: "" }));
-        settle(where);
+        setBusy(where);
+        void settle(where).finally(() => setBusy(null));
       },
       (error: unknown) => {
         // The file changed since the question: asked again, counted as it stands now; the row stays busy.
@@ -235,11 +238,10 @@ export function SettingsPage() {
     setBusy(where);
     source({ source: question.source, act: "private", token: question.token, confirmed: true }).then(
       (answer) => {
-        setBusy(null);
         setPrivating(null);
         if (answer.notice) setNotice(answer.notice);
         if (answer.warning) setSaid({ where, words: answer.warning, tone: "warn" });
-        settle(where);
+        void settle(where).finally(() => setBusy(null));
       },
       (error: unknown) => {
         if (moved(error)) {

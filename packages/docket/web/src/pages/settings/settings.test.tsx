@@ -21,7 +21,7 @@ const VALUE = "Ada Example";
 function pageOf(shown: boolean): SettingsPage {
   return {
     canonical: shown ? "/settings?show=lists" : "/settings",
-    token: "t-1",
+    token: rotating ? `t-r${rotating}` : "t-1",
     lead: "2 sources, 2 on; 2 never-store values; credentials redacted, phone numbers not; models off on ui-box.",
     form: "vault.yaml is as Docket writes it.",
     machine: "ui-box",
@@ -94,6 +94,8 @@ function pageOf(shown: boolean): SettingsPage {
 let posts: { path: string; body: Record<string, unknown> }[] = [];
 let answers: Record<string, () => Response> = {};
 let holding: (() => void) | null = null;
+// When set, each read of the page answers a new token, as each write changes the file.
+let rotating = 0;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -124,6 +126,7 @@ async function serve(request: Request): Promise<Response> {
     return answer ? answer() : json({ notice: "done", warning: null });
   }
   if (url.pathname !== "/api/web/settings") return json({ error: "not here" }, 404);
+  if (rotating) rotating += 1;
   return json(pageOf(url.searchParams.get("show") === "lists"));
 }
 
@@ -176,6 +179,7 @@ function addField(): HTMLInputElement {
 }
 
 beforeEach(() => {
+  rotating = 0;
   posts = [];
   answers = {};
   holding = null;
@@ -275,6 +279,20 @@ describe("the Settings page", () => {
     act(() => holding?.());
     await waitFor(() => expect(turn.getAttribute("aria-busy")).toBeNull());
     expect(posts.filter((p) => p.path.endsWith("/redaction"))).toHaveLength(1);
+  });
+
+  it("keeps a write's row busy until the page holds the token the write left, so the next write carries it", async () => {
+    holding = () => undefined;
+    await open("/settings");
+    rotating = 1;
+    fireEvent.click(screen.getByRole("button", { name: "Turn it off: memo" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Turn it off: memo" }).getAttribute("aria-busy")).toBeNull(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Turn it off: memo" }));
+    await waitFor(() => expect(posts).toHaveLength(2));
+    expect(posts[1]?.body.token).not.toBe(posts[0]?.body.token);
+    expect(String(posts[1]?.body.token)).toMatch(/^t-r/);
   });
 
   it("gives credentials off no button, only its command", async () => {
