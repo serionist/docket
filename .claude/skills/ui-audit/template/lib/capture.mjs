@@ -257,10 +257,11 @@ async function overflowNodes(page) {
   });
 }
 
-// Dictionary keys or unrendered interpolations shown as text.
-async function rawKeys(page) {
-  return page.evaluate(() => {
-    const keyRe = /^[a-z][a-zA-Z0-9]*(?:[._][a-zA-Z0-9]+){1,}$/;
+// Unrendered interpolations shown as text, and dictionary keys when the app has a dictionary (config.rawKeyPattern):
+// Docket has none, and a material's path such as plan.md would read as a key.
+async function rawKeys(page, pattern) {
+  return page.evaluate((src) => {
+    const keyRe = src ? new RegExp(src) : /(?!)/;
     const mustache = /\{\{[^}]+\}\}/;
     const out = new Set();
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -271,7 +272,7 @@ async function rawKeys(page) {
       if (r && r.width > 0 && r.height > 0) out.add(t.slice(0, 80));
     }
     return [...out];
-  });
+  }, pattern ?? null);
 }
 
 // Words a screen must never show (config.bannedText: the words the text of record bans, and retired names).
@@ -379,7 +380,7 @@ async function shootCell(page, cdp, vpObj, ctx, sink) {
     sink.sideways.push(base);
   }
   for (const v of await page.evaluate(() => (window.__csp ?? []).splice(0)).catch(() => [])) sink.csp.push({ cell: base, violation: v });
-  for (const k of await rawKeys(page)) sink.raw.add(k);
+  for (const k of await rawKeys(page, ctx.rawKeyPattern)) sink.raw.add(k);
   return true;
 }
 
@@ -468,7 +469,7 @@ export async function capture(page, journey, state, opts = {}) {
             await setEmulated(c, theme);
             await settle(p, { timeout: config.timeouts?.settle ?? 8000 });
             if (!(await anchorOk(p, opts.anchor))) suspect.push(base);
-            if (!(await shootCell(p, c, vpObj, { base, dir, maskSelectors, coarseProbe: config.coarseProbe }, sink))) continue;
+            if (!(await shootCell(p, c, vpObj, { base, dir, maskSelectors, coarseProbe: config.coarseProbe, rawKeyPattern: config.rawKeyPattern }, sink))) continue;
             if (vp.name === cvp && lang === clang) axeByTheme[theme] = await runAxe(p, config.axeTags ?? AXE_TAGS);
             if (theme === ctheme && lang === clang) {
               const floor = vpObj.mobile ? minCoarse : minFine;

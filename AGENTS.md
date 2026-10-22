@@ -50,7 +50,7 @@ The schema is `docs/docs-regime.yaml`, explained in `docs/docs-regime.md`.
 | `examples/` | reference sources to copy into a project, tested in CI and never a dependency: Plaud, Slack, Teams, Outlook mail and the calendar under `sources/<name>` |
 | `tools/devkit/` | the development kit, never published: `gate`, `docs`, `devkit` |
 | `docs/` | the design, the regime, the glossary, plans and reviews |
-| `.claude/skills/` | the work loop: `start-work`, `review-plan`, `review-code`, `finish-work` |
+| `.claude/skills/` | the work loop: `start-work`, `review-plan`, `review-code`, `finish-work`; for the web app, `build-ui`, `check-ui` and `ui-audit` |
 | `.github/` | CI, the nightly full matrix, the PR text check, CodeQL, Dependabot, issue forms, the PR template |
 | `.githooks/` | `commit-msg` strips tool attribution, `pre-push` runs `gate quick` |
 | `index.yaml` | the root's reading list, and its decisions and conventions from before `index.d/` |
@@ -85,7 +85,7 @@ You need uv (it brings Python 3.12), git, gitleaks, Claude Code for the full gat
 Every change is a GitHub issue on the Docket board, with a milestone per phase, and runs one loop:
 
 1. `start-work`: the issue, the door, a plan when it needs one, `review-plan`, then a branch `<issue>-<slug>`.
-2. Build it with its tests and docs: the entries, the guides, a `CHANGELOG.md` line when users notice it.
+2. Build it with its tests and docs: the entries, the guides, a `CHANGELOG.md` line when users notice it; web app pages by `build-ui` and `check-ui`.
 3. `finish-work`: `gate full`, a draft PR, `review-code` until it is clean, then ready or squash-merge.
 
 While you build:

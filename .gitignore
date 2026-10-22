@@ -25,8 +25,10 @@ age-identity*.txt
 .claude/worktrees/
 CLAUDE.local.md
 
-# Local working files: review packs, PR body drafts, scratch.
+# Local working files: review packs, PR body drafts, scratch, the UI rounds and audits.
 .local/
+# Screenshots the Playwright MCP takes in the working folder.
+.playwright-mcp/
 
 # Python
 __pycache__/

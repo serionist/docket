@@ -13,7 +13,8 @@ complete. `main` takes PRs only, squash-merged.
 1. Docs in the same change. Check each thing that describes the change moved with it: the entries (`uv run docs`),
    the guide or README, `AGENTS.md` for a changed path, command or rule, `CHANGELOG.md` when users notice it, the plan
    when the work departed from it (say where and why). Write them the way `AGENTS.md` asks: short, plain, no walls of
-   text.
+   text. A change to the web app's pages ran `check-ui` on each page it changed: its rounds and its coverage table go
+   in the PR body, every lens not checked named.
 2. Run `uv run gate full`. Fix every failure; never weaken a test or a check to pass. Raise a coverage floor the change
    earned. Never lower one: the gate fails a floor below the merge base's unless the floors file's `$lowered` names a
    decided decision that sets it (DR-0755), and only the maintainer decides one.
