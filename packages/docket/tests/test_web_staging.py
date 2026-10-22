@@ -508,13 +508,32 @@ def test_an_unexpected_failure_answers_500_and_names_nothing_of_it(
         assert "Something failed in Docket" in got.json()["error"] and "Kovács" not in got.text
 
 
-def test_a_classification_of_a_record_on_hold_writes_nothing(client: TestClient, vault: Vault) -> None:
-    panel = panel_of(client, vault, TRANSCRIPT)
-    holds.add(vault, "calls", ["rec-1"])
+HELD_PICKS: list[dict[str, list[str]]] = [
+    {},
+    {"u": ["2"]},
+    {"u": ["99"]},
+    {"line": ["1"]},
+    {"line": ["99"]},
+    {"cut": ["0-5"]},
+    {"cut": ["0:00-0:10"]},
+    {"cut": ["12:30"]},
+]
+
+
+def test_a_classification_of_a_record_on_hold_writes_nothing_and_says_nothing_of_its_body(
+    client: TestClient, vault: Vault
+) -> None:
+    """Every selection gets the gate's one refusal of a hold, so none tells how long the body is (DR-0382)."""
+    panels = {rid: panel_of(client, vault, rid) for rid in (TRANSCRIPT, MAIL_RID)}
+    holds.add(vault, "calls", ["rec-1", "mail-1"])
     before = staged(vault)
-    for label in ("work", "private"):
-        refused = classify(client, body(panel, label), status=400)
-        assert "is on hold" in refused["error"], label
+    for rid, panel in panels.items():
+        said = {classify(client, body(panel, "work", **picks), status=400)["error"] for picks in HELD_PICKS}
+        said.add(classify(client, body(panel, "private"), status=400)["error"])
+        refusal = (
+            f"{rid} is on hold in {holds.HOLDS}/calls.txt: it can't be classified, work or private, until the hold"
+        )
+        assert said == {f"{refusal} is released"}, rid
     assert staged(vault) == before
     assert not (vault.root / "staging" / "_decided.jsonl").exists()
 

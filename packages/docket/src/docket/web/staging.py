@@ -34,7 +34,7 @@ from docket.service.state import Service
 from docket.sources import local
 from docket.vault import holds, releaselog
 from docket.vault.cuts import Cut
-from docket.vault.gate import Gate, Label, Listing, Shown
+from docket.vault.gate import Gate, Label, Listing, Shown, held_refusal
 from docket.vault.records import source_name_problem
 from docket.vault.redact import Redactor
 from docket.web import staging_view
@@ -240,6 +240,9 @@ def _classify(service: Service, key: str, label: Label, state: StagingState, sho
     with vault.lock:
         now = gate.show(key)
         staged = now.entry.staged
+        if now.why == "on-hold":
+            # Refused before its body is read: a selection's cuts would say how long it is (DR-0382).
+            raise held_refusal(staged.record)
         if staging_view.seen(staged) != shown:
             return True
         cuts: list[Cut] = []
