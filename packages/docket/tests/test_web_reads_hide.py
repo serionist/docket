@@ -38,6 +38,7 @@ RELEASED_WORDS = "Brambleton orchard pays twice"
 LISTED = "Nortwin"
 HIDDEN_KEY = "new:-:nortwin"
 HELD_RID = "calls:rec-held/transcript"
+HELD_MAIL = "calls:mail-held"
 RELEASED_RID = "calls:rec-rel/transcript"
 # Each panel's selections, as its URL takes them.
 CHOSEN = (
@@ -56,8 +57,9 @@ CHOSEN = (
 
 
 def build(folder: Path) -> Path:
-    """curate_kit's recordings and notes with a round started and its Northwind card rejected; staged, a held call
-    that Claude cut before its hold, a call whose release cuts its second utterance, and a mail; then Nortwin listed,
+    """curate_kit's recordings and notes with a round started and its Northwind card rejected; staged, a held call and
+    a held mail Claude cut before their hold, a call whose release cuts its second utterance, and a mail; then Nortwin
+    listed,
     so the round's card and its stoplist key hide it, and the index built over all of it."""
     vault = Vault.init(folder / "vault", make_config(), "test-box")
     fill_curate(vault)
@@ -67,11 +69,14 @@ def build(folder: Path) -> Path:
     gate.stage([
         transcript("rec-held", title=HELD_TITLE, segments=said),
         transcript("rec-rel", title="Orchard call", segments=released),
+        mail("mail-held", title=f"{HELD_TITLE} terms", text=f"Ada,\n{HELD_WORDS} on Friday.\nBen"),
         mail(),
     ])  # fmt: skip
     keys = {e.staged.record.rid: e.key for e in gate.list().entries}
     gate.classify(keys[HELD_RID], "work", [Cut(start=12_000, end=30_400, unit="ms")], by="claude")
-    holds.add(vault, "calls", ["rec-held"])
+    # The mail's stored cut makes a panel opened with nothing chosen start from it, the way a selection does.
+    gate.classify(keys[HELD_MAIL], "work", [Cut(start=0, end=4)], by="claude")
+    holds.add(vault, "calls", ["rec-held", "mail-held"])
     cut = LoggedCut(start=TALK[1]["start_ms"], end=TALK[1]["end_ms"])
     when = "2026-10-14T09:00:00Z"
     releaselog.add(
@@ -151,6 +156,10 @@ def test_no_read_sends_what_its_page_hides(client: TestClient, root: Path) -> No
             got = client.get(f"{path}?{query}" if query else path)
             assert got.status_code in (200, 400), (path, query, got.status_code)
             said = got.text.casefold()
+            shown = got.json().get("panel") if path == "/api/web/staging/panel" and got.status_code == 200 else None
+            if shown and shown["on_hold"]:
+                # Nothing worked out from a held record's body: neither a preview nor a selection's problem with it.
+                assert (shown["preview"], shown["problem"]) == (None, None), (path, query)
             for secret in secrets:
                 assert secret not in said, (path, query, secret)
             if path not in SHOWS_STORED_RAW:
@@ -160,7 +169,7 @@ def test_no_read_sends_what_its_page_hides(client: TestClient, root: Path) -> No
     # The vault holds what the walk looks for: the held record, the released stretch and the hidden key.
     vault = Vault.open(root)
     assert HIDDEN_KEY in curatelog.fold(curatelog.read_all(vault.root).lines).stoplist
-    assert {e.staged.record.rid for e in Gate(vault).list().entries} >= {HELD_RID, RELEASED_RID}
+    assert {e.staged.record.rid for e in Gate(vault).list().entries} >= {HELD_RID, HELD_MAIL, RELEASED_RID}
 
 
 def test_the_walk_finds_what_it_looks_for_where_a_page_shows_it(client: TestClient, root: Path) -> None:
@@ -174,4 +183,4 @@ def test_the_walk_finds_what_it_looks_for_where_a_page_shows_it(client: TestClie
     ]
     staged = "".join(p.read_text(encoding="utf-8") for p in (root / "staging").glob("*/*.json"))
     assert "Quillmoss" in staged and "Brambleton" in staged
-    assert json.loads(client.get("/api/web/shell").text)["staging"] == 3
+    assert json.loads(client.get("/api/web/shell").text)["staging"] == 4
