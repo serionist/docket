@@ -4,10 +4,11 @@ thread and as every agent's fallback.
 
 - A source's agent: the open and snoozed items whose source is one of its records, whose who wrote one of its records
   from 30 days before its window on, or that hang on a meeting such a person organises or attends; every meeting for
-  a source with events or mail, else those such a person is in; no points.
+  a source with events or mail, with the items on them, else those such a person is in; no points.
 - A recording's agent: the items whose who its transcript or notes name, or that hang on its meetings; those meetings
   with their points.
-- Every agent: the items due by the prep week's end, and every stream.
+- Every agent: the items due by the prep week's end, every stream, and whole people: every open item of each person
+  the slice holds an item of, so an agent that finds someone in it has all their items.
 
 A person is matched by the words of their name, three letters or more, as the ledger's `name_tokens` reads them: Ben
 Sample is in `Ben Sample <ben@example.invalid>` and in `ben.sample@example.invalid`. The owner is no one's person: they
@@ -108,11 +109,26 @@ def for_source(
     each meeting's, by its id."""
     met = {m.ref for m in snapshot.meetings if _in_meeting(m, attendees.get(m.id, ()), covered)}
     meetings = [m for m in snapshot.meetings if every_meeting or m.ref in met]
+    # A source that sees every meeting sees what hangs on each.
+    listed = {m.ref for m in meetings} if every_meeting else met
     items = [
         i for i in snapshot.items
-        if _source_of(i.source) == source or covered.has(i.who) or (i.meeting in met) or _due_by(i, until)
+        if _source_of(i.source) == source or covered.has(i.who) or (i.meeting in listed) or _due_by(i, until)
     ]  # fmt: skip
-    return snapshot.model_copy(update={"items": items, "meetings": meetings, "points": []})
+    return snapshot.model_copy(update={"items": whole(snapshot.items, items), "meetings": meetings, "points": []})
+
+
+def whole(every: Sequence[views.ItemRow], taken: Sequence[views.ItemRow]) -> list[views.ItemRow]:
+    """The items taken, and every other item of each person they hold, in the snapshot's order: an agent that finds
+    a person in its slice takes their items there as all of them, so none may be left out."""
+    people = [words for i in taken if (words := name_tokens(i.who))]
+    ids = {i.id for i in taken}
+    return [i for i in every if i.id in ids or _one_of(name_tokens(i.who), people)]
+
+
+def _one_of(words: set[str], people: Sequence[set[str]]) -> bool:
+    """The same person as one of them, by name in full or in part, as Ben in Ben Sample."""
+    return bool(words) and any(words <= other or other <= words for other in people)
 
 
 def for_recording(
@@ -121,7 +137,9 @@ def for_recording(
     """A recording agent's slice: the items its text names or on its meetings, and those meetings with their
     points."""
     refs = {m.row.ref for m in meetings}
-    items = [i for i in snapshot.items if named.has(i.who) or i.meeting in refs or _due_by(i, until)]
+    items = whole(
+        snapshot.items, [i for i in snapshot.items if named.has(i.who) or i.meeting in refs or _due_by(i, until)]
+    )
     rows = [m.row for m in meetings]
     points = [p for p in snapshot.points if p.meeting in refs]
     return snapshot.model_copy(update={"items": items, "meetings": rows, "points": points})

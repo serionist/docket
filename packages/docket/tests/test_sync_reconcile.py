@@ -1314,3 +1314,21 @@ def test_a_prep_candidate_taken_by_the_settle_is_a_point_the_writer_takes(
     assert sum(line.startswith("# + ") for line in settled) == 1
     code, out = dry_run(vault, done.path, capsys)
     assert code == 0 and not [line for line in out if ": refused, " in line], out
+
+
+def test_with_two_blocks_setting_one_outcome_an_add_is_held_against_the_other_block_s_alone(vault: Vault) -> None:
+    """The weekly's minutes come from the recorder and from a Teams recording: Teams' add restating the recorder's
+    line is unsure, and the recorder's own who-does-what stays sure, whichever block came last."""
+    plaud = [
+        f"OUTCOME:  M-0001 | Dan books the venue | r:{WEEKLY}/transcript@14:00",
+        waiting("Dan Example", f"r:{WEEKLY}/transcript@14:00", "2026-10-19 10:05", "Dan books the venue"),
+    ]
+    teams = [
+        f"OUTCOME:  M-0001 | Gail draws the map | {CHAT_AGAIN}",
+        waiting("Gail Example", CHAT_AGAIN, "2026-10-19 10:06", "Dan books the venue for the pilot"),
+    ]
+    _, lines = run(vault, plaud=plaud, teams=teams)
+    own, other = [op for op in ops(lines) if op["op"] == "add"]
+    assert own["fields"]["source"].startswith("r:plaud") and "unsure" not in own
+    assert other["fields"]["source"] == CHAT_AGAIN
+    assert any(why.startswith("it restates M-0001's outcome, from blocks/plaud.txt:2") for why in unsure(other))

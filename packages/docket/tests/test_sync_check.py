@@ -132,3 +132,12 @@ def test_a_learned_line_of_a_source_with_no_skill_folder_or_no_skill_says_so(
     (skills / "SKILL.md").unlink()
     ((_, (line,)),) = check.learned(memo, started.info.sync)
     assert (line.file, line.part) == (skills / "SKILL.md", None)
+
+
+def test_a_line_with_no_locator_is_said_since_the_reconcile_drops_it(vault: Vault) -> None:
+    sync = written(vault, "slack", owed("Ben Sample", "-", "2026-10-19 10:00", "Send Ben the badges"),
+                   "CLOSES:   A-0001 |  done | - | sent")  # fmt: skip
+    assert check.check(vault, sync, "slack")[1] == [
+        "blocks/slack.txt:1 OWED: it has no locator: give the one read opens, or drop the line",
+        "blocks/slack.txt:2 CLOSES: it has no locator: give the one read opens, or drop the line",
+    ]

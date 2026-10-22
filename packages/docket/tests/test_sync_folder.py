@@ -427,3 +427,30 @@ def test_a_slice_past_the_read_tool_s_room_is_written_in_parts(tmp_path: Path) -
     assert texts[0].startswith("the ledger for slack | part 1 of 3\n") and all(len(t.encode()) <= 40_000 for t in texts)
     assert sum(t.count("x" * 999) for t in texts) == 100
     assert slices.listed(files) == ", ".join(str(f) for f in files)
+
+
+def test_a_slice_holds_each_of_its_people_whole_and_the_items_on_the_meetings_it_lists(vault: Vault) -> None:
+    """Hal never wrote in Slack: his reply due this week brings him in, and with him his deck due in a month, or the
+    agent, seeing Hal there, would never look for it. A source that sees every meeting gets the items on them, the
+    owner's own meeting with nobody who wrote in it included."""
+    reply = {"kind": "reply", "stream": "pilot", "opened": "2026-10-19", "who": "Hal Example"}
+    store.write(vault, [
+        {"op": "add", "fields": reply | {"title": "Confirm the badges", "source": "outlook:AAMkADhal1",
+                                         "due": "2026-10-22"}},
+        {"op": "add", "fields": reply | {"title": "Send Hal the deck", "source": "outlook:AAMkADhal2", "who": "Hal",
+                                         "due": "2026-11-20"}},
+        {"op": "meeting", "as": "own", "fields": {"subject": "Planning", "organiser": "Ada Example",
+                                                 "start": "2026-10-23T10:00+02:00", "end": "2026-10-23T11:00+02:00"}},
+        {"op": "add", "fields": reply | {"title": "Bring the floor plan", "source": "outlook:AAMkADivy",
+                                         "who": "Ivy Example", "meeting": "$own"}},
+    ], by="claude", now=NOW)  # fmt: skip
+    sliced = (start.start(vault, [], NOW).folder / "context" / "slack.md").read_text(encoding="utf-8")
+    assert "Confirm the badges" in sliced and "Send Hal the deck" in sliced
+    assert "Bring the floor plan" not in sliced
+    # Mail makes Slack a source that sees every meeting.
+    vault.write_run("slack", [make_record(rid="slack:C0PILOT/1791100960.000100", source="slack", kind="mail",
+                                          container="slack:C0PILOT", author="Ada Example <ada@example.invalid>",
+                                          ts=datetime(2026, 10, 19, 8, tzinfo=UTC))])  # fmt: skip
+    index_build.update(vault)
+    sliced = (start.start(vault, [], NOW).folder / "context" / "slack.md").read_text(encoding="utf-8")
+    assert "Bring the floor plan" in sliced and "Planning" in sliced

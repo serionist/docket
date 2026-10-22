@@ -332,3 +332,28 @@ def test_the_media_route_puts_what_media_put_puts(client: TestClient, monkeypatc
     monkeypatch.setattr(calls, "media_put", media_put)
     answer = client.post("/api/media", json={"rid": "memo:m1", "url": "https://example.invalid/a"}, headers=BEARER)
     assert answer.status_code == 200 and answer.json() == {"rid": "memo:m1", "ext": "m4a", "bytes": 12}
+
+
+def test_a_final_run_or_audio_that_fails_after_the_close_keeps_the_run_and_its_files(
+    vault: Vault, client: TestClient, tmp_path: Path
+) -> None:
+    """The run is ingested once it closes: a final run or a media phase that stops later is said in the RUN line,
+    and what waits to be classified is still written."""
+    started = start.start(vault, [], datetime.now(UTC))
+    lines_are(tmp_path, run=RUN, final=[{"stop": "plaud's listing stayed rate-limited"}], media=[{"exit": 2}])
+    real = post_to(client)
+
+    def post(path: str, body: dict[str, Any], timeout: float) -> tuple[int, dict[str, Any]] | None:
+        if path == "/api/runs" and body.get("final"):
+            return 200, {"run": "run-final", "since": None, "until": None, "waiting": [{"id": "m3"}], "retry": []}
+        answer = real(path, body, timeout)
+        if path == "/api/runs" and answer is not None and answer[0] == 200:
+            answer = (200, answer[1] | {"steps": answer[1]["steps"] + "\n8. Media: media_put(rid, url)"})
+        return answer
+
+    pulled = pull.pull(vault, started.info.sync, "memo", post=post)
+    said = pull.lines(pulled)
+    assert said[0].startswith(f"RUN:      memo | {pulled.run} | captures 3 | ready 0, pending 2 |")
+    assert "final run not run; audio 0 put, 0 refused; the final run: the pull stopped: plaud's listing" in said[0]
+    assert said[0].endswith("; the audio: the pull failed (exit 2)")
+    assert [w.rid for w in pulled.waiting] == ["memo:m1", "memo:m2"]

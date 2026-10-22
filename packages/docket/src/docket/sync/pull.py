@@ -38,6 +38,7 @@ from typing import IO, Any, cast
 
 from docket.childproc import GROUPS, console_flags, stop
 from docket.errors import DocketError
+from docket.ledger import views
 from docket.sync import folder, recordings, slices, start
 from docket.vault.anchors import format_time, paragraphs
 from docket.vault.gate import Gate
@@ -91,6 +92,8 @@ class Pulled:
     put: int = 0
     refused: list[str] = field(default_factory=list[str])
     waiting: list[Waiting] = field(default_factory=list[Waiting])
+    # What went wrong after the run closed: the final run's or the audio's.
+    problems: list[str] = field(default_factory=list[str])
 
 
 def http(token: str) -> Post:
@@ -243,12 +246,20 @@ def pull(
         raise DocketError("the run didn't open")
     opened, count, fetched, closed = first
     pulled = Pulled(source, str(opened["run"]), count, closed, final="none due")
-    final = job.run(final=True)
-    if final is not None:
-        pulled.final = f"{final[0]['run']}, {final[1]} captures"
-        fetched |= final[2]
+    # The run is ingested: from here a step that fails is said in the RUN line, and what waits is still written.
+    try:
+        final = job.run(final=True)
+        if final is not None:
+            pulled.final = f"{final[0]['run']}, {final[1]} captures"
+            fetched |= final[2]
+    except DocketError as e:
+        pulled.final = "not run"
+        pulled.problems.append(f"the final run: {e}")
     if "media_put" in str(opened.get("steps", "")):
-        job.media(sorted(fetched | {str(i) for i in _listed(opened.get("media"))}), pulled)
+        try:
+            job.media(sorted(fetched | {str(i) for i in _listed(opened.get("media"))}), pulled)
+        except DocketError as e:
+            pulled.problems.append(f"the audio: {e}")
     pulled.waiting = _waiting(vault, path, source)
     return pulled
 
@@ -354,6 +365,7 @@ def lines(pulled: Pulled) -> list[str]:
     closed = pulled.closed
     moved = "yes" if closed.get("moved") else "no"
     note = f"pulled; final run {pulled.final}; audio {pulled.put} put, {len(pulled.refused)} refused"
+    note += "".join(f"; {views.as_field(problem)}" for problem in pulled.problems)
     out = [
         f"RUN:      {pulled.source} | {pulled.run} | captures {pulled.captures} | ready {closed.get('ready', 0)}, "
         f"pending {closed.get('pending', 0)} | skipped {closed.get('skipped', 0)} | mark moved {moved} | {note}"

@@ -392,6 +392,8 @@ class _Drafting:
         self.closing: dict[str, tuple[Found, datetime | None]] = {}
         # Each meeting's outcome as the draft's lines set it so far, and the line that set it last.
         self.outcomes: dict[str, tuple[str, str]] = {}
+        # Each meeting's OUTCOME lines: the text, the block line and the block's file.
+        self.outcome_lines: dict[str, list[tuple[str, str, str]]] = {}
         self.answered: set[str] = set()
         self.sections: dict[str, list[Draft]] = {"closes": [], "asks": [], "meetings": [], "streams": []}
         self.prep: list[views.MeetingFacts] = []
@@ -1063,6 +1065,7 @@ class _Drafting:
             d.alternatives.append(d.op | {"fields": {"outcome": f"{had}\n{text}"}})
         if meeting is not None:
             self.outcomes[meeting.row.id] = (had + "\n" + text if had else text, f.where)
+            self.outcome_lines.setdefault(meeting.row.id, []).append((text, f.where, f.file))
         return d
 
     def restating(self) -> None:
@@ -1075,9 +1078,9 @@ class _Drafting:
             if meeting is None:
                 continue
             texts = [(meeting.outcome, "the ledger")] if meeting.outcome else []
-            drafted = self.outcomes.get(meeting.row.id)
-            if drafted is not None and drafted[1].rpartition(":")[0] != d.found.file:
-                texts.append((drafted[0], drafted[1]))
+            # Every block's outcome lines but the add's own block's.
+            texts += [(text, where) for text, where, file in self.outcome_lines.get(meeting.row.id, [])
+                      if file != d.found.file]  # fmt: skip
             words = title_words(str(d.op["fields"].get("title") or ""))
             said = [
                 (line, where) for text, where in texts for line in text.splitlines()

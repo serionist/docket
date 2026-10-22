@@ -79,8 +79,12 @@ def _problems(line: block.Line, streams: set[str], names: list[str], lookup: rec
     f = line.fields
     out: list[str] = []
     at = reconcile.LOCATOR.get(line.label)
-    if at is not None and at < len(f) and f[at] not in ("", "-") and not lookup.opens(f[at]):
-        out.append(f"its locator, {f[at]}, doesn't open: give the one read opens, or drop the line")
+    if at is not None and at < len(f):
+        if f[at] in ("", "-"):
+            # The reconcile drops a line with no locator, as one whose locator doesn't open.
+            out.append("it has no locator: give the one read opens, or drop the line")
+        elif not lookup.opens(f[at]):
+            out.append(f"its locator, {f[at]}, doesn't open: give the one read opens, or drop the line")
     kinds = KINDS.get(line.label)
     if kinds is not None and len(f) > 6 and f[6] not in kinds:
         out.append(f"its kind, {f[6]!r}, is one of {', '.join(kinds)}")
