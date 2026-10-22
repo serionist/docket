@@ -42,9 +42,10 @@ templates folder, so the parallel run builds it and the timed run only times (DR
 
 A timed test that builds a big vault to time it, such as the index's 100,000 chunks or the ledger's 5,000 items, also
 carries `@pytest.mark.nightly`, and so does each untimed test that builds that vault: `gate os` and `gate full` leave
-them out, and `--all`, which the nightly passes, runs them on all three systems. A change to the index, the ledger,
-search or the scan takes the `full-matrix` label, which runs the nightly on its PR. A test marked nightly is never the
-only one to run a line, so the covered run holds the floors without it (DR-0757).
+them out, and `--all`, which the nightly passes, runs them on all three systems. A file whose every test is one says so
+once, `pytestmark = pytest.mark.nightly` at its top, and a PR's shares then leave it out before they split the files.
+A change to the index, the ledger, search or the scan takes the `full-matrix` label, which runs the nightly on its PR.
+A test marked nightly is never the only one to run a line, so the covered run holds the floors without it (DR-0757).
 
 A new test file goes in `tools/devkit/test-systems.json`: under `system`, with its kind and why, when what it tests can
 differ by system (paths, git, processes, the keychain, file times, modes and links, the console), else under `same`.
@@ -53,6 +54,13 @@ os`), and every file each night (`gate os --all`). The gate fails a file named n
 names the system, skips by it, or makes links, file modes or file times, unless `signals` says why it runs the same
 everywhere (DR-0758). A new command group or MCP tool fails `test_smoke.py` until it has its case there;
 `test_web_browser_smoke.py` loads a new page as is.
+
+CI splits each system's test files into shares by what each cost in a run (`tools/devkit/test-weights.json`, which `uv
+run gate weights <folder>` writes from a run's times artifacts), and a share imports only its own files. The split is
+taken from `test-systems.json` before pytest collects anything, so a test file named nowhere fails every share's run
+rather than going unrun. Windows and macOS find the files under `same` that hold a smoke or timed test by their text,
+so such a test carries `pytest.mark.smoke` or `pytest.mark.perf` in its own file; a run that finds one marked another
+way fails. A share whose files hold no timed test starts no timed run (DR-0783).
 
 Tests never touch the real Docket folders or the keychain, not even to read them: `conftest.py` points the config,
 state and models folders at a temp folder of the session's before any fixture runs, and each test at its own.

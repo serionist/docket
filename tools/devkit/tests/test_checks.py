@@ -528,8 +528,12 @@ def marks(run: list[str]) -> str:
 
 
 def _fake_pytest(
-    monkeypatch: pytest.MonkeyPatch, codes: tuple[int, int] = (0, 0), envs: list[dict[str, str]] | None = None
+    monkeypatch: pytest.MonkeyPatch,
+    codes: tuple[int, int] = (0, 0),
+    envs: list[dict[str, str]] | None = None,
+    timed: tuple[str, ...] | None = ("t.py::test_timed",),
 ) -> list[list[str]]:
+    """pytest's runs, faked: the parallel run lists these timed tests in its files, or writes no list for None."""
     calls: list[list[str]] = []
 
     def fake_run(_ctx: gate.Ctx, cmd: list[str], *, env: dict[str, str] | None = None) -> tuple[int, list[str]]:
@@ -537,6 +541,9 @@ def _fake_pytest(
         if envs is not None:
             envs.append(dict(env or {}))
         if "-n" in cmd:
+            out = next((a.removeprefix("--shard-timed=") for a in cmd if a.startswith("--shard-timed=")), None)
+            if out is not None and timed is not None:
+                Path(out).write_text(json.dumps(list(timed)), encoding="utf-8")
             lines = ["....", "12.34s call     t.py::test_slow", "9 passed, 2 deselected in 3.00s", "a test broke"]
             return codes[0], lines
         return codes[1], [*PASSED_OUTPUT, "a timed test broke"]
@@ -550,25 +557,25 @@ def test_the_os_lane_runs_what_can_differ_by_system_and_all_of_it_with_all(
 ) -> None:
     calls = _fake_pytest(monkeypatch)
     assert gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None, shard="1/4")).status == "ok"
-    # Both runs of a share select the same files, before the share is taken, and leave the nightly's tests out.
+    # Both runs of a share select the same files and leave the nightly's out, before the share is taken.
     rest, alone = calls
-    assert all("--select=system" in run for run in calls)
-    assert (marks(rest), marks(alone)) == ("not perf and not nightly", "perf and not nightly")
+    assert all("--select=system" in run and "--leave-out=nightly" in run for run in calls)
+    assert (marks(rest), marks(alone)) == ("not perf", "perf")
     calls.clear()
     whole = gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None, shard="1/8", whole=True)
     assert gate.step_tests(whole).status == "ok"
     rest, alone = calls
-    assert not any("--select=system" in run for run in calls)
+    assert not any("--select=system" in run or "--leave-out=nightly" in run for run in calls)
     assert (marks(rest), marks(alone)) == ("not perf", "perf")
     # The full lane runs every file, and the nightly's tests with --all (DR-0757).
     calls = _fake_pytest(monkeypatch, codes=(1, 0))
     gate.step_tests(gate.Ctx(root=tmp_path, lane="full", ci=False, base=None, pr=None))
     [run] = calls
-    assert "--select=system" not in run and marks(run) == "not nightly"
+    assert "--select=system" not in run and "--leave-out=nightly" in run and "-m" not in run[3:]
     calls.clear()
     gate.step_tests(gate.Ctx(root=tmp_path, lane="full", ci=False, base=None, pr=None, whole=True))
     [run] = calls
-    assert "--select=system" not in run and "-m" not in run[3:]
+    assert "--select=system" not in run and "--leave-out=nightly" not in run and "-m" not in run[3:]
     with pytest.raises(KitError, match="--all widens the tests of the os and full lanes"):
         gate.run("quick", whole=True)
     assert gate.main(["quick", "--all"]) == 2
@@ -704,8 +711,8 @@ def test_the_tests_step_runs_the_timed_tests_alone_after_the_rest(
     calls = _fake_pytest(monkeypatch)
     out = gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None))
     rest, alone = calls
-    assert marks(rest) == "not perf and not nightly" and rest[rest.index("-n") + 1] == "auto"
-    assert marks(alone) == "perf and not nightly" and "-n" not in alone and "-raP" in alone
+    assert marks(rest) == "not perf" and rest[rest.index("-n") + 1] == "auto"
+    assert marks(alone) == "perf" and "-n" not in alone and "-raP" in alone
     assert not any(a.startswith("--cov") for a in [*rest, *alone])
     assert out.status == "ok"
     assert out.detail == [
@@ -762,7 +769,7 @@ def test_a_covered_share_saves_its_coverage_data_and_holds_no_floor(
     [(cmd, env)] = seen
     assert "--cov" in cmd and "--cov-report=" in cmd and not any(a.startswith("--cov-report=json") for a in cmd)
     # Under coverage the timed tests stay in the one run, as in the whole lane, and the nightly's wait for --all.
-    assert marks(cmd) == "not nightly" and "--shard=2/4" in cmd
+    assert "-m" not in cmd[3:] and "--leave-out=nightly" in cmd and "--shard=2/4" in cmd
     assert Path(env["COVERAGE_FILE"]) == tmp_path / ".local" / "coverage" / "share-2-of-4"
     assert Path(env[evalfloors.REPORT_ENV]) == tmp_path / evalfloors.REPORT
     assert out.status == "ok"
@@ -934,16 +941,31 @@ def test_a_failure_in_either_run_shows_its_tail(tmp_path: Path, monkeypatch: pyt
         assert [ln for ln in out.detail if "broke" in ln] == broke
 
 
-def test_a_share_with_no_timed_test_passes_but_one_with_no_test_at_all_fails(
+def test_a_share_with_no_timed_test_starts_no_timed_run_but_one_with_no_test_at_all_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _fake_pytest(monkeypatch, codes=(0, gate.NO_TESTS))
-    out = gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None, shard="9/12"))
-    assert out.status == "ok"
-    assert out.detail[:2] == ["9 passed, 2 deselected in 3.00s", "timed alone: none in these files"]
+    def share() -> gate.Outcome:
+        return gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None, shard="9/12"))
+
+    # The parallel run found no timed test in the share's files: no second pytest.
+    calls = _fake_pytest(monkeypatch, timed=())
+    out = share()
+    assert (out.status, len(calls)) == ("ok", 1)
+    assert out.detail == [
+        "9 passed, 2 deselected in 3.00s",
+        "timed alone: none in these files",
+        "slowest: 12.34s call     t.py::test_slow",
+    ]
+    _fake_pytest(monkeypatch, codes=(1, 0), timed=())
+    assert share().detail[-1] == "a test broke"
+    # It found one, or wrote no list: the timed run starts, and running nothing is the share's own answer.
+    for timed in (("t.py::test_timed",), None):
+        calls = _fake_pytest(monkeypatch, codes=(0, gate.NO_TESTS), timed=timed)
+        out = share()
+        assert (out.status, len(calls)) == ("ok", 2)
+        assert out.detail[:2] == ["9 passed, 2 deselected in 3.00s", "timed alone: none in these files"]
     _fake_pytest(monkeypatch, codes=(gate.NO_TESTS, 0))
-    out = gate.step_tests(gate.Ctx(root=tmp_path, lane="os", ci=False, base=None, pr=None, shard="9/12"))
-    assert out.status == "fail"
+    assert share().status == "fail"
 
 
 def test_each_step_gives_both_runs_one_templates_folder_and_the_timed_run_a_temp_folder(
@@ -988,7 +1010,7 @@ def test_under_coverage_the_timed_tests_stay_in_the_one_run(tmp_path: Path, monk
     [run] = calls
     # One run builds its own templates, as on main.
     assert gate.TEMPLATES_ENV not in envs[0]
-    assert marks(run) == "not nightly" and run[run.index("-n") + 1] == "auto"
+    assert "--leave-out=nightly" in run and "-m" not in run[3:] and run[run.index("-n") + 1] == "auto"
     assert "--cov" in run and any(a.startswith("--cov-report=json:") for a in run) and "--cov-append" not in run
     # Its one run is the lane's one share, so the shard plugin runs as it does in each of CI's covered shares.
     assert "--shard=1/1" in run and any(a.endswith("-1-of-1-tests.json") for a in run)

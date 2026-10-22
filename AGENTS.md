@@ -68,7 +68,7 @@ You need uv (it brings Python 3.12), git, gitleaks, Claude Code for the full gat
   secrets, the harness.
 - `uv run gate full` adds the tests with their coverage floors, the whole history's secrets and the plugin validated
   by Claude Code: the merge rule, in CI's shares (DR-0754). Windows and macOS run the types, the timed and smoke tests and
-  the test files `tools/devkit/test-systems.json` lists under system; every test file is named there (DR-0758).
+  the test files `tools/devkit/test-systems.json` lists under system; every test file is named there (DR-0758), each share importing only its own (DR-0783).
 - Coverage floors (`tools/devkit/coverage-floors.json`) rise when earned; only a decided decision lowers one (DR-0755).
 - A test that asserts an elapsed time carries `perf` and asserts a speed as the best of three runs; `gate os`, without
   coverage, runs them alone after the rest on vaults it built (DR-0430, DR-0492); `nightly` ones only on --all (DR-0757).
