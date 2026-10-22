@@ -80,6 +80,10 @@ def is_meeting(ref: str) -> bool:
     return ref.startswith("M-")
 
 
+def is_item(ref: str) -> bool:
+    return ref.startswith("A-")
+
+
 @dataclass(frozen=True)
 class DayState:
     page: str = "ledger"
@@ -186,7 +190,11 @@ class DayState:
         items = self.page in ("ledger", "queue")
         filtered = self.page in FILTERED
         panels = self.page in MEETING_PANELS
-        meeting = self.open is not None and (self.page == "meetings" or is_meeting(self.open))
+        # On Today an id may be a meeting's, as when two meetings share a number after a merge: only an A- number is
+        # surely an item's, whose panel takes no suggestions.
+        meeting = self.open is not None and (
+            self.page == "meetings" or is_meeting(self.open) or (self.page == "today" and not is_item(self.open))
+        )
         return replace(
             self,
             state=self.state if ledger else "open",

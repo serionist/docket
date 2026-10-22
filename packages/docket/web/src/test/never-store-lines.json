@@ -1,0 +1,54 @@
+[
+  {
+    "value": "Dora Example",
+    "line": "- 'Dora Example'"
+  },
+  {
+    "value": "Dora #2",
+    "line": "- 'Dora #2'"
+  },
+  {
+    "value": "Project: Phoenix",
+    "line": "- 'Project: Phoenix'"
+  },
+  {
+    "value": "O'Brien's 'shop'",
+    "line": "- 'O''Brien''s ''shop'''"
+  },
+  {
+    "value": "chat:family",
+    "line": "- 'chat:family'"
+  },
+  {
+    "value": "Árvíz Ödön",
+    "line": "- 'Árvíz Ödön'"
+  },
+  {
+    "value": "- not a list",
+    "line": "- '- not a list'"
+  },
+  {
+    "value": "@dora.secret",
+    "line": "- '@dora.secret'"
+  },
+  {
+    "value": "true",
+    "line": "- 'true'"
+  },
+  {
+    "value": "{a: b}",
+    "line": "- '{a: b}'"
+  },
+  {
+    "value": "say \"hi\" \\ back",
+    "line": "- 'say \"hi\" \\ back'"
+  },
+  {
+    "value": "100%",
+    "line": "- '100%'"
+  },
+  {
+    "value": "*star &anchor !tag",
+    "line": "- '*star &anchor !tag'"
+  }
+]

@@ -78,12 +78,15 @@ def install(app: FastAPI, service: Service) -> None:
         return frontend.document(request, status=404)
 
     async def unreadable(request: Request, error: Exception) -> Response:
-        # A body the app's routes can't read: where and why, never what it held, which can be a never-store value.
+        # A body the app's routes can't read: where and why, never what it held, which can be a never-store value,
+        # nor the name of a key the model doesn't have, which a body could have made of one.
         if not request.url.path.startswith(f"{webapi.PREFIX}/") or not isinstance(error, RequestValidationError):
             return await request_validation_exception_handler(request, error)  # pyright: ignore[reportArgumentType]
-        said = [
-            {"loc": list(e.get("loc", ())), "msg": e.get("msg", ""), "type": e.get("type", "")} for e in error.errors()
-        ]
+        said: list[dict[str, object]] = []
+        for e in error.errors():
+            loc = list(e.get("loc", ()))
+            kind = str(e.get("type", ""))
+            said.append({"loc": loc[:-1] if kind == "extra_forbidden" else loc, "msg": e.get("msg", ""), "type": kind})
         return JSONResponse({"detail": said}, status_code=422)
 
     app.add_exception_handler(HTTPException, not_found)

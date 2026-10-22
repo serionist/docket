@@ -56,6 +56,8 @@ def test_each_route_of_the_app_answers_its_document_with_a_nonce_and_the_csp_nam
         "/briefs",
         "/staging",
         "/curate",
+        "/sync",
+        "/settings",
     )
     first, second = client.get("/design?part=tokens"), client.get("/ledger?open=A-0012&q=Ada%27s+offer")
     nonces = []
@@ -107,13 +109,14 @@ def test_the_build_s_files_are_served_as_static_files_are_and_its_document_only_
     assert stranger.get("/static/app/licences.txt").status_code == 200
     assert client.get("/static/app/index.html").status_code == 404
     assert client.get("/static/app/nothing.js").status_code == 404
-    assert client.get("/static/icon.svg").status_code == 200, "the Jinja pages' files stay where they are"
+    assert client.get("/static/icon.svg").status_code == 200, "the icon stays where every page names it"
 
 
-def test_a_path_the_app_doesn_t_list_is_still_the_server_s_own(client: TestClient) -> None:
-    assert client.get("/design/more").status_code == 404
-    page = client.get("/sync")
-    assert page.status_code == 200 and '<div id="root">' not in page.text
+def test_a_path_the_app_doesn_t_list_is_its_document_with_404(client: TestClient) -> None:
+    missing = client.get("/design/more")
+    assert missing.status_code == 404 and '<div id="root"></div>' in missing.text
+    found = NONCE.search(missing.text)
+    assert found is not None and missing.headers["content-security-policy"] == frontend.csp(found.group(1))
 
 
 def test_the_build_lists_its_licences_routes_and_stamp(tmp_path: Path) -> None:

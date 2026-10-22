@@ -312,7 +312,12 @@ def test_each_machines_mark_entries_and_hand_over(client: TestClient, vault: Vau
     assert (retry["kind"], retry["why"], retry["leaves"]) == ("retry", "rate-limited", leaves)
     [waiting] = rows[0]["waiting"]
     since = (TODAY - timedelta(days=8)).isoformat()
-    assert (waiting["kind"], waiting["why"], waiting["since"], waiting["final_due"]) == ("waiting", "summary", since, True)
+    assert (waiting["kind"], waiting["why"], waiting["since"], waiting["final_due"]) == (
+        "waiting",
+        "summary",
+        since,
+        True,
+    )
     assert any("1 id due a final run" in n["line"] for n in found["needs"])
     failures = [f["what"] for f in found["failures"]]
     assert any("cursors-broken-box.yaml doesn't read" in f for f in failures)

@@ -1,7 +1,8 @@
 """What no /api/web read sends, whatever page or panel asks and with whatever selection a panel takes: a held record's
 body and title (DR-0380, DR-0382), the words of an utterance its recording's release cuts (DR-0383), a value a
 never-store list now holds where a page hides it (DR-0464, DR-0501), and the hash of a stoplist key that names one,
-which trying short names would find again (DR-0786).
+which trying short names would find again (DR-0786); and a hash of vault.yaml, which holds the lists' values, where
+the Settings page needs a token for it (DR-0790).
 
 A page's own test checks the fields it expects; this one reads the whole answer of every read the app has, so a field
 added later that carries what its page hides fails here. A read the app gains fails it too until it is walked below.
@@ -24,9 +25,11 @@ from starlette.testclient import TestClient
 from docket.curate import batch
 from docket.index import build as index_build
 from docket.vault import curatelog, holds, releaselog
+from docket.vault.config import CONFIG_FILE
 from docket.vault.cuts import Cut
 from docket.vault.gate import Gate
 from docket.vault.releaselog import LoggedCut, Release
+from docket.vault.settings import file_hash
 from docket.vault.vault import Vault
 from docket.web import curate as curate_routes
 from docket.web import webapi
@@ -134,12 +137,17 @@ def queries(root: Path) -> dict[str, list[str]]:
         "/api/web/meetings/panel": ["open=M-0001"],
         "/api/web/today": [""],
         "/api/web/today/panel": ["open=A-0001"],
+        "/api/web/sync": ["", "source=calls", "k=1", "run=run-20261015T000000-ffffffffffffffff"],
+        "/api/web/sync/runs": ["", "source=calls"],
+        "/api/web/settings": ["", "done=listed-keywords-1", "show=lists"],
     }
 
 
 # Raw keeps what it stored before a list held it, until the owner forgets it: Search and the Recording page show raw
 # as it stands, so a value listed since may be in their answers. Every other read hides it.
 SHOWS_STORED_RAW = frozenset({"/api/web/search", "/api/web/search/panel", "/api/web/recording"})
+# The Settings page shows the lists' values when its URL asks for them, so one can be taken off (DR-0789).
+SHOWS_LISTS = frozenset({("/api/web/settings", "show=lists")})
 
 
 def test_every_read_the_app_has_is_walked(root: Path) -> None:
@@ -149,7 +157,8 @@ def test_every_read_the_app_has_is_walked(root: Path) -> None:
 
 def test_no_read_sends_what_its_page_hides(client: TestClient, root: Path) -> None:
     hidden_id = curate_routes.key_id(HIDDEN_KEY)
-    secrets = ["quillmoss", "brambleton", hidden_id]
+    plain = file_hash((root / CONFIG_FILE).read_bytes())
+    secrets = ["quillmoss", "brambleton", hidden_id, plain]
     walked = 0
     for path, asked in queries(root).items():
         for query in asked:
@@ -162,10 +171,10 @@ def test_no_read_sends_what_its_page_hides(client: TestClient, root: Path) -> No
                 assert (shown["preview"], shown["problem"]) == (None, None), (path, query)
             for secret in secrets:
                 assert secret not in said, (path, query, secret)
-            if path not in SHOWS_STORED_RAW:
+            if path not in SHOWS_STORED_RAW and (path, query) not in SHOWS_LISTS:
                 assert LISTED.casefold() not in said, (path, query)
             walked += 1
-    assert walked >= 80
+    assert walked >= 90
     # The vault holds what the walk looks for: the held record, the released stretch and the hidden key.
     vault = Vault.open(root)
     assert HIDDEN_KEY in curatelog.fold(curatelog.read_all(vault.root).lines).stoplist
@@ -204,6 +213,8 @@ def test_the_walk_finds_what_it_looks_for_where_a_page_shows_it(client: TestClie
     key's own line on the Curate page, its words in the staged files."""
     pallets = client.get("/api/web/search?query=pallets").text
     assert LISTED in pallets
+    shown = client.get("/api/web/settings?show=lists").json()["lists"]
+    assert [v["value"] for n in shown if n["name"] == "keywords" for v in n["values"]] == [LISTED]
     lifts = client.get("/api/web/curate").json()["lifts"]
     assert [(lift["shown"], lift["liftable"], lift["id"]) for lift in lifts if not lift["liftable"]] == [
         ("new:-:(on a never-store list)", False, "")

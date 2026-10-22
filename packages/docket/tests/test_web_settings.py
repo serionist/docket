@@ -1,17 +1,17 @@
-"""The Settings page over HTTP, signed in (DR-0505, DR-0601, DR-0510 to DR-0512): each source, the never-store lists
-with their values only on request, redaction with the commands and warnings, this machine's models, every change a
-button, its command or its line, and nothing written."""
+"""The Settings page's read over HTTP, signed in (DR-0510, DR-0511, DR-0601, DR-0789): each source, the never-store
+lists with their values only on request, redaction with the commands and warnings, this machine's models, every
+change a button, its command or its line, nothing written, and nothing the page never showed."""
 
 from __future__ import annotations
 
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
 from docket_testkit import indexed, read_only, sh
-from docket_webkit import Element, a11y_problems, html_problems, parse
 from settings_kit import edit_config, settings_template, settings_vault
 from staging_kit import signed_in
 from starlette.testclient import TestClient
@@ -20,10 +20,13 @@ from docket import index, userconfig
 from docket.index import vectors
 from docket.index.build import vector_counts
 from docket.vault import redaction
-from docket.vault.config import NeverStore, Redaction, RedactionPattern, SourceConfig, VaultConfig
+from docket.vault.config import CONFIG_FILE, NeverStore, Redaction, RedactionPattern, SourceConfig, VaultConfig
+from docket.vault.settings import file_hash
 from docket.vault.vault import Vault
 from docket.web import settings_view
-from docket.web.templating import PAGE_CSP
+from docket.web.display import FAILED
+
+PAGE = "/api/web/settings"
 
 
 @pytest.fixture(scope="module")
@@ -55,89 +58,72 @@ def reader(seen: Vault) -> Iterator[TestClient]:
         yield found
 
 
-def page(client: TestClient, path: str = "/settings", status: int = 200) -> str:
-    answer = client.get(path)
+def read(client: TestClient, query: str = "", status: int = 200) -> dict[str, Any]:
+    answer = client.get(f"{PAGE}?{query}" if query else PAGE)
     assert answer.status_code == status, answer.text
-    assert answer.headers["Content-Security-Policy"] == PAGE_CSP
-    assert answer.headers["Cache-Control"] == "no-store"
-    assert answer.headers["Referrer-Policy"] == "same-origin"
-    assert not html_problems(answer.text), path
-    assert not a11y_problems(answer.text), path
-    return answer.text
+    found: dict[str, Any] = answer.json()
+    return found
 
 
-def card(html: str, card_id: str) -> str:
-    return parse(html).find("li", id=card_id).text()
+def source(found: dict[str, Any], name: str) -> dict[str, Any]:
+    return next(s for s in found["sources"] if s["name"] == name)
 
 
-def said(html: str) -> str:
-    """The page's main text as a reader gets it: entities read, white space folded."""
-    return parse(html).find("main").text()
-
-
-def raw(element: Element) -> str:
-    """An element's own text as written, line breaks kept: a pre's."""
-    return "".join(c for c in element.children if isinstance(c, str))
+def facts(entry: dict[str, Any]) -> dict[str, str]:
+    return {f["name"]: f["value"] for f in entry["facts"]}
 
 
 def test_the_page_names_each_source_with_its_settings_and_writes_nothing(reader: TestClient, seen: Vault) -> None:
-    before = (seen.root / "vault.yaml").read_bytes()
+    before = (seen.root / CONFIG_FILE).read_bytes()
     head = sh(seen.root, "git", "rev-parse", "HEAD")
-    html = page(reader)
-    lead = parse(html).find("p", class_="lead").text()
-    assert lead.startswith("4 sources, 4 on; 4 never-store values; credentials redacted, phone numbers not; models off")
-    calls = card(html, "source-calls")
-    assert "mixed" in calls
-    assert "list_calls, get_call" in calls
-    assert ".claude/skills/sources/calls/mapper.py" in calls
-    memo = card(html, "source-memo")
-    assert "work" in memo
-    assert "has no mapper in vault.yaml" in memo
-    documents = card(html, "source-documents")
-    assert "docs" in documents
-    assert "archive/*" in documents
-    assert "folder" in documents
-    # A read writes nothing; the page's forms make each change both ways (DR-0601).
-    forms = parse(html).find_all("form")
-    posted = sorted({(f.attrs["method"], f.attrs["action"]) for f in forms})
-    assert posted == [("post", "/settings/never-store"), ("post", "/settings/redaction"), ("post", "/settings/source")]
-    acts = sorted(i.attrs["value"] for f in forms for i in f.find_all("input", name="act"))
-    assert set(acts) <= {"work", "mixed", "private", "off", "on"}
-    assert (seen.root / "vault.yaml").read_bytes() == before
+    found = read(reader)
+    assert found["canonical"] == "/settings"
+    assert found["lead"].startswith(
+        "4 sources, 4 on; 4 never-store values; credentials redacted, phone numbers not; models off"
+    )
+    assert (found["machine"], found["primary"]) == ("test-box", "test-box")
+    calls = source(found, "calls")
+    assert (calls["sensitivity"], calls["enabled"], calls["folder"]) == ("mixed", True, False)
+    assert facts(calls)["Tools"] == "list_calls, get_call"
+    assert facts(calls)["Mapper"] == ".claude/skills/sources/calls/mapper.py"
+    memo = source(found, "memo")
+    assert memo["sensitivity"] == "work"
+    assert "has no mapper in vault.yaml" in memo["problem"]
+    documents = source(found, "documents")
+    assert (documents["folder"], facts(documents)["Folder"], facts(documents)["Exclude"]) == (True, "docs", "archive/*")
+    assert {c["act"] for s in found["sources"] for c in s["changes"]} <= {"work", "mixed", "private", "off", "on"}
+    assert (seen.root / CONFIG_FILE).read_bytes() == before
     assert sh(seen.root, "git", "rev-parse", "HEAD") == head
 
 
 def test_each_change_to_a_source_is_a_button_and_a_looser_one_says_so(reader: TestClient) -> None:
-    html = page(reader)
-    changes = parse(html).find("li", id="source-calls").find_all("li", class_="change")
-    buttons = [(c.find("input", name="act").attrs["value"], c.find("button").text()) for c in changes]
-    assert buttons == [
-        ("private", "Make it private… : calls"),
-        ("off", "Turn it off : calls"),
-        ("work", "Make it work : calls"),
+    found = read(reader)
+    changes = source(found, "calls")["changes"]
+    assert [(c["act"], c["what"], c["looser"]) for c in changes] == [
+        ("private", "Make it private", False),
+        ("off", "Turn it off", False),
+        ("work", "Make it work", True),
     ]
-    assert "looser" in changes[2].attrs["class"]
-    assert "lets more in" in changes[2].text()
-    documents = parse(html).find("li", id="source-documents")
+    assert changes[2]["effect"].startswith("lets more in")
     # A folder source is work only: it can only be turned off.
-    acts = [i.attrs["value"] for i in documents.find_all("input", name="act")]
-    assert acts == ["off"]
-    entry = raw(documents.find("pre", class_="entry"))
-    assert yaml.safe_load(f"sources:\n{entry}")["sources"]["documents"]["folder"] == "docs"
+    documents = source(found, "documents")
+    assert [c["act"] for c in documents["changes"]] == ["off"]
+    assert yaml.safe_load(f"sources:\n{documents['entry']}")["sources"]["documents"]["folder"] == "docs"
 
 
-def test_the_never_store_values_show_only_when_asked(reader: TestClient, seen: Vault) -> None:
-    hidden = page(reader)
+def test_the_never_store_values_show_only_when_asked(reader: TestClient) -> None:
+    hidden = reader.get(PAGE)
     for value in ("Cleo Test", "Dora #2", "chat:garden", "Project: Phoenix"):
-        assert value not in hidden
-    assert "2 values" in card(hidden, "list-people")
-    toggle = parse(hidden).find("a", class_="show-values")
-    assert (toggle.attrs["href"], toggle.text()) == ("/settings?show=lists", "Show the values")
-    shown = page(reader, "/settings?show=lists")
-    people = parse(shown).find("li", id="list-people")
-    values = [v.text() for v in people.find_all("span", class_="value")]
-    assert values == ["Cleo Test", "Dora #2"]
-    lines = [c.text() for c in parse(shown).find_all("code", class_="line")]
+        assert value not in hidden.text
+    lists = {n["name"]: n for n in hidden.json()["lists"]}
+    assert (lists["people"]["count"], lists["people"]["values"]) == (2, [])
+    assert lists["people"]["ask"] == "A name, as a mail, a chat or a recording writes it"
+    assert hidden.json()["shown"] is False
+    shown = read(reader, "show=lists")
+    assert (shown["canonical"], shown["shown"]) == ("/settings?show=lists", True)
+    people = next(n for n in shown["lists"] if n["name"] == "people")
+    assert [v["value"] for v in people["values"]] == ["Cleo Test", "Dora #2"]
+    lines = [v["line"] for n in shown["lists"] for v in n["values"]]
     # Each line pastes as one value: quoted where YAML would read it otherwise.
     assert [yaml.safe_load(line) for line in lines] == [
         ["Cleo Test"],
@@ -145,87 +131,98 @@ def test_the_never_store_values_show_only_when_asked(reader: TestClient, seen: V
         ["chat:garden"],
         ["Project: Phoenix"],
     ]
-    toggle = parse(shown).find("a", class_="show-values")
-    assert (toggle.attrs["href"], toggle.text()) == ("/settings", "Hide the values")
-    assert "committed in vault.yaml as you write it" in shown
+
+
+def test_the_read_sends_nothing_the_page_never_showed(reader: TestClient, seen: Vault) -> None:
+    """The lines a change makes and where they go, a list's example, a rule's command beside its button, and
+    vault.yaml's own hash: none of them was on the page, so none is in its JSON."""
+    found = read(reader, "show=lists")
+    assert all(set(c) == {"act", "what", "effect", "looser"} for s in found["sources"] for c in s["changes"])
+    assert all("example" not in n for n in found["lists"])
+    assert "Dora Example" not in str(found)
+    assert [r["name"] for r in found["rules"] if r["button"] and r["command"] is not None] == []
+    plain = file_hash((seen.root / CONFIG_FILE).read_bytes())
+    assert plain not in reader.get(f"{PAGE}?show=lists").text
+    assert len(found["token"]) == 64
+    # The token is the same for the same file, so a write from this read is checked against it.
+    assert read(reader)["token"] == found["token"]
 
 
 def test_redaction_names_each_rule_with_its_command_and_what_it_does(client: TestClient, vault: Vault) -> None:
-    html = page(client)
-    codes = [c.text() for c in parse(html).find_all("code", class_="paste-text")]
+    found = read(client)
+    rules = {r["name"]: r for r in found["rules"]}
     root = str(vault.root)
-    assert f'docket redaction set credentials off --vault "{root}"' in codes
+    assert rules["credentials"]["command"] == f'docket redaction set credentials off --vault "{root}"'
     # Each rule turns either way with a button, but credentials off, which stays a command for your own terminal.
-    rules = [i.attrs["value"] for i in parse(html).find_all("input", name="rule")]
-    assert rules == ["phone", "ticket-id"]
-    assert not any("set phone on" in c or '"ticket-id" off' in c for c in codes)
-    text = said(html)
-    assert redaction.CREDENTIALS_OFF in text
-    assert redaction.TURNED_ON in text
-    assert "Names are never redacted" in text
-    assert "TCK-\\d{6}" in text
+    assert [r["name"] for r in found["rules"] if r["button"]] == ["phone", "ticket-id"]
+    assert (rules["credentials"]["button"], rules["credentials"]["note"]) == (False, redaction.CREDENTIALS_OFF)
+    assert rules["phone"]["note"] == redaction.TURNED_ON
+    assert found["names"].startswith("Names are never redacted")
+    assert rules["ticket-id"]["what"] == r"TCK-\d{6}"
+    assert found["credentials_off"] is None
     twins = [RedactionPattern(name="cost$", pattern="x"), RedactionPattern(name="cost$", pattern="y")]
     edit_config(vault, redaction=Redaction(credentials=False, patterns=twins))
-    off = page(client)
-    assert "Credentials are not redacted: " + redaction.CREDENTIALS_OFF in said(off)
-    codes = [c.text() for c in parse(off).find_all("code", class_="paste-text")]
+    off = read(client)
+    assert off["credentials_off"] == redaction.CREDENTIALS_OFF
+    commands = [r["command"] for r in off["rules"] if r["command"]]
     # A name a shell would act on stays its placeholder, and is listed beside.
-    assert f'docket redaction set "<pattern>" off --vault "{root}"' in codes
-    assert "<pattern> is cost$" in said(off)
+    assert f'docket redaction set "<pattern>" off --vault "{root}"' in commands
+    assert {"name": "pattern", "value": "cost$"} in off["unfilled"]
 
 
 def test_a_hand_edited_vault_yaml_is_named_and_keeps_its_buttons(client: TestClient, vault: Vault) -> None:
-    path = vault.root / "vault.yaml"
+    path = vault.root / CONFIG_FILE
     mine = path.read_text(encoding="utf-8").replace("redaction:\n", "redaction:   # mine\n", 1)
     path.write_text(mine, encoding="utf-8", newline="\n")
-    html = page(client)
-    assert "each change below edits it in place and keeps them" in said(html)
-    assert parse(html).find_all("input", name="rule")
+    found = read(client)
+    assert "each change below edits it in place and keeps them" in found["form"]
+    assert [r for r in found["rules"] if r["button"]]
     assert path.read_text(encoding="utf-8") == mine
 
 
-def test_content_in_settings_renders_escaped(client: TestClient, vault: Vault) -> None:
+def test_content_in_settings_is_sent_as_text(client: TestClient, vault: Vault) -> None:
     edit_config(
         vault,
         never_store=NeverStore(people=["<script>alert(1)</script>"]),
         redaction=Redaction(patterns=[RedactionPattern(name="tag", pattern="<img src=x onerror=alert(1)>")]),
     )
-    html = page(client, "/settings?show=lists")
-    assert "<script>alert(1)</script>" not in html
-    assert "&lt;script&gt;" in html
-    assert "<img src=x" not in html
+    answer = client.get(f"{PAGE}?show=lists")
+    assert answer.headers["content-type"] == "application/json"
+    people = next(n for n in answer.json()["lists"] if n["name"] == "people")
+    assert people["values"][0]["value"] == "<script>alert(1)</script>"
 
 
 def test_this_machines_folder_and_models_come_from_its_config(reader: TestClient, seen: Vault) -> None:
     userconfig.set_section("folders", {str(seen.root): {"documents": str(seen.root.parent / "elsewhere")}})
-    html = page(reader)
-    assert str(seen.root.parent / "elsewhere") in card(html, "source-documents")
-    assert "off (docket models install turns them on)" in html
-    assert "docket models install --no-reranker" in html
-    assert "provider: none" in html
+    found = read(reader)
+    assert facts(source(found, "documents"))["Here"] == str(seen.root.parent / "elsewhere")
+    models = found["models"]
+    assert {"name": "Models", "value": "off (docket models install turns them on)"} in models["rows"]
+    assert "docket models install --no-reranker" in [c["text"] for c in models["commands"]]
+    assert models["off_line"] == "provider: none"
+    assert models["config_path"] == str(userconfig.config_path())
     userconfig.set_section("models", {"provider": "api", "embedder": "large"})
-    assert "names an embedder the api provider doesn't have (voyage-4), so models are off" in said(page(reader))
+    rows = str(read(reader)["models"]["rows"])
+    assert "names an embedder the api provider doesn't have (voyage-4), so models are off" in rows
     userconfig.set_section("folders", {str(seen.root): {"documents": "relative/path"}})
-    assert "must be an absolute folder" in page(reader)
+    assert "must be an absolute folder" in read(reader)["folders_problem"]
 
 
-def test_a_bad_show_and_a_vault_that_doesnt_load_are_the_page_s_own_errors(client: TestClient, vault: Vault) -> None:
-    html = page(client, "/settings?show=everything", status=400)
-    assert "show is lists" in html
-    (vault.root / "vault.yaml").write_text("owner: [\n", encoding="utf-8")
-    broken = page(client, status=400)
-    assert "not valid YAML" in broken
+def test_a_bad_show_and_a_vault_that_doesnt_load_are_refused_with_their_words(client: TestClient, vault: Vault) -> None:
+    assert "show is lists" in read(client, "show=everything", status=400)["error"]
+    assert read(client, "done=listed-people-1")["notice"].startswith("Added one value to people")
+    assert read(client, "done=listed-people-1")["canonical"] == "/settings"
+    (vault.root / CONFIG_FILE).write_text("owner: [\n", encoding="utf-8")
+    assert "not valid YAML" in read(client, status=400)["error"]
 
 
-def test_a_failure_answers_the_error_page_naming_no_value(reader: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_failure_answers_500_naming_no_value(reader: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def broken(*_args: object) -> object:
         raise RuntimeError("Dora #2")
 
     monkeypatch.setattr(settings_view, "build", broken)
-    answer = reader.get("/settings?show=lists")
-    assert answer.status_code == 500
-    assert "Something failed in Docket" in said(answer.text)
-    assert "Dora #2" not in answer.text
+    answer = reader.get(f"{PAGE}?show=lists")
+    assert (answer.status_code, answer.json()) == (500, {"error": FAILED})
 
 
 def test_the_vectors_are_counted_where_an_index_reads_and_left_out_where_none_does(
@@ -247,20 +244,14 @@ def test_the_vectors_are_counted_where_an_index_reads_and_left_out_where_none_do
 
 def test_a_vault_yaml_that_doesnt_parse_names_the_place_never_the_line(client: TestClient, vault: Vault) -> None:
     # A hand edit: a handle added as it is written in chat, which YAML refuses as a plain value.
-    path = vault.root / "vault.yaml"
+    path = vault.root / CONFIG_FILE
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
     at = next(i for i, line in enumerate(lines) if line.strip() == "- Cleo Test")
     indent = lines[at][: len(lines[at]) - len(lines[at].lstrip())]
     lines.insert(at + 1, f"{indent}- @dora.secret\n")
     path.write_text("".join(lines), encoding="utf-8", newline="\n")
     where = f"found character '@' that cannot start any token at line {at + 2}, column {len(indent) + 3}"
-    for route in ("/settings", "/settings?show=lists"):
-        answer = client.get(route)
-        assert answer.status_code == 400, route
-        assert "dora.secret" not in answer.text, route
-        assert where in said(answer.text), route
-    # The app's pages read the same vault.yaml through their JSON routes.
-    for route in ("/api/web/staging", "/api/web/curate"):
+    for route in (PAGE, f"{PAGE}?show=lists", "/api/web/staging", "/api/web/curate", "/api/web/sync"):
         answer = client.get(route)
         assert answer.status_code == 400, route
         assert "dora.secret" not in answer.text, route
@@ -270,15 +261,23 @@ def test_a_vault_yaml_that_doesnt_parse_names_the_place_never_the_line(client: T
 def test_an_edit_not_in_force_is_said_at_the_top_and_credentials_off_is_for_your_own_terminal(
     client: TestClient, vault: Vault
 ) -> None:
-    html = said(page(client))
-    assert "isn't in force until you commit it" not in html
-    assert "Turning credentials off is yours to confirm: run it in your own terminal" in html
+    assert read(client)["waiting"] is None
     edit_config(vault, never_store=NeverStore())
-    shown = said(page(client))
-    assert "vault.yaml has an edit that isn't in force until you commit it." in shown
-    assert "Cleo" not in shown
+    found = read(client)
+    assert found["waiting"] == "vault.yaml has an edit that isn't in force until you commit it."
+    assert "Cleo" not in str(found)
     # Said once, at the top: a source's own problem doesn't repeat it, and one added by hand waits for its commit.
-    assert shown.count("isn't in force until you commit it") == 1
-    sources = VaultConfig.load(vault.root / "vault.yaml").sources
+    assert str(found).count("isn't in force until you commit it") == 1
+    sources = VaultConfig.load(vault.root / CONFIG_FILE).sources
     edit_config(vault, sources={**sources, "diary": SourceConfig(sensitivity="private")})
-    assert "not in force until you commit vault.yaml" in card(page(client), "source-diary")
+    assert source(read(client), "diary")["problem"] == "not in force until you commit vault.yaml"
+
+
+def test_the_page_path_answers_the_apps_document_and_the_read_takes_the_session_only(client: TestClient) -> None:
+    for path in ("/settings", "/settings?show=lists"):
+        page = client.get(path)
+        assert page.status_code == 200
+        assert '<div id="root"></div>' in page.text
+    assert client.get(PAGE, headers={"Authorization": "Bearer x"}).status_code == 401
+    client.cookies.clear()
+    assert client.get(PAGE).status_code == 401
