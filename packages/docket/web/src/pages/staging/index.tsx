@@ -363,6 +363,7 @@ export function StagingPage() {
             refused={refused && !refused.moved ? refused.words : ""}
             onChange={setChoice}
             onSubmit={preview}
+            onCopy={copy}
           />
         ) : missing ? (
           <div className="p-4">

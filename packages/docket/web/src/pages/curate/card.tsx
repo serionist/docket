@@ -175,7 +175,7 @@ export function CardBody({
   return (
     <div className="grid gap-3 pb-4">
       <div className="grid gap-3 px-4 pt-3">
-        <dl className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-x-4 gap-y-1.5">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5">
           <div className="grid gap-0.5">
             <dt className="text-xs text-ink-muted">state</dt>
             <dd>

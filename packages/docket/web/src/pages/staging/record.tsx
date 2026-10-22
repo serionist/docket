@@ -6,6 +6,7 @@
  * cuts its file holds. Utterances its recording's release cuts show as gone, with no tick. A record a hold covers shows
  * only its rid and why.
  */
+import { CopyIcon } from "lucide-react";
 import * as React from "react";
 import { Note } from "@/components/doc";
 import { Refusal } from "@/components/shell/page";
@@ -49,7 +50,7 @@ function toggle(list: number[], n: number, on: boolean): number[] {
 
 function Facts({ pairs }: { pairs: { name: string; value: string }[] }) {
   return (
-    <dl className="grid grid-cols-[repeat(auto-fill,minmax(136px,1fr))] gap-x-4 gap-y-1.5">
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5">
       {pairs.map(({ name, value }) => (
         <div key={name} className="grid min-w-0 gap-0.5">
           <dt className="text-xs text-ink-muted">{name}</dt>
@@ -198,6 +199,7 @@ export function RecordBody({
   refused,
   onChange,
   onSubmit,
+  onCopy,
 }: {
   panel: StagingPanel;
   choice: Choice;
@@ -208,6 +210,7 @@ export function RecordBody({
   onChange: (choice: Choice) => void;
   /** Enter in the typed field: Preview. */
   onSubmit: () => void;
+  onCopy: (text: string) => void;
 }) {
   const fresh = !moved(panel, choice);
   const cuts = panel.cuts.length ? `; cuts ${panel.cuts.join(", ")}` : "";
@@ -225,6 +228,16 @@ export function RecordBody({
           <span className="text-xs text-ink-muted">state</span>
           <span className="text-sm">{`${panel.state}, classified by ${panel.by}${cuts}`}</span>
         </p>
+        <div className="grid gap-0.5">
+          <span className="text-xs text-ink-muted">rid</span>
+          <span className="flex items-center gap-1">
+            <code className="min-w-0 font-mono text-xs break-all">{panel.rid}</code>
+            <Button size="sm" variant="ghost" aria-label={`Copy ${panel.rid}`} onClick={() => onCopy(panel.rid)}>
+              <CopyIcon />
+              Copy
+            </Button>
+          </span>
+        </div>
         <p className="grid gap-0.5">
           <span className="text-xs text-ink-muted">key</span>
           <code className="font-mono text-xs break-all">{panel.key}</code>
