@@ -136,6 +136,12 @@ def test_a_value_the_url_can_t_hold_is_refused_in_its_words(client: TestClient) 
     assert zero.status_code == 400 and zero.json()["error"].startswith("u is a number from 1")
 
 
+def test_a_panel_read_with_no_record_open_holds_none(client: TestClient) -> None:
+    got = client.get(f"{API}/panel?source=calls")
+    assert got.status_code == 200
+    assert got.json() == {"canonical": "/staging?source=calls", "panel": None, "missing": None}
+
+
 def test_a_key_nothing_is_staged_under_says_so(client: TestClient) -> None:
     got = client.get(f"{API}/panel?open={'0' * 32}")
     assert got.status_code == 200
@@ -292,6 +298,7 @@ def test_a_selection_or_label_the_record_can_t_take_writes_nothing(client: TestC
         (body(panel, "private", u=["1"]), "cuts go with work"),
         (body(panel, u=["0"]), "u is a number from 1"),
         (body(panel) | {"key": "nope"}, "open is a staged record's key"),
+        (body(panel) | {"key": ""}, "the write names no record"),
     ]:
         assert said in classify(client, sent, status=400)["error"], sent
     assert staged(vault) == before

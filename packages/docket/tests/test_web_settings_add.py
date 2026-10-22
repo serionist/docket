@@ -308,6 +308,10 @@ def test_what_the_index_can_t_say_is_said_and_the_question_still_asked(
 
 def test_a_body_that_isn_t_a_form_is_refused(client: TestClient, vault: Vault) -> None:
     assert client.post(ADD, json={"list": "people", "value": NAME}, headers=SAME).status_code == 415
+    form = SAME | {"Content-Type": "application/x-www-form-urlencoded"}
+    big = client.post(ADD, content=b"value=" + b"x" * 70_000, headers=form)
+    assert (big.status_code, big.text) == (413, "a form post is at most 64 KB")
+    assert client.post(ADD, content=b"list=people&value=\xff", headers=form).status_code == 400
     assert commits(vault) == 0
 
 
