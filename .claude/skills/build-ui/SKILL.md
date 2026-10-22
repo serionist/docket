@@ -61,7 +61,7 @@ disagrees with one of them is wrong.
   dialog, in one place (`lib/session.ts`), never per page.
 - **The URL** is the page's state as a plain query string, encoded with the one `URL_SAFE` (`src/lib/search.ts`,
   `docket/web/urls.py`); the server's canonical string is written back with `router.history.replace`, never
-  `navigate({ href })` (DR-0704). Parameter names only gain optional ones, so Claude's links open the same state byte
+  `navigate({ href })` (DR-0792). Parameter names only gain optional ones, so Claude's links open the same state byte
   for byte.
 - **A cache a read adds** on the server is bounded and keyed by everything its answer depends on: the commit it read,
   never a HEAD read twice; the vault's folder; the bytes.

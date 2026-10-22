@@ -92,7 +92,7 @@ The service has no fault hook: route interception stands in (`faults` in `lib/pa
   and the plugin's skills give: `/queue`, `/search?query=...&hit=...`, `/recording?rid=...&at=...#at`,
   `/briefs?brief=brief:<subject>`), a link opened in a new tab, leaving a field, panel or dialog with unsaved text, a
   tab open across an upgrade of the build.
-- **Passes:** the page's state is in its URL, written back byte for byte as the server's canonical string (DR-0704); a
+- **Passes:** the page's state is in its URL, written back byte for byte as the server's canonical string (DR-0792); a
   refresh lands on the same thing; a link with `#at` lands on its line; unsaved text asks once before it is dropped
   (the router's blocker, `beforeunload`); a page loaded after the build changed loads whole, never a new chunk on the
   old app (DR-0784).
@@ -115,7 +115,7 @@ Docket has one owner. The personas are the owner, signed in through a one-time l
 - **Exercise:** each page as the owner; each page path as a stranger; the session lapsing mid-page (the cookie
   cleared, or the service restarted); a used or stale sign-in link.
 - **Passes:** a stranger gets the 401 sign-in page naming `docket open` for that page, and neither the vault nor the
-  machine (DR-0704); a lapsed session shows the shell's dialog naming `docket open`, keeps everything typed, and Retry
+  machine (DR-0792); a lapsed session shows the shell's dialog naming `docket open`, keeps everything typed, and Retry
   asks again; no page offers to release a held recording, forget, or turn credentials redaction off: each names its
   command for the owner's console (DR-0382, DR-0577, DR-0601).
 - **Not exercised:** rarely blocked.
