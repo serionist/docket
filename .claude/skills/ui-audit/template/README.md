@@ -102,7 +102,9 @@ flags. In a journey, `faults` from `part.journey()`:
 | `faults.clear()` | all off; done for you at the journey's end |
 
 TanStack Query asks a failed read again three times, about 7 s, before the page shows the failure: wait it out
-before the shot.
+before the shot. A touch cell opens the page afresh in a context of its own, with the same faults put on it (`prepare`), so it
+shows that retry window, not the failure: shoot a failure state `canonical`, and its phone cell in a part that opens
+the page in a touch context and waits.
 
 ## Shots
 

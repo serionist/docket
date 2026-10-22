@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import sys
 import threading
 import time
@@ -98,6 +99,8 @@ def serve(world: str, record: Path, *, link: str | None, stdin: bool, minutes: f
 
 
 def main(argv: Sequence[str]) -> int:
+    # A stop by signal unwinds like any other, so devkit ui's service stops `docket serve` and removes its folders.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     if argv[:1] == ["link"]:
         if len(argv) != 3:
             raise SystemExit("usage: serve.py link <record> <page>")

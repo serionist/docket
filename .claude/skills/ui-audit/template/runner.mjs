@@ -57,7 +57,7 @@ async function startService(world) {
   mkdirSync(STATE, { recursive: true });
   const log = openSync(join(E2E, 'service.log'), 'a');
   const child = spawn('uv', ['run', 'python', join(E2E, 'serve.py'), world, '--record', RECORD, '--stdin'], {
-    cwd: findRepoRoot(E2E), stdio: ['pipe', log, log], shell: false, windowsHide: true,
+    cwd: findRepoRoot(E2E), stdio: ['pipe', log, log], shell: false, windowsHide: true, detached: process.platform !== 'win32',
   });
   let exited = null;
   const gone = new Promise((r) => child.on('exit', (code) => r((exited = code ?? 1))));

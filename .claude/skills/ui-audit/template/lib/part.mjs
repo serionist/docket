@@ -49,21 +49,26 @@ function tierOpts(tier, add = []) {
 // Route interception stands in for a fault hook, which the service doesn't have: a read failing, a slow network, the
 // service gone, a lapsed session. Each is named in the flags of every capture taken while it is on.
 function faultsFor(page, context, active) {
+  const routes = []; // [url, handler]: each fault's route, so a touch cell's fresh page gets it as well (prepare)
+  const route = async (url, handler) => {
+    routes.push([url, handler]);
+    await page.route(url, handler);
+  };
   return {
     async fail(url, status = 500, body = '{"error":"failed on purpose by the audit"}') {
       active.add(`fail ${status} ${url}`);
-      await page.route(url, (r) => r.fulfill({ status, contentType: 'application/json', body }));
+      await route(url, (r) => r.fulfill({ status, contentType: 'application/json', body }));
     },
     async slow(url = '**/api/web/**', ms = 2000) {
       active.add(`slow ${ms} ms ${url}`);
-      await page.route(url, async (r) => {
+      await route(url, async (r) => {
         await sleep(ms);
         await r.continue().catch(() => {});
       });
     },
     async down(url = '**/api/**') {
       active.add(`down ${url}`);
-      await page.route(url, (r) => r.abort('connectionrefused'));
+      await route(url, (r) => r.abort('connectionrefused'));
     },
     async lapse() {
       active.add('session lapsed');
@@ -71,7 +76,11 @@ function faultsFor(page, context, active) {
     },
     async clear() {
       active.clear();
+      routes.length = 0;
       await page.unrouteAll({ behavior: 'ignoreErrors' });
+    },
+    async prepare(other) {
+      for (const [url, handler] of routes) await other.route(url, handler);
     },
   };
 }
@@ -104,7 +113,8 @@ export async function openPart(name, { persona = 'owner', world } = {}) {
       const vps = o.viewports ? { viewports: o.viewports.map(viewport) } : {};
       const flags = active.size ? { faults: [...active], ...(o.flags ?? {}) } : o.flags;
       return capture(c.page, id, state, {
-        ...tierOpts(o.tier ?? 'canonical', add), ...o, ...vps, flags, config: cfg, cdp: c.cdp, manifest, part: name, recorder: c.recorder,
+        ...tierOpts(o.tier ?? 'canonical', add), ...o, ...vps, flags, prepare: faults.prepare, config: cfg, cdp: c.cdp, manifest, part: name,
+        recorder: c.recorder,
       });
     };
     const battery = (form, o = {}) =>

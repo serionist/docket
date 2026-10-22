@@ -457,6 +457,9 @@ export async function capture(page, journey, state, opts = {}) {
         env = await newEmulatedContext(page.context().browser(), page.context(), config, vpObj);
         p = env.page;
         c = env.cdp;
+        // The part's faults are routes on its own page: put them on this one too, or a phone cell shot "under a
+        // fault" would show the healthy page.
+        if (opts.prepare) await opts.prepare(p);
         await p.goto(page.url(), { waitUntil: 'domcontentloaded' });
         if (!opts.noThemeForce) await forceSystemTheme(p, config);
       }
