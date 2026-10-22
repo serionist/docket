@@ -294,10 +294,13 @@ def test_a_line_past_the_cap_stops_the_pull(tmp_path: Path, monkeypatch: pytest.
         list(pull.child(script, {"contract": 1}))
 
 
-def test_a_transcript_waiting_is_written_a_segment_a_line_with_the_times_a_cut_takes() -> None:
+def test_a_transcript_waiting_is_written_a_segment_a_line_with_the_times_a_cut_takes(tmp_path: Path) -> None:
     record = make_record(rid="memo:m1/transcript", source="memo", kind="transcript", container="memo:m1",
                          segments=lines([("Ben Sample", "the dates"), ("", "a  pause")]))  # fmt: skip
-    assert pull._segments(record) == [  # pyright: ignore[reportPrivateUsage]
+    made = pull.waiting(tmp_path, "memo:m1", [record])
+    assert (made.rid, made.records, made.files) == ("memo:m1", ["memo:m1/transcript"], [tmp_path / "m1.transcript.md"])
+    assert made.files[0].read_text(encoding="utf-8").splitlines() == [
+        "waits to be classified: memo:m1, its transcript",
         "== memo:m1/transcript | transcript | a segment a line; a cut is the times at its start, mm:ss-mm:ss",
         "@00:00-00:19 Ben Sample: the dates",
         "@00:20-00:39 a pause",

@@ -315,20 +315,22 @@ def _waiting(vault: Vault, path: Path, source: str) -> list[Waiting]:
         record = entry.staged.record
         groups.setdefault(record.container or record.rid, []).append(record)
     where = path / folder.RECORDINGS / source / PENDING
-    out: list[Waiting] = []
-    for rid, records in sorted(groups.items()):
-        k = recordings.key(rid)
-        said = [r for r in records if not segments(r)]
-        spoken = [r for r in records if segments(r)]
-        files: list[Path] = []
-        if said:
-            lines = [line for r in said for line in _paragraphs(r)]
-            files += slices.write(where, f"{k}.notes", f"waits to be classified: {rid}, its notes", lines)
-        if spoken:
-            lines = [line for r in spoken for line in _segments(r)]
-            files += slices.write(where, f"{k}.transcript", f"waits to be classified: {rid}, its transcript", lines)
-        out.append(Waiting(rid, sorted(r.rid for r in records), files))
-    return out
+    return [waiting(where, rid, records) for rid, records in sorted(groups.items())]
+
+
+def waiting(where: Path, rid: str, records: Sequence[RawRecord]) -> Waiting:
+    """A recording's files to classify from: its notes, a paragraph a line, then its transcript, a segment a line."""
+    k = recordings.key(rid)
+    said = [r for r in records if not segments(r)]
+    spoken = [r for r in records if segments(r)]
+    files: list[Path] = []
+    if said:
+        lines = [line for r in said for line in _paragraphs(r)]
+        files += slices.write(where, f"{k}.notes", f"waits to be classified: {rid}, its notes", lines)
+    if spoken:
+        lines = [line for r in spoken for line in _segments(r)]
+        files += slices.write(where, f"{k}.transcript", f"waits to be classified: {rid}, its transcript", lines)
+    return Waiting(rid, sorted(r.rid for r in records), files)
 
 
 def _paragraphs(record: RawRecord) -> list[str]:
