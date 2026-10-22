@@ -56,7 +56,8 @@ def key_id(key: str) -> str:
 
 
 class Lift(BaseModel):
-    # The key as the page shows it, a never-store value hidden; its hash, which a lift names; and whether it lifts.
+    # The key as the page shows it, a never-store value hidden; whether it lifts; and the hash a lift names it by, only
+    # when it lifts: a short name's hash can be found again by trying names (DR-0464).
     shown: str
     id: str
     liftable: bool
@@ -130,14 +131,13 @@ class Done(BaseModel):
 
 def lifts(facts: Facts) -> list[Lift]:
     # No Lift on a hidden key: its line would commit the value again, and the store refuses it (DR-0464).
-    return [
-        Lift(
-            shown=curate_view.stop_key(k, facts.lists),
-            id=key_id(k),
-            liftable=not curate_view.hidden(k, facts.lists),
+    out: list[Lift] = []
+    for k in sorted(facts.stoplist):
+        liftable = not curate_view.hidden(k, facts.lists)
+        out.append(
+            Lift(shown=curate_view.stop_key(k, facts.lists), id=key_id(k) if liftable else "", liftable=liftable)
         )
-        for k in sorted(facts.stoplist)
-    ]
+    return out
 
 
 def router(service: Service) -> APIRouter:

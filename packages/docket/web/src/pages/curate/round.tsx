@@ -329,10 +329,11 @@ export function Stoplist({
             What curation won't offer again in that role. Lift a key to have it offered again.
           </p>
           <ul>
-            {lifts.map((key) => (
+            {lifts.map((key, at) => (
               <li
-                key={key.id}
-                data-stop={key.id}
+                // A hidden key comes with no id, and two hidden keys may show alike: the list's order tells them apart.
+                key={`${at}-${key.id}`}
+                data-stop={key.id || undefined}
                 className="flex min-h-9 items-center gap-3 border-b border-rule px-3 py-1 text-sm sm:px-4"
               >
                 <code dir="auto" className="min-w-0 font-mono text-xs break-all">

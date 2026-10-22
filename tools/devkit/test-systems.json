@@ -242,6 +242,7 @@
     "packages/docket/tests/test_web_meetings.py",
     "packages/docket/tests/test_web_panel.py",
     "packages/docket/tests/test_web_queue.py",
+    "packages/docket/tests/test_web_reads_hide.py",
     "packages/docket/tests/test_web_recording.py",
     "packages/docket/tests/test_web_search.py",
     "packages/docket/tests/test_web_settings.py",

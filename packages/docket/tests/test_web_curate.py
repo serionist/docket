@@ -371,6 +371,8 @@ def test_never_store_values_never_show(client: TestClient, vault: Vault) -> None
     assert "new:-:northwind" in shown and HIDDEN in shown
     # No Lift and no Undo on the hidden key: their lines would commit it again, and the store refuses both.
     assert [lift["liftable"] for lift in got["lifts"]] == [True, False]
+    # A short name's hash can be found again by trying names: a hidden key's is never sent.
+    assert got["lifts"][1]["id"] == "" and curate_routes.key_id("new:-:nortwin") not in json.dumps(got)
     reject = next(ln for ln in log(vault) if ln.key == "new:-:nortwin")
     assert not next(line for line in got["view"]["log"] if line["id"] == reject.id)["undo"]
     lift = post(client, LIFT, {"key": curate_routes.key_id("new:-:nortwin")}, status=400)

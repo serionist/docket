@@ -1,0 +1,177 @@
+"""What no /api/web read sends, whatever page or panel asks and with whatever selection a panel takes: a held record's
+body and title (DR-0380, DR-0382), the words of an utterance its recording's release cuts (DR-0383), a value a
+never-store list now holds where a page hides it (DR-0464, DR-0501), and the hash of a stoplist key that names one,
+which trying short names would find again (DR-0786).
+
+A page's own test checks the fields it expects; this one reads the whole answer of every read the app has, so a field
+added later that carries what its page hides fails here. A read the app gains fails it too until it is walked below.
+One vault holds all four, built once and shared read-only (DR-0779). Invented people and words only.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+from curate_kit import fill_curate
+from docket_testkit import configure, make_config, read_only, shared
+from docket_webkit import serving
+from staging_kit import TALK, mail, transcript
+from starlette.testclient import TestClient
+
+from docket.curate import batch
+from docket.index import build as index_build
+from docket.vault import curatelog, holds, releaselog
+from docket.vault.cuts import Cut
+from docket.vault.gate import Gate
+from docket.vault.releaselog import LoggedCut, Release
+from docket.vault.vault import Vault
+from docket.web import curate as curate_routes
+from docket.web import webapi
+
+# A held recording's title and words, an utterance a release cuts, and a value a never-store list holds.
+HELD_TITLE = "Quillmoss briefing"
+HELD_WORDS = "the Quillmoss quarry deal closes"
+RELEASED_WORDS = "Brambleton orchard pays twice"
+LISTED = "Nortwin"
+HIDDEN_KEY = "new:-:nortwin"
+HELD_RID = "calls:rec-held/transcript"
+RELEASED_RID = "calls:rec-rel/transcript"
+# Each panel's selections, as its URL takes them.
+CHOSEN = (
+    "",
+    "u=1",
+    "u=2",
+    "u=3",
+    "u=99",
+    "line=1",
+    "line=2",
+    "cut=0-5",
+    "cut=0:00-0:20",
+    "picked=1",
+    "confirm=private",
+)
+
+
+def build(folder: Path) -> Path:
+    """curate_kit's recordings and notes with a round started and its Northwind card rejected; staged, a held call
+    that Claude cut before its hold, a call whose release cuts its second utterance, and a mail; then Nortwin listed,
+    so the round's card and its stoplist key hide it, and the index built over all of it."""
+    vault = Vault.init(folder / "vault", make_config(), "test-box")
+    fill_curate(vault)
+    gate = Gate(vault)
+    said = [*TALK[:1], {**TALK[1], "text": HELD_WORDS}, *TALK[2:3]]
+    released = [*TALK[:1], {**TALK[1], "text": RELEASED_WORDS}, *TALK[2:3]]
+    gate.stage([
+        transcript("rec-held", title=HELD_TITLE, segments=said),
+        transcript("rec-rel", title="Orchard call", segments=released),
+        mail(),
+    ])  # fmt: skip
+    keys = {e.staged.record.rid: e.key for e in gate.list().entries}
+    gate.classify(keys[HELD_RID], "work", [Cut(start=12_000, end=30_400, unit="ms")], by="claude")
+    holds.add(vault, "calls", ["rec-held"])
+    cut = LoggedCut(start=TALK[1]["start_ms"], end=TALK[1]["end_ms"])
+    when = "2026-10-14T09:00:00Z"
+    releaselog.add(
+        vault,
+        "calls",
+        Release.model_validate({"id": "rec-rel", "cuts": [cut], "keep": [], "at": when, "machine": "test-box"}),
+    )
+    found = batch.start(vault)
+    northwind = next(c for c in found.cards if c.name == "Northwind")
+    batch.reject(vault, found, [northwind])
+    configure(vault.root, keywords=[LISTED])
+    index_build.rebuild(vault)
+    return vault.root
+
+
+@pytest.fixture(scope="module")
+def root(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return read_only(shared(build, "web-reads-hide", tmp_path_factory))
+
+
+@pytest.fixture(scope="module")
+def client(root: Path) -> Iterator[TestClient]:
+    with serving(root) as found:
+        yield found
+
+
+def queries(root: Path) -> dict[str, list[str]]:
+    """Each read the app has, with the query strings it is walked with: every record and card open, with each
+    selection a panel takes."""
+    vault = Vault.open(root)
+    staged = [e.key for e in Gate(vault).list().entries]
+    round_ = batch.load(vault)
+    assert round_ is not None
+    cards = [c.id for c in round_.cards]
+    rids = (HELD_RID, RELEASED_RID, "calls:rec-held", "calls:rec-rel", "plaud:rec-0000")
+    return {
+        "/api/web/shell": [""],
+        "/api/web/staging": ["", "source=calls", "state=pending", "state=ready", "k=1000"],
+        "/api/web/staging/panel": [f"open={key}&{chosen}".rstrip("&") for key in staged for chosen in CHOSEN],
+        "/api/web/curate": ["", "done=lifted-1"],
+        "/api/web/curate/panel": [f"{how}={card}" for card in cards for how in ("open", "edit")],
+        "/api/web/briefs": ["", "type=person", "brief=brief:northwind"],
+        # A search echoes its query: it asks for the held and released records by their other words.
+        "/api/web/search": ["query=quarry", "query=orchard", "query=briefing", "query=twice", "query=pallets"],
+        "/api/web/search/panel": [f"hit=r:{rid}@00:00" for rid in rids],
+        "/api/web/recording": [f"rid={rid}" for rid in rids],
+        "/api/web/ledger": [""],
+        "/api/web/ledger/panel": ["open=A-0001"],
+        "/api/web/ledger/changed": ["page=ledger", "page=today"],
+        "/api/web/ledger/text": ["open=A-0001&text=notes/plan.md"],
+        "/api/web/ledger/who": [""],
+        "/api/web/queue": [""],
+        "/api/web/queue/panel": ["open=A-0001"],
+        "/api/web/meetings": [""],
+        "/api/web/meetings/panel": ["open=M-0001"],
+        "/api/web/today": [""],
+        "/api/web/today/panel": ["open=A-0001"],
+    }
+
+
+# Raw keeps what it stored before a list held it, until the owner forgets it: Search and the Recording page show raw
+# as it stands, so a value listed since may be in their answers. Every other read hides it.
+SHOWS_STORED_RAW = frozenset({"/api/web/search", "/api/web/search/panel", "/api/web/recording"})
+
+
+def test_every_read_the_app_has_is_walked(root: Path) -> None:
+    reads = {path for path, ops in webapi.openapi()["paths"].items() if "get" in ops}
+    assert reads == set(queries(root))
+
+
+def test_no_read_sends_what_its_page_hides(client: TestClient, root: Path) -> None:
+    hidden_id = curate_routes.key_id(HIDDEN_KEY)
+    secrets = ["quillmoss", "brambleton", hidden_id]
+    walked = 0
+    for path, asked in queries(root).items():
+        for query in asked:
+            got = client.get(f"{path}?{query}" if query else path)
+            assert got.status_code in (200, 400), (path, query, got.status_code)
+            said = got.text.casefold()
+            for secret in secrets:
+                assert secret not in said, (path, query, secret)
+            if path not in SHOWS_STORED_RAW:
+                assert LISTED.casefold() not in said, (path, query)
+            walked += 1
+    assert walked >= 80
+    # The vault holds what the walk looks for: the held record, the released stretch and the hidden key.
+    vault = Vault.open(root)
+    assert HIDDEN_KEY in curatelog.fold(curatelog.read_all(vault.root).lines).stoplist
+    assert {e.staged.record.rid for e in Gate(vault).list().entries} >= {HELD_RID, RELEASED_RID}
+
+
+def test_the_walk_finds_what_it_looks_for_where_a_page_shows_it(client: TestClient, root: Path) -> None:
+    """The secrets are where the reads could reach them: the stored raw that a listed value stays in, the stoplist
+    key's own line on the Curate page, its words in the staged files."""
+    pallets = client.get("/api/web/search?query=pallets").text
+    assert LISTED in pallets
+    lifts = client.get("/api/web/curate").json()["lifts"]
+    assert [(lift["shown"], lift["liftable"], lift["id"]) for lift in lifts if not lift["liftable"]] == [
+        ("new:-:(on a never-store list)", False, "")
+    ]
+    staged = "".join(p.read_text(encoding="utf-8") for p in (root / "staging").glob("*/*.json"))
+    assert "Quillmoss" in staged and "Brambleton" in staged
+    assert json.loads(client.get("/api/web/shell").text)["staging"] == 3

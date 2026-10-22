@@ -289,6 +289,33 @@ def test_a_record_on_hold_shows_neither_its_title_nor_its_text() -> None:
     assert not panel.can_work
 
 
+@pytest.mark.parametrize("chosen", ["u=2", "u=99", "line=1", "cut=0-12", "cut=0:10-0:20", "picked=1"])
+@pytest.mark.parametrize("record", [transcript(), mail()], ids=["transcript", "mail"])
+def test_a_selection_on_a_record_on_hold_works_out_nothing_from_its_body(chosen: str, record: RawRecord) -> None:
+    """Neither a preview nor a selection's problem: each would carry the body or its shape (DR-0380, DR-0382)."""
+    panel = build_panel(shown(record, "on-hold"), CREDENTIALS, state(f"open={OPENED}&{chosen}"))
+    assert (panel.preview, panel.problem, panel.typed, panel.notes) == (None, None, "", [])
+    said = str(panel.model_dump())
+    for words in (
+        "weekend",
+        "Morning",
+        "offer",
+        "10 million",
+        "Hello Ben",
+        "names utterance",
+        "this text has",
+        "Removes",
+    ):
+        assert words not in said, (chosen, words)
+
+
+def test_a_record_on_hold_with_stored_cuts_works_out_nothing_from_its_body() -> None:
+    cuts = [Cut(start=0, end=10, unit="char")]
+    panel = build_panel(shown(mail(), "on-hold", state="ready", cuts=cuts), CREDENTIALS, state(f"open={OPENED}"))
+    assert (panel.preview, panel.problem, panel.typed, panel.work_label) == (None, None, "", "Work, whole")
+    assert "offer" not in str(panel.model_dump()) and "Hello" not in str(panel.model_dump())
+
+
 # -- the list --------------------------------------------------------------------------------------------------------
 
 

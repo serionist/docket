@@ -640,10 +640,11 @@ def missing(state: StagingState) -> Missing:
 
 
 def build_panel(shown: Shown, redactor: Redactor, state: StagingState, tz: ZoneInfo = UTC_ZONE) -> StagingPanel:
+    if shown.why == "on-hold":
+        return _held_panel(shown, state, tz)
     staged = shown.entry.staged
     record = staged.record
     key = shown.entry.key
-    held = shown.why == "on-hold"
     reading = read_record(record, redactor)
     view = reading.view
     if staged.cuts and not state.selected() and not state.picked:
@@ -653,12 +654,12 @@ def build_panel(shown: Shown, redactor: Redactor, state: StagingState, tz: ZoneI
     said = segments(record)
     released = {id(s) for c in shown.release_cuts for s in cutting.removes(said, c)}
     notes: list[str] = []
-    if reading.changed and not held:
+    if reading.changed:
         notes.append(
             "The redaction rules changed since this was staged: it shows as promotion will write it, and the staged "
             "file keeps what it had until then."
         )
-    if released and not held:
+    if released:
         n = len(released)
         notes.append(
             f"Its recording's release cuts {n} utterance{_s(n)}, marked below: they go whatever is checked, as you "
@@ -694,7 +695,7 @@ def build_panel(shown: Shown, redactor: Redactor, state: StagingState, tz: ZoneI
             )
             for n, (s, v) in enumerate(zip(said, view_said, strict=True), start=1)
         ]
-        if said and not held
+        if said
         else None
     )
     checked_lines = set(numbers(state.line))
@@ -703,17 +704,17 @@ def build_panel(shown: Shown, redactor: Redactor, state: StagingState, tz: ZoneI
             TextLine(n=n, offset=span[0], text=text, checked=n in checked_lines)
             for n, (span, text) in enumerate(zip(reading.spans, reading.lines, strict=True), start=1)
         ]
-        if not said and reading.lines is not None and not held
+        if not said and reading.lines is not None
         else None
     )
-    if not said and reading.lines is None and not held:
+    if not said and reading.lines is None:
         notes.append(_JOINED[0].upper() + _JOINED[1:] + ".")
     n = len(chosen) if problem is None else 0
     return StagingPanel(
         key=key,
         rid=record.rid,
         kind=record.kind,
-        title="" if held else " ".join((view.title or "").split()),
+        title=" ".join((view.title or "").split()),
         source=record.source,
         when=at(record.ts, tz),
         staged_at=at(staged.staged_at, tz),
@@ -721,22 +722,61 @@ def build_panel(shown: Shown, redactor: Redactor, state: StagingState, tz: ZoneI
         by={"user": "you", "claude": "Claude"}.get(staged.classified_by or "", "nobody yet"),
         cuts=[_cut_text(c) for c in staged.cuts],
         why_line=why_line(shown.why, staged),
-        on_hold=held,
+        on_hold=False,
         utterances=utterances,
         lines=lines,
-        text="" if held or said else view.text,
-        facts=[] if held else [Fact(name=n, value=v) for n, v in _facts(view)],
-        native="" if held or not view.native else json.dumps(view.native, indent=2, ensure_ascii=False, default=str),
+        text="" if said else view.text,
+        facts=[Fact(name=n, value=v) for n, v in _facts(view)],
+        native="" if not view.native else json.dumps(view.native, indent=2, ensure_ascii=False, default=str),
         cut_before=None
-        if held or shown.cut_before is None
+        if shown.cut_before is None
         else CutBefore(run=shown.cut_before.run, text=shown.cut_before.text),
         notes=notes,
         problem=problem,
         preview=preview,
         typed=", ".join(state.cut),
         work_label=f"Work, with {n} cut{_s(n)}" if n else "Work, whole",
-        can_work=not held and problem is None,
-        confirm=state.confirm and not held,
+        can_work=problem is None,
+        confirm=state.confirm,
+        seen=seen(staged),
+        close=state.listing().url(),
+        confirm_url=replace(state.opened(key), confirm=True).url(),
+        back=state.opened(key).url(),
+    )
+
+
+def _held_panel(shown: Shown, state: StagingState, tz: ZoneInfo) -> StagingPanel:
+    """A record a hold covers: its key, rid, kind and times, and why it waits, and nothing worked out from its body, not
+    a selection's cuts, their preview or the problem a selection has with it (DR-0380, DR-0382)."""
+    staged = shown.entry.staged
+    record = staged.record
+    key = shown.entry.key
+    return StagingPanel(
+        key=key,
+        rid=record.rid,
+        kind=record.kind,
+        title="",
+        source=record.source,
+        when=at(record.ts, tz),
+        staged_at=at(staged.staged_at, tz),
+        state=staged.state,
+        by={"user": "you", "claude": "Claude"}.get(staged.classified_by or "", "nobody yet"),
+        cuts=[_cut_text(c) for c in staged.cuts],
+        why_line=why_line(shown.why, staged),
+        on_hold=True,
+        utterances=None,
+        lines=None,
+        text="",
+        facts=[],
+        native="",
+        cut_before=None,
+        notes=[],
+        problem=None,
+        preview=None,
+        typed="",
+        work_label="Work, whole",
+        can_work=False,
+        confirm=False,
         seen=seen(staged),
         close=state.listing().url(),
         confirm_url=replace(state.opened(key), confirm=True).url(),
