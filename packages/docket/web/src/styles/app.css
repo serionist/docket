@@ -168,3 +168,99 @@
     min-width: 44px;
   }
 }
+
+/*
+ * The pages the service writes itself, with no script (DR-0793): the sign-in and used-link pages and the page a
+ * failure answers. Plain rules on the tokens, so they look like the app before and without its script; Tailwind
+ * scans only the sources, so none of its classes would reach them.
+ */
+@layer components {
+  .bare {
+    min-height: 100dvh;
+  }
+
+  .bare .skip {
+    position: absolute;
+    left: -10000px;
+  }
+
+  .bare .skip:focus {
+    left: 8px;
+    top: 8px;
+    padding: 8px 12px;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    background: var(--sheet);
+    font-weight: 600;
+  }
+
+  .bare-head {
+    display: flex;
+    align-items: center;
+    min-height: 48px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--paper);
+  }
+
+  .bare-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .bare-mark {
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    background: var(--green);
+    color: var(--on-green);
+    font-size: 12px;
+  }
+
+  .bare-main {
+    display: grid;
+    gap: 12px;
+    max-width: 40rem;
+    padding: 48px 16px;
+    font-size: 16px;
+    line-height: 24px;
+  }
+
+  .bare-main h1 {
+    font-size: 21px;
+    line-height: 28px;
+    font-weight: 600;
+  }
+
+  .bare-command {
+    margin: 0;
+    padding: 8px 12px;
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--green);
+    border-radius: 0 4px 4px 0;
+    background: var(--sheet);
+    font-family: "Atkinson Hyperlegible Mono Variable", ui-monospace, monospace;
+    font-size: 14px;
+    line-height: 20px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: all;
+  }
+
+  .bare-note {
+    color: var(--ink-muted);
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  .bare-main a {
+    color: var(--green);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}

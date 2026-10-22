@@ -14,8 +14,10 @@ import {
   ScrollTextIcon,
 } from "lucide-react";
 import type * as React from "react";
-import { AppLink, plainClick } from "@/components/app-link";
+import { plainClick } from "@/components/app-link";
+import { Chips } from "@/components/chips";
 import { Locator } from "@/components/doc";
+import { Tab } from "@/components/paste";
 import { Empty } from "@/components/shell/page";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -29,26 +31,14 @@ const ICONS: Record<string, LucideIcon> = {
   record: ScrollTextIcon,
 };
 
-const TAB = "inline-flex h-5 shrink-0 items-center rounded-r-sm border-l-[3px] pr-1.5 pl-1 text-xs leading-none";
-
 /** A record's state as a margin tab: what waits for the owner in ochre, what goes next in green, a hold in red. */
 export function StateTab({ row }: { row: Pick<StagedRow, "state" | "on_hold" | "why"> }) {
   const held = row.on_hold || row.why === "held-back";
   const word = row.on_hold ? "on hold" : row.why === "held-back" ? "held back" : row.state;
   return (
-    <span
-      data-state={word}
-      className={cn(
-        TAB,
-        held
-          ? "border-red bg-red-wash text-red"
-          : row.state === "ready"
-            ? "border-green bg-selection text-green"
-            : "border-me bg-me-wash text-me",
-      )}
-    >
+    <Tab data-state={word} tone={held ? "red" : row.state === "ready" ? "green" : "me"}>
       {word}
-    </span>
+    </Tab>
   );
 }
 
@@ -151,29 +141,6 @@ export function rowsOf(view: StagingList | undefined): StagedRow[] {
 }
 
 /** The bar's chips: one source or all, one state or both; each a link, so each is a URL of its own. */
-function Chips({ label, chips }: { label: string; chips: StagingList["source_chips"] }) {
-  return (
-    <nav aria-label={label} className="shrink-0">
-      <ul className="flex gap-0.5">
-        {chips.map((chip) => (
-          <li key={chip.url}>
-            <AppLink
-              href={chip.url}
-              aria-current={chip.on ? "page" : undefined}
-              className={cn(
-                "tap flex h-7 items-center rounded-sm px-2 text-sm whitespace-nowrap text-ink-muted hover:bg-hover hover:text-ink",
-                chip.on && "bg-hover font-semibold text-ink",
-              )}
-            >
-              {chip.label}
-            </AppLink>
-          </li>
-        ))}
-      </ul>
-    </nav>
-  );
-}
-
 export function FilterBar({ view }: { view: StagingList }) {
   return (
     <div className="flex shrink-0 items-center gap-x-4 overflow-x-auto border-b border-rule px-2 py-1.5 sm:px-3">

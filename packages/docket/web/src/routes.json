@@ -1,1 +1,14 @@
-["/design", "/today", "/queue", "/ledger", "/meetings", "/search", "/recording", "/briefs", "/staging", "/curate", "/sync", "/settings"]
+[
+  "/design",
+  "/today",
+  "/queue",
+  "/ledger",
+  "/meetings",
+  "/search",
+  "/recording",
+  "/briefs",
+  "/staging",
+  "/curate",
+  "/sync",
+  "/settings"
+]

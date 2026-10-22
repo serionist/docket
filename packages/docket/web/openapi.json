@@ -1133,6 +1133,25 @@
         "title": "Chip",
         "type": "object"
       },
+      "Chosen": {
+        "description": "A filter or a boost the search holds, with the same search without it.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "url"
+        ],
+        "title": "Chosen",
+        "type": "object"
+      },
       "CitedLine": {
         "description": "A doc line the open line was built from, as it reads now, with its own raw.",
         "properties": {
@@ -5169,7 +5188,7 @@
           "chips": {
             "default": [],
             "items": {
-              "$ref": "#/components/schemas/docket__web__views__Chosen"
+              "$ref": "#/components/schemas/Chosen"
             },
             "title": "Chips",
             "type": "array"
@@ -5177,7 +5196,7 @@
           "drops": {
             "default": [],
             "items": {
-              "$ref": "#/components/schemas/docket__web__views__Chosen"
+              "$ref": "#/components/schemas/Chosen"
             },
             "title": "Drops",
             "type": "array"
@@ -6854,6 +6873,30 @@
         "title": "SummaryLink",
         "type": "object"
       },
+      "SyncChip": {
+        "description": "A source chip: All, or one source; the page narrows to the one that is on.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "on": {
+            "title": "On",
+            "type": "boolean"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "url",
+          "on"
+        ],
+        "title": "SyncChip",
+        "type": "object"
+      },
       "SyncLine": {
         "description": "A live source's last sync: when, in words that never count down, and whether it is due one, as the sidebar's\nSync mark says (DR-0304); one with a run open is syncing, never due.",
         "properties": {
@@ -6902,7 +6945,7 @@
           },
           "chips": {
             "items": {
-              "$ref": "#/components/schemas/docket__web__sync_view__Chosen"
+              "$ref": "#/components/schemas/SyncChip"
             },
             "title": "Chips",
             "type": "array"
@@ -7621,49 +7664,6 @@
           "version"
         ],
         "title": "Wrote",
-        "type": "object"
-      },
-      "docket__web__sync_view__Chosen": {
-        "description": "A source chip: All, or one source; the page narrows to the one that is on.",
-        "properties": {
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "on": {
-            "title": "On",
-            "type": "boolean"
-          },
-          "url": {
-            "title": "Url",
-            "type": "string"
-          }
-        },
-        "required": [
-          "label",
-          "url",
-          "on"
-        ],
-        "title": "Chosen",
-        "type": "object"
-      },
-      "docket__web__views__Chosen": {
-        "description": "A filter or a boost the search holds, with the same search without it.",
-        "properties": {
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "url": {
-            "title": "Url",
-            "type": "string"
-          }
-        },
-        "required": [
-          "label",
-          "url"
-        ],
-        "title": "Chosen",
         "type": "object"
       }
     }

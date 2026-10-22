@@ -722,7 +722,7 @@ def build(facts: Facts, state: SyncState) -> SyncView:
 NEED_WORDS = {"you": "needs you", "due": "due a sync", "final": "final run due"}
 
 
-class Chosen(BaseModel):
+class SyncChip(BaseModel):
     """A source chip: All, or one source; the page narrows to the one that is on."""
 
     label: str
@@ -827,7 +827,7 @@ class SyncPage(BaseModel):
     # The URL as the server writes it, which the app puts in the address bar as it is (DR-0704).
     canonical: str
     lead: str
-    chips: list[Chosen]
+    chips: list[SyncChip]
     notes: list[str]
     needs: list[NeedRead]
     paste_all: str | None
@@ -918,7 +918,7 @@ def page(view: SyncView, state: SyncState, tz: ZoneInfo, machine: str) -> SyncPa
     return SyncPage(
         canonical=state.url(),
         lead=view.lead,
-        chips=[Chosen(label=c.label, url=c.url, on=c.on) for c in view.chips],
+        chips=[SyncChip(label=c.label, url=c.url, on=c.on) for c in view.chips],
         notes=view.notes,
         needs=[
             NeedRead(source=n.source, kind=n.kind, word=NEED_WORDS[n.kind], line=n.line, paste=n.paste)

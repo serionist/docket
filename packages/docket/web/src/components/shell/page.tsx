@@ -5,8 +5,10 @@
 import { ArrowLeftIcon, XIcon } from "lucide-react";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { useBand } from "@/hooks/use-width";
+import { HttpError } from "@/lib/query";
 import { cn } from "@/lib/utils";
 
 export function Page({ className, ...props }: React.ComponentProps<"main">) {
@@ -197,6 +199,44 @@ export function NoticeBar({
       <Button variant="ghost" size="icon-sm" onClick={onDismiss} aria-label="Dismiss the notice">
         <XIcon />
       </Button>
+    </div>
+  );
+}
+
+/** A read still on its way: rows of skeleton in the list's own layout, and in words what is loading. */
+export function Loading({ what, rows = 6 }: { what: string; rows?: number }) {
+  return (
+    <div role="status" aria-live="polite" className="grid">
+      <span className="sr-only">{what}</span>
+      {Array.from({ length: rows }, (_, at) => (
+        <div key={at} className="grid gap-1.5 border-b border-rule px-3 py-2.5 sm:px-4">
+          <Skeleton className={cn("h-4", at % 3 === 0 ? "w-2/5" : "w-3/5")} />
+          <Skeleton className={cn("h-3", at % 2 === 0 ? "w-4/5" : "w-2/3")} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// What a read that got no answer at all says: never the browser's own words for it.
+const UNREACHED = "The service didn't answer. docket service status says whether it runs.";
+
+/** A read that failed and showed nothing: what failed, in the server's words, then the way on: Try again for a
+ * failure, which asks again, or the page as it opens for a URL it refused. Never posing as an empty page. */
+export function ReadFailed({ error, onRetry, whole }: { error: unknown; onRetry: () => void; whole: () => void }) {
+  const refused = error instanceof HttpError && error.refused;
+  return (
+    <div className="grid justify-items-start gap-3 px-4 py-6">
+      <Refusal>{error instanceof HttpError ? error.message : UNREACHED}</Refusal>
+      {refused ? (
+        <Button size="sm" onClick={whole}>
+          The whole page
+        </Button>
+      ) : (
+        <Button size="sm" onClick={onRetry}>
+          Try again
+        </Button>
+      )}
     </div>
   );
 }
