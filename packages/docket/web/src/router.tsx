@@ -11,6 +11,7 @@ import {
   type RouterHistory,
 } from "@tanstack/react-router";
 import { NotFound, Shell } from "@/components/shell/shell";
+import { freshPage, PageLoadError } from "@/lib/build";
 import { parseSearch, type Search, stringifySearch } from "@/lib/search";
 import { BriefsPage } from "@/pages/briefs";
 import { DesignPage } from "@/pages/design";
@@ -83,14 +84,22 @@ export const stagingRoute = createRoute({
   getParentRoute: () => root,
   path: "/staging",
   // Staging and Curate load when first opened: the first page's script keeps to its budget (DR-0712).
-  component: lazyRouteComponent(() => import("@/pages/staging"), "StagingPage"),
+  component: lazyRouteComponent(
+    freshPage(() => import("@/pages/staging")),
+    "StagingPage",
+  ),
+  errorComponent: PageLoadError,
   validateSearch: (search: Record<string, unknown>): Search => search as Search,
 });
 
 export const curateRoute = createRoute({
   getParentRoute: () => root,
   path: "/curate",
-  component: lazyRouteComponent(() => import("@/pages/curate"), "CuratePage"),
+  component: lazyRouteComponent(
+    freshPage(() => import("@/pages/curate")),
+    "CuratePage",
+  ),
+  errorComponent: PageLoadError,
   validateSearch: (search: Record<string, unknown>): Search => search as Search,
 });
 
