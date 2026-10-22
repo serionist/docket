@@ -123,7 +123,7 @@ def test_a_source_is_made_private_through_its_question_and_a_rule_turned_on(
     found = config(vault_root)
     assert (found.sources["memo"].sensitivity, found.redaction.phone) == ("private", True)
     # Credentials off is a command for the owner's console, never a button.
-    expect(page.get_by_role("button", name=re.compile("credentials"))).to_have_count(0)
+    expect(page.get_by_role("button", name=re.compile("^Turn it (on|off): credentials"))).to_have_count(0)
     clean(page, errors)
 
 

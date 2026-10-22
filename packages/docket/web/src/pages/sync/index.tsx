@@ -192,7 +192,15 @@ export function SyncPage() {
           </p>
           <Notes notes={data.notes.filter((note) => !open || !note.includes(open))} />
           <Needs page={data} onCopy={copy} narrowed={narrowed} />
-          <Failures failures={data.failures} onRun={(href) => go(href, open !== undefined)} narrowed={narrowed} />
+          <Failures
+            failures={data.failures}
+            onRun={(href) => {
+              // The run's card takes the focus once it shows, as a row's does.
+              wanted.current = "heading";
+              go(href, open !== undefined);
+            }}
+            narrowed={narrowed}
+          />
           <Runs
             runs={runs}
             narrowed={narrowed}
