@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from curate_kit import fill_curate
 from docket_testkit import configure, make_config, read_only, shared
-from docket_webkit import serving
+from docket_webkit import OURS, serving
 from staging_kit import TALK, mail, transcript
 from starlette.testclient import TestClient
 
@@ -170,6 +170,33 @@ def test_no_read_sends_what_its_page_hides(client: TestClient, root: Path) -> No
     vault = Vault.open(root)
     assert HIDDEN_KEY in curatelog.fold(curatelog.read_all(vault.root).lines).stoplist
     assert {e.staged.record.rid for e in Gate(vault).list().entries} >= {HELD_RID, HELD_MAIL, RELEASED_RID}
+
+
+# What would tell a held body's size or words: a selection's problem with it, or its preview.
+SIZES = ("names utterance", "names line", "transcript has", "text has", "removes", "cuts ")
+SAME_ORIGIN = {"Origin": OURS, "Sec-Fetch-Site": "same-origin"}
+
+
+def test_no_write_on_a_held_record_answers_with_its_body(client: TestClient, root: Path) -> None:
+    """Each Staging write a page can send on a held record, with each selection, gets the hold's one refusal, and
+    writes nothing, so the shared vault stays as it was."""
+    vault = Vault.open(root)
+    held = [e for e in Gate(vault).list().entries if e.staged.record.rid in (HELD_RID, HELD_MAIL)]
+    assert len(held) == 2
+    for entry in held:
+        shown = client.get(f"/api/web/staging/panel?open={entry.key}").json()["panel"]
+        answers: set[str] = set()
+        for chosen in ("", "u=2", "u=99", "line=1", "line=99", "cut=0-5", "cut=0:00-0:10"):
+            name, _, value = chosen.partition("=")
+            picks = {"u": [], "line": [], "cut": []} | ({name: [value]} if name else {})
+            for label in ("work", "private") if not name else ("work",):
+                sent = {"key": entry.key, "label": label, **picks, "seen": shown["seen"]}
+                got = client.post("/api/web/staging/classify", json=sent, headers=SAME_ORIGIN)
+                assert got.status_code == 400, (entry.key, chosen, label)
+                said = got.text.casefold()
+                assert not any(secret in said for secret in ("quillmoss", "brambleton", *SIZES)), (chosen, said)
+                answers.add(got.json()["error"])
+        assert len(answers) == 1 and "is on hold" in answers.pop()
 
 
 def test_the_walk_finds_what_it_looks_for_where_a_page_shows_it(client: TestClient, root: Path) -> None:
