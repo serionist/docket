@@ -1,0 +1,17 @@
+decisions:
+  - id: DR-0786
+    title: "The Curate page is the app's: its round and the open card as JSON reads, its four writes JSON writes on the writer thread, a decision on a changed entity file answered 409"
+    status: proposed
+    at: "2026-10-22"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#252", "#68"]
+    supersedes: [DR-0473]
+    description: "DR-0473's page, in the app (#252). GET /api/web/curate reads this machine's round, what tier 1 applied, the measures, the forms matching leaves out, the log and the stoplist; GET /api/web/curate/panel the open card, its snippets cut now (DR-0468), and with edit its form as the card proposes it. Both read beside the writer and write nothing; each answers the canonical URL, which holds open or edit, and the page writes it back (DR-0704); done, from a URL before the app, says what a write did once and is left out of it. A round, a decision, an undo and a lift are POST /api/web/curate/round, /decide, /undo and /lift: JSON writes with the browser's session only, the token refused, the body checked before any route reads it, and the Guard's same-origin check (DR-0709, DR-0152), each run through the batch's and the entity store's own calls on the writer thread and logged via page. A round brings the index up to date and mines beside the writer, only tier 1's commit and the batch's write on it (DR-0468, DR-0470). A decision's body is the act, the round, the card and the hash of the entity file it was shown with, and for an edit the spellings kept by their place, each plain or asr, and for a new card its type, id, a name per language and role; a round that isn't this machine's current one is refused with 400, and under the lock a changed file answers 409, and the page reads the card again. An undo names a logged op's id and a lift a stoplisted key's hash, so a value a never-store list holds never reaches the page; a hidden key shows no Undo or Lift (DR-0464). A refusal answers 400 with the store's words, the form as typed kept on the page. Once a card is decided the panel moves on to the next card still open, as a call on a day page moves to the row after. The keys: j and k through the cards, an open card following; Enter or o opens; Esc closes; no key decides a card (DR-0711). The entity files' reads, which the cards' states and the Briefs page take every time, are kept by each file's path and bytes, at most 4,096, so a round on hundreds of entities lists within its budget; the page's script loads when the page is first opened (DR-0712)."
+    binds:
+      - "Only the owner's click decides a card on the page: the token never writes, and no key decides."
+      - A decision is refused unless the round is this machine's current one and the entity file is as the card was shown.
+    not_chosen:
+      - "Same-origin form posts answered 303, and the edit form through htmx or edit= without JavaScript, as DR-0473 had: the page is the app's now (DR-0704, DR-0709)."
+      - "Closing the panel after a decision, as the 303 to the list did: a round's cards are decided one after another."
+      - "Parsing every entity file on every read: on 300 entities the list's read took 200 ms here, most of a 250 ms budget."

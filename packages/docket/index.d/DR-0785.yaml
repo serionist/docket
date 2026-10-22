@@ -1,0 +1,18 @@
+decisions:
+  - id: DR-0785
+    title: The Staging page writes only through the staging gate's calls, on the writer thread, as JSON writes; a classification of a record that changed since answers 409
+    status: proposed
+    at: "2026-10-22"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#252", "#71"]
+    supersedes: [DR-0381]
+    description: "DR-0381's writes, in the app (#252). Work and private are POST /api/web/staging/classify, its body the record's key, the label, the ticked utterances (u) and lines (line) and the typed cuts (cut) as the URL holds them, and what the panel showed of the record (seen: its state, who classified it and its cuts), and nothing else; promote is POST /api/web/staging/promote with one source, or null for every source. Each is a JSON write with the browser's session only: a request carrying Authorization refused, the body checked before any route reads it, and the Guard's same-origin check (DR-0709, DR-0152). Each runs the CLI's own call on the service's writer thread: Gate.classify(key, label, cuts, by=user) or Gate.promote(source, via=page); private is the gate's drop, asked once more on the page first (confirm=private), and a promotion that wrote something, a stopped calendar step's meetings included, pokes the index updater. A classification is checked under one vault's one lock: the writer compares seen with Gate.show and calls Gate.classify only when they match, so a click from a page the record changed under, by another tab, the CLI or Claude, writes nothing and answers 409, and the page reads the record again and shows it as it stands, with its own ticks. A selection the record can't take, a label but work or private, cuts with private, a record on hold or one no longer staged answers 400 with the writer's words, and the page keeps what was ticked and typed. The answer says what the write did, in the words the page shows at the list's foot."
+    binds:
+      - No route of the page writes but through Gate.classify and Gate.promote.
+      - Every classification the page makes is classified_by user, as the CLI's default.
+      - "The token never classifies or promotes: the routes refuse Authorization."
+    not_chosen:
+      - "A same-origin form post answered 303, as DR-0381 had: the page is the app's now, and its writes are JSON (DR-0709)."
+      - "A token per write: SameSite=Strict, the Origin checks and JSON-only bodies already refuse a cross-site write."
+      - "Reads beside the writer: every gate call sweeps staging, which deletes and rewrites files."

@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0784
+    title: "The Staging page is the app's: a read for the list and one for the open record, its URL as before, keys that move and open"
+    status: proposed
+    at: "2026-10-22"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#252", "#71"]
+    supersedes: [DR-0384]
+    description: "DR-0384's page, in the app (#252). GET /api/web/staging reads the list for the URL's source, state and k, with the held recordings (DR-0382) and the files that don't read, and GET /api/web/staging/panel the open record for the whole URL, as promotion would write it (DR-0383); both run on the writer thread, since every gate call sweeps staging first, and each answers the canonical URL, which the page writes back (DR-0704), and values ready to show, times in the owner's zone (DR-0709). The URL holds source, state, k, open, u, line, cut, picked and confirm, in that order, defaults left out, repeated values sorted; u, line, cut and picked only with open. source narrows to one source, state to pending or ready, k is how many records (50, Show more adds 50, at most 1,000), open a staged record's whole key, u and line the utterances or lines to cut (each a number from 1 or a range), cut a typed cut as --cut takes it, picked=1 that an empty selection is the owner's (without it a record opened with nothing chosen starts from its stored cuts, DR-0383), confirm=private the drop's own question. done, from a URL before the app, says what a write did once and is left out of the canonical URL. A malformed value answers 400 with its words, except a typed cut that doesn't read, which the panel names beside the ticks; a key nothing is staged under any more says so with 200; unknown parameters are ignored, and parameters only gain. The page lists the records by source under the lead line and the ready bar with a Promote per source and one for all, each row's state a tab in its ink: pending in the owner's ochre, ready in ledger green, on hold and held back in red. The open record sits in the shell's 480 px panel beside the list (over it below 1024 px, the whole screen below 768), its Preview, Work and Private at the panel's foot. What is ticked and typed is the page's own until Preview, which writes it into the URL and reads the record again, or Work. A record a hold covers shows its rid, kind and time, and doesn't open. The keys: j and k through the records that open, an open record following; Enter or o opens; Esc closes; no key writes (DR-0711). The page's script loads when the page is first opened, so the first page's script keeps to its budget (DR-0712)."
+    binds:
+      - The page's URL only gains optional parameters, so a link from Claude, the Recording page or a bookmark keeps opening.
+      - The reads write nothing but what the gate's own sweep writes.
+    not_chosen:
+      - "Plain links, a page per state and the htmx panel, as the Jinja page had: the pages need JavaScript now (DR-0704)."
+      - "A preview read on every tick: a writer job per click, where Preview reads once."

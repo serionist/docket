@@ -8,7 +8,7 @@ sources' cursor marks; its version hashes the cursor files and the open runs too
 
 Reads run beside the writer, as the `ledger` tool's do: `ledger_tables`, then `views.read` and its two siblings,
 `views.matching` and `views.batch_lines`, and nothing else of the ledger (DR-0616). Every write goes through
-`store.write`, one batch per call, by user, via page, on the service's writer thread (DR-0381). The routes are
+`store.write`, one batch per call, by user, via page, on the service's writer thread (DR-0710). The routes are
 `day_api`'s.
 """
 

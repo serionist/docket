@@ -1,11 +1,12 @@
 decisions:
   - id: DR-0384
     title: The Staging page's URL holds source, state, k, open, u, line, cut, picked, confirm and done
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#71"]
+    superseded_by: [DR-0784]
     description: One canonical form in that order, defaults left out, repeated values sorted; u, line, cut and picked only with open, and done never in a link the page makes. source narrows to one source, state to pending or ready, k is how many records (50, Show more adds 50, at most 1,000), open a staged record's whole key, u and line the utterances or lines to cut (each a number from 1 or a range), cut a typed cut as --cut takes it, picked=1 that an empty selection is the user's (without it a record opened with nothing chosen starts from its stored cuts, DR-0383), confirm=private the drop's own question, and done what the last post did, in ids and counts. A malformed value is the page's error with status 400, except a typed cut that doesn't read, which the panel names; a key nothing is staged under any more says so with 200; unknown parameters are ignored, and parameters only gain. /staging is always a whole page and /staging/panel always the panel, which names the canonical URL by DR-0170's rule.
     not_chosen:
       - "One click on Private: a work record dropped for good by a slip."

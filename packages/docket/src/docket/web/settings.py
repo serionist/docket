@@ -9,13 +9,13 @@ what has no button is named here, as its command or its line. A value the URL ca
 page's own error state; anything else is logged as its type and frames and answered with the error page, as on the
 other pages (DR-0170).
 
-An add is two plain form posts the Guard checks (DR-0152), on the service's writer thread, as Staging's and Curate's
-writes are (DR-0381, DR-0473): the first answers the confirm view, naming what the value drops now and what already
-stored holds it (DR-0509); the second, carrying the hash of the vault.yaml the view was built from, adds it and answers
-a 303 whose `done` names the list and a count. The value travels only in the posts' bodies: never in a URL, the log or a
-commit message (DR-0508). A value taken off, a rule turned on or off, a source's sensitivity or its on and off is one
-post; a source made private asks once more, naming what waits from it. Each carries the hash of the vault.yaml the page
-read, so a page older than the file writes nothing (409), and a post sent twice is no write.
+An add is two plain form posts the Guard checks (DR-0152), on the service's writer thread (DR-0153): the first answers
+the confirm view, naming what the value drops now and what already stored holds it (DR-0509); the second, carrying the
+hash of the vault.yaml the view was built from, adds it and answers a 303 whose `done` names the list and a count. The
+value travels only in the posts' bodies: never in a URL, the log or a commit message (DR-0508). A value taken off, a
+rule turned on or off, a source's sensitivity or its on and off is one post; a source made private asks once more,
+naming what waits from it. Each carries the hash of the vault.yaml the page read, so a page older than the file writes
+nothing (409), and a post sent twice is no write.
 """
 
 from __future__ import annotations

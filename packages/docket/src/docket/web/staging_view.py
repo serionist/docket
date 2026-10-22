@@ -617,7 +617,7 @@ class StagingPanel(BaseModel):
     work_label: str
     can_work: bool
     confirm: bool
-    # What a classification carries back, so a change since is caught (DR-0381).
+    # What a classification carries back, so a change since is caught (DR-0785).
     seen: Seen
     # The list with nothing open, the drop's question, and the record without it: URLs the server wrote.
     close: str
