@@ -29,8 +29,8 @@ import json
 import shutil
 import subprocess
 import sys
-import time
 from datetime import UTC, datetime
+from time import sleep
 from typing import IO, Any
 
 CONTRACT = 1
@@ -121,7 +121,7 @@ class Server:
             if "429" in text or "too many requests" in text or "rate limit" in text:
                 if pause is None:
                     raise LimitedError
-                time.sleep(pause)
+                sleep(pause)
                 continue
             if "404" in text or "not found" in text or "500" in text:
                 raise GoneError

@@ -22,11 +22,13 @@ script's stderr is never read: it can quote a payload.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -55,6 +57,9 @@ NO_FINAL = "no final run is needed"
 UNSHOWN = ("on-hold", "held-back")
 OPEN_SECONDS = 60.0
 CAPTURE_SECONDS = 30.0
+# A close refused for these stays open and is asked again, after each of these pauses in seconds.
+BUSY = ("another run is closing", "call ingest again")
+BUSY_WAITS = (10.0, 20.0, 30.0, 30.0, 30.0)
 CLOSE_SECONDS = 150.0
 MEDIA_SECONDS = 600.0
 
@@ -126,6 +131,7 @@ class _Job:
     source: str
     session: str
     server: list[str] | None
+    pause: Callable[[float], None] = time.sleep
 
     def request(self, opened: dict[str, Any], phase: str) -> dict[str, Any]:
         owed = [str(d["id"]) for d in [*_listed(opened.get("waiting")), *_listed(opened.get("retry"))]]
@@ -171,8 +177,19 @@ class _Job:
         run = str(opened["run"])
         count, fetched, skipped = self.drive(self.request(opened, "final" if final else "run"), run)
         close = {"captures": count, "skipped": skipped} | ({"final": True} if final else {})
-        closed = _asked(self.post, f"/api/runs/{run}/close", close, CLOSE_SECONDS, f"run {run} didn't close")
-        return opened, count, fetched, closed
+        return opened, count, fetched, self.close(run, close)
+
+    def close(self, run: str, body: dict[str, Any]) -> dict[str, Any]:
+        """The run's close, asked again while another run's close, or another process's hold on the vault, keeps it
+        open: the sync's agents close side by side, and both refusals leave the run open (DR-0796)."""
+        for wait in (*BUSY_WAITS, None):
+            answer = self.post(f"/api/runs/{run}/close", body, CLOSE_SECONDS)
+            busy = answer is not None and answer[0] != 200 and any(
+                said in str(answer[1].get("error") or "") for said in BUSY)  # fmt: skip
+            if not busy or wait is None:
+                return _answered(answer, f"run {run} didn't close")
+            self.pause(wait)
+        raise AssertionError  # pragma: no cover - the loop returns on its last try
 
     def media(self, ids: list[str], pulled: Pulled) -> None:
         """Each recording's audio, its links from the script's media phase, put four at a time."""
@@ -203,7 +220,15 @@ class _Job:
                     pulled.refused.append(refused)
 
 
-def pull(vault: Vault, sync: str, source: str, *, post: Post, server: Sequence[str] | None = None) -> Pulled:
+def pull(
+    vault: Vault,
+    sync: str,
+    source: str,
+    *,
+    post: Post,
+    server: Sequence[str] | None = None,
+    pause: Callable[[float], None] = time.sleep,
+) -> Pulled:
     """The source's run, its final run when one is due, its audio and its files to classify, by its `pull.py`."""
     path, info = folder.find(sync, vault.root)
     if source not in {s.source for s in info.sources}:
@@ -212,7 +237,7 @@ def pull(vault: Vault, sync: str, source: str, *, post: Post, server: Sequence[s
     script = start.pull_script(vault, source)
     if script is None:
         raise DocketError(f"{source} has no pull.py beside its skill: its agent runs it through run_open")
-    job = _Job(post, script, source, SESSION + info.sync, list(server) if server else None)
+    job = _Job(post, script, source, SESSION + info.sync, list(server) if server else None, pause)
     first = job.run(final=False)
     if first is None:  # pragma: no cover - only a final run is ever none
         raise DocketError("the run didn't open")
@@ -252,7 +277,8 @@ def child(script: Path, request: dict[str, Any], time_limit: float = TIME_LIMIT)
     timer.start()
     stdin, stdout = cast(IO[bytes], proc.stdin), cast(IO[bytes], proc.stdout)
     try:
-        with stdin:
+        # A script that ends before it reads, as one that doesn't import, says so by its exit, below.
+        with contextlib.suppress(BrokenPipeError), stdin:
             stdin.write(json.dumps(request).encode("utf-8"))
         while raw := stdout.readline(LINE_CAP + 1):
             if len(raw) > LINE_CAP:

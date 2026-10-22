@@ -220,3 +220,29 @@ def test_a_pull_past_its_time_limit_is_stopped(tmp_path: Path) -> None:
     script.write_text("import sys, time\nsys.stdin.read()\ntime.sleep(60)\n", encoding="utf-8")
     with pytest.raises(pull.PullStoppedError, match="the pull ran past 1 s and was stopped"):
         list(pull.child(script, {"contract": 1}, time_limit=1.0))
+
+
+def test_a_close_another_run_s_close_holds_off_is_asked_again(vault: Vault, client: TestClient, tmp_path: Path) -> None:
+    """The sync's agents close side by side, and the service refuses a close while another maps: the run stays open,
+    so the pull waits and asks again rather than lose what it fetched."""
+    started = start.start(vault, [], datetime.now(UTC))
+    lines_are(tmp_path, run=RUN)
+    real = post_to(client)
+    refused: list[str] = []
+    waited: list[float] = []
+
+    def post(path: str, body: dict[str, Any], timeout: float) -> tuple[int, dict[str, Any]] | None:
+        if path.endswith("/close") and not refused:
+            refused.append(path)
+            return 400, {"error": "another run is closing; its run stays open: call ingest again in a minute"}
+        return real(path, body, timeout)
+
+    pulled = pull.pull(vault, started.info.sync, "memo", post=post, pause=waited.append)
+    assert len(refused) == 1 and waited == [10.0] and pulled.closed["pending"] == 2
+
+
+def test_a_pull_that_ends_before_it_reads_its_request_says_its_exit(tmp_path: Path) -> None:
+    script = tmp_path / "pull.py"
+    script.write_text("import sys\nsys.exit(4)\n", encoding="utf-8")
+    with pytest.raises(pull.PullStoppedError, match=r"the pull failed \(exit 4\)"):
+        list(pull.child(script, {"contract": 1, "pad": "x" * 2_000_000}))

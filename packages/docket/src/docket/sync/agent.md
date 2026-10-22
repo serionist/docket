@@ -120,7 +120,9 @@ that item in its line's continues field: the sync logs it there. A new piece of 
 
 Before the block, go through the open and snoozed items in your slice whose people are in what your run read, and only
 those: the item's who, by name or address, or for an item on a meeting (`@M-0003`), that meeting's organiser or its
-attendees as your records list them. An item whose people you didn't read is left alone.
+attendees as your records list them. An item whose people you didn't read is left alone. Your slice knows who wrote
+in {SOURCE} before this run: for each person your run read who has no item there, one `ledger` view `list` with their
+`who`, all in one message, and go through what it gives the same way.
 
 For each, look in what you read for evidence it was done: a message sent, a call held, a file or a link shared, an
 answer given, an invite sent, a release made. The owner's own messages count: their answer closes a reply, the file

@@ -119,7 +119,8 @@ def test_a_rate_limit_is_waited_out_and_one_that_lasts_skips_that_recording(
 ) -> None:
     waited: list[float] = []
     monkeypatch.setattr(pull, "PAUSES", (1, 2))
-    monkeypatch.setattr(pull.time, "sleep", waited.append)
+    # The module's own name only: time.sleep itself is every thread's.
+    monkeypatch.setattr(pull, "sleep", waited.append)
     given = scenario(limited={f"get_note|{CALL}": 1, f"get_transcript|{SHORT}": 9})
     lines = run(pull, tmp_path, "run", given, window={"since": SINCE})
     assert waited == [1, 1, 2]
