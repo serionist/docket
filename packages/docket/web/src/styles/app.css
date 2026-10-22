@@ -181,13 +181,21 @@
 
   .bare .skip {
     position: absolute;
-    left: -10000px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   .bare .skip:focus {
     left: 8px;
     top: 8px;
-    padding: 8px 12px;
+    width: auto;
+    height: auto;
+    min-height: 44px;
+    clip-path: none;
+    padding: 12px;
     border: 1px solid var(--rule);
     border-radius: 4px;
     background: var(--sheet);

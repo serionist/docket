@@ -115,7 +115,7 @@ function Source({
       <h3 id={`${id}-title`} tabIndex={-1} className="flex flex-wrap items-center gap-x-2 gap-y-1 outline-none">
         <span className={cn("text-sm font-semibold", !source.enabled && "text-ink-muted")}>{source.name}</span>
         <Tab tone={SENSITIVITY_TONE[source.sensitivity] ?? "muted"}>{source.sensitivity}</Tab>
-        <Tab tone={source.enabled ? "green" : "muted"}>{source.enabled ? "on" : "off"}</Tab>
+        {!source.enabled && <Tab tone="muted">off</Tab>}
         {source.folder && <Tab tone="muted">folder</Tab>}
       </h3>
       <Facts facts={source.facts} />
@@ -145,7 +145,7 @@ function Source({
           that lets more in, or changes what the service runs or reads. Its entry as Docket writes it, to change under{" "}
           <code className="font-mono text-xs">sources</code>:
         </p>
-        <pre className="overflow-x-auto rounded-sm border border-rule bg-paper px-3 py-2 font-mono text-xs">
+        <pre className="rounded-sm border border-rule bg-paper px-3 py-2 font-mono text-xs break-all whitespace-pre-wrap">
           {source.entry}
         </pre>
       </Fold>
@@ -314,7 +314,7 @@ export function NeverStore({
       aside={
         <AppLink
           href={page.shown ? PATH_HIDE : PATH_SHOW}
-          className="tap inline-flex min-h-8 items-center text-sm underline decoration-rule underline-offset-2 hover:decoration-ink"
+          className="inline-flex min-h-8 items-center text-sm underline decoration-rule underline-offset-2 hover:decoration-ink pointer-coarse:min-h-11"
         >
           {page.shown ? "Hide the values" : "Show the values"}
         </AppLink>
@@ -437,7 +437,7 @@ export function Redaction({
             <code className="font-mono text-xs">patterns:</code> in vault.yaml. It is committed as written, so write the
             shape, never the secret itself. Such as:
           </p>
-          <pre className="overflow-x-auto rounded-sm border border-rule bg-paper px-3 py-2 font-mono text-xs">
+          <pre className="rounded-sm border border-rule bg-paper px-3 py-2 font-mono text-xs break-all whitespace-pre-wrap">
             {page.pattern_example}
           </pre>
         </Fold>

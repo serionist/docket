@@ -286,7 +286,7 @@ export function SettingsPage() {
     body = <Loading what="Reading vault.yaml and this machine's models." rows={8} />;
   } else {
     body = (
-      <div className="mx-auto grid w-full max-w-4xl gap-4 pb-6">
+      <div className="grid w-full max-w-4xl gap-4 pb-6">
         <div className="grid gap-2 px-3 pt-3 sm:px-4">
           <p className="text-xs text-ink-muted">
             {data.machine},{" "}
@@ -396,10 +396,8 @@ function AddDialog({
           <>
             <AlertDialogHeader>
               <AlertDialogTitle>Add to {adding.name}?</AlertDialogTitle>
-              <AlertDialogDescription asChild>
-                <p dir="auto" className="text-base font-semibold break-words text-ink" data-value>
-                  {adding.value.trim()}
-                </p>
+              <AlertDialogDescription dir="auto" className="text-base font-semibold break-words text-ink" data-value>
+                {adding.value.trim()}
               </AlertDialogDescription>
             </AlertDialogHeader>
             {adding.stale && <Note tone="warn">{adding.stale}</Note>}

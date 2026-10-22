@@ -207,7 +207,7 @@ export function NoticeBar({
 export function Loading({ what, rows = 6 }: { what: string; rows?: number }) {
   return (
     <div role="status" aria-live="polite" className="grid">
-      <span className="sr-only">{what}</span>
+      <p className="px-3 pt-3 pb-1 text-sm text-ink-muted sm:px-4">{what}</p>
       {Array.from({ length: rows }, (_, at) => (
         <div key={at} className="grid gap-1.5 border-b border-rule px-3 py-2.5 sm:px-4">
           <Skeleton className={cn("h-4", at % 3 === 0 ? "w-2/5" : "w-3/5")} />

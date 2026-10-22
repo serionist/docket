@@ -54,7 +54,10 @@ function NoneOf({ narrowed, what }: { narrowed: string; what: string }) {
   return (
     <Quiet>
       {what} for {narrowed}.{" "}
-      <AppLink href="/sync" className="tap inline-flex min-h-6 items-center text-ink underline underline-offset-2">
+      <AppLink
+        href="/sync"
+        className="inline-flex min-h-6 items-center text-ink underline underline-offset-2 pointer-coarse:min-h-11"
+      >
         Every source
       </AppLink>
     </Quiet>
@@ -149,7 +152,7 @@ export function Failures({
                       event.preventDefault();
                       onRun(failure.run_url ?? "");
                     }}
-                    className="tap inline-flex min-h-6 items-center underline decoration-rule underline-offset-2 hover:decoration-ink"
+                    className="inline-flex min-h-6 items-center underline decoration-rule underline-offset-2 hover:decoration-ink pointer-coarse:min-h-11"
                     aria-label={`The run ${failure.run}`}
                   >
                     <Locator value={failure.run} />

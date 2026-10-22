@@ -898,7 +898,7 @@ beside it; `/design` shows its parts on invented data. It comes built with Docke
   locator from Claude's answer into the box to open it.
 - Keys: `/` the box, `j` and `k` through the hits, carrying an open hit along, `Enter` or `o` to open one, `Esc` to
   close it, `c` to copy a locator, `?` for the rest. The keys switch at the sidebar's foot turns the single keys off.
-- Nothing loads from the network: the app, htmx, the fonts and the icons come with Docket, and the pages work
+- Nothing loads from the network: the app, its fonts and the icons come with Docket, and the pages work
   offline. Any browser from mid-2024 on; the app's pages need JavaScript.
 - A session lasts 12 hours, and ends when the service restarts; the sign-in page then names the `docket open` command
   that brings you back to the page you were on.
@@ -1030,21 +1030,23 @@ list, one click and one key at a time, and the first page of the web app's React
 
 ### The Sync page
 
-`/sync` shows how syncs went without a log, what to do first (DR-0304, DR-0305, DR-0788). It only reads: nothing on it opens,
-drops or closes a run.
+`/sync` shows how syncs went without a log, what to do first (DR-0304, DR-0305, DR-0788). It only reads: nothing on
+it opens, drops or closes a run.
 
 | Part | Shows |
 |---|---|
 | Needs | a source `run_open` would refuse, in its words; a source no machine synced in a day, or never; ids due a final run; each with the words to paste into Claude Code |
 | Failures | dropped runs until a later whole run of their source, ids skipped for a reason other than `later` while a cursor file holds them, ids a close expired in the last week, cursor files that don't read; each with what to do |
-| Runs | open runs, refreshed every 5 seconds while one is open, then recent ones: captures, what was staged, the mark, what is owed, or why the run dropped |
+| Runs | open runs, read again every 5 seconds while one is open, then recent ones; a run's card opens beside them: captures, what was staged, the mark, what is owed, or why the run dropped |
 | Cursors | each machine's mark, lookback, retry and waiting ids with their ages, and whether another machine's are still handed over |
 
-- Its URL holds `source` (one source), `run` (a run's card at the top) and `k` (how many recent runs, up to 500).
+- Its URL holds `source` (one source), `run` (a run's card, in the panel) and `k` (how many recent runs, up to 500).
+- When the last open run closes, the page reads itself again, the sidebar's due mark too.
 - Recent runs survive a restart: each ended run leaves one line in the vault's private folder, `sync/runs.jsonl`
   under `.git/docket/` (or the host's git dir for a folder vault). Ids and counts only, per machine, never committed;
   deleting it loses only the page's list.
 - The page shows ids, counts, times and Docket's own messages, never a title or anything a source's tool returned.
+- Keys: `j` and `k` through the runs, an open run following, `Enter` or `o` to open one, `Esc` to close it, `?`.
 
 ### The Staging page
 
@@ -1115,13 +1117,14 @@ the api provider it names as commands.
 - Adding a never-store value asks once more first: the records it drops from staging now, and how many records and
   chunks already stored hold it, with their share of the index, so a word that would take half of everything shows
   it (DR-0509). They stay in raw; from the next sync, what it names is dropped before it is stored.
-- The value goes in a form's body only: never in the address bar, the service's log or a commit message, which says
-  `Config: never-store people, 1 added`. The field asks the browser to keep nothing and check no spelling (DR-0790).
+- The value goes in a write's body only: never in the address bar, an answer, the service's log or a commit
+  message, which says `Config: never-store people, 1 added`. The field asks the browser to keep nothing and check no
+  spelling (DR-0790). A value refused, such as an empty one, says why on its field and stays there to fix.
   Sending the same add twice adds it once.
 - A never-store value is committed in `vault.yaml` as you write it, so it is in your repo's history and goes wherever
   the vault is pushed.
-- A change made while the page was open (another tab, the CLI, an editor) refuses the add, and the question comes
-  back counted again. An edit of `vault.yaml` not committed yet is committed on its own first, by the CLI too,
+- A change made while the page was open (another tab, the CLI, an editor) refuses the click, says so, and the page
+  shows `vault.yaml` as it stands; an add's question comes back counted again. An edit of `vault.yaml` not committed yet is committed on its own first, by the CLI too,
   and the question says so; one that turns credentials redaction off refuses the add until you commit or undo it.
 - Keys: `?`.
 
