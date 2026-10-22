@@ -1,12 +1,13 @@
 decisions:
   - id: DR-0760
     title: The sync's draft quotes what settling an unsure line needs, and docket sync settle settles its lines in one call at the draft's rev
-    status: proposed
+    status: superseded
     at: "2026-10-20"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#272"]
     supersedes: [DR-0749]
+    superseded_by: [DR-0798]
     description: "DR-0749 as it stands, but: an unsure op's # ? lines also carry what settling it needs, so Claude asks the ledger's show for none of them. Each candidate item's context.md line gains its due and its latest log line with its day, cut at 120 characters. A MINUTES line on an answered or dropped point quotes the point whole; one whose point isn't standing on its meeting quotes the meeting's standing points, and when the line gave the point's number, as 1 or #1, the op on that point by its id is the alternative. An OUTCOME line on a meeting with an outcome, or one an earlier line set, quotes that outcome whole, and the two joined are the alternative. A STREAMS line quotes the stream's line whole; an add, an invite or a STREAMS line naming a stream the ledger doesn't hold quotes the streams it holds. Under the # prep line, each prep meeting's line and its open points. Quoted text is cut at 1,000 characters. docket sync settle <sync> <line>=<choice>... settles the draft's unsure lines by the numbers the reconcile printed and the Read tool shows: keep takes the unsure key out, alt, alt2 and so on put that alternative in its place, keep+alt2 and alt+alt2 give those ops in order, and drop deletes the line; the lines that go with an op follow a keep and go with anything else, unless named themselves; a settled op's # ? lines and alternatives go with it. Every choice is checked first, and one that doesn't apply changes nothing. The draft's head line carries its revision, rev 1 as the reconcile writes it: a settle names with --rev the revision its line numbers were read at, refuses any other, writing nothing, since a settle before it moved the lines, and raises it by one. It rewrites only draft.jsonl in a sync folder of this vault, and prints the unsure lines left and the # prep line by their new numbers; the sync skill pre-approves it, since it writes only scratch (DR-0605). The skill settles in one pass: the draft read once, one suggest with refs for the prep meetings, one settle, an Edit only for a line that needs new words and one for the prep points, then the dry run and the write. A recording's NOTES line that left out its note's id, the recording's rid first, is read from its block's file, which names the recording: the meeting link is drafted by the line's time or M- ref, and the missing id said."
     binds:
       - "DR-0689's binds: nothing closes without a locator that shows it, no proposal queue, rollover before the proposed points, no message sent without the owner's word."

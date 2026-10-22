@@ -222,3 +222,55 @@ def test_a_draft_with_no_head_line_is_refused(vault: Vault) -> None:
     file.write_text("\n".join(draft(sync)[1:]) + "\n", encoding="utf-8")
     with pytest.raises(DocketError, match="the draft's head line, with its rev, isn't its first line"):
         settle.settle(vault, sync, ["6=keep"], rev=1)
+
+
+POINT = {"op": "point", "item": "M-0002", "fields": {"text": "Ben: the dates, where do they stand?", "proposed": True,
+                                                   "item": "A-0001"}}  # fmt: skip
+
+
+def with_candidates(file: Path) -> list[str]:
+    """The draft with two prep candidates under its prep meeting, as the reconcile writes them (#305)."""
+    lines = file.read_text(encoding="utf-8").splitlines()
+    at = lines.index("#   M-0002 | 10-26 10:00-10:30 | Pilot weekly | Ben Sample") + 1
+    lines[at:at] = ["#     candidate, on Ben Sample", f"# + {j(POINT)}", f"# + {j(POINT | {'item': 'M-0003'})}"]
+    file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return lines
+
+
+def test_a_range_settles_each_line_its_choice_fits_and_passes_over_the_rest(vault: Vault) -> None:
+    sync, file = started(vault)
+    with_candidates(file)
+    done = settle.settle(vault, sync, ["1-15=drop", "24-26=take"], rev=1)
+    assert (done.kept, done.swapped, done.dropped, done.taken, done.unsure) == (0, 0, 3, 2, [8])
+    lines = file.read_text(encoding="utf-8").splitlines()
+    assert lines[-4:-1] == ["#     candidate, on Ben Sample", j(POINT), j(POINT | {"item": "M-0003"})]
+    assert lines[0] == f"# docket sync reconcile {sync}: 6 ops, 1 unsure, rev 2"
+
+
+def test_a_prep_candidate_is_taken_or_dropped_and_a_range_keeps_only_unsure_ops(vault: Vault) -> None:
+    sync, file = started(vault)
+    with_candidates(file)
+    done = settle.settle(vault, sync, ["25=drop", "7-26=keep"], rev=1)
+    assert (done.kept, done.taken) == (4, 0)
+    lines = file.read_text(encoding="utf-8").splitlines()
+    assert f"# + {j(POINT)}" not in lines and f"# + {j(POINT | {'item': 'M-0003'})}" in lines
+
+
+@pytest.mark.parametrize(
+    ("choices", "said"),
+    [
+        (["25=keep"], "line 25 is a prep candidate: take it or drop it"),
+        (["7=take"], "line 7: take isn't keep, alt, alt2 and so on, or drop"),
+        (["7-12=alt"], "'7-12=alt': a range runs up, such as 31-38, and takes keep, take or drop"),
+        (["12-7=keep"], "'12-7=keep': a range runs up"),
+        (["7-12=keep", "12=drop"], "line 12 is named twice"),
+    ],
+)
+def test_a_take_or_a_range_that_doesn_t_apply_changes_nothing(vault: Vault, choices: list[str], said: str) -> None:
+    sync, file = started(vault)
+    with_candidates(file)
+    before = file.read_bytes()
+    with pytest.raises(DocketError, match=r"^nothing settled: ") as refused:
+        settle.settle(vault, sync, choices, rev=1)
+    assert said in str(refused.value)
+    assert file.read_bytes() == before

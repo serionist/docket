@@ -8,6 +8,13 @@ Unreleased in the same PR.
 
 ### Added
 
+- `docket sync pull <sync> <source>`: a source whose skill folder holds a `pull.py` is fetched in code, straight into
+  its run, so nothing it returns passes through Claude's context; the audio goes four at a time, and what waits to be
+  classified is written to files. The Plaud example ships one, which starts your own Plaud MCP server signed in with
+  its own tokens. Copy the example's `pull.py` beside your Plaud skill to use it.
+- `docket sync check <sync> <block>`: an agent's block read as the reconcile will, each field it would leave to a hand
+  edit named; and `docket sync learned <sync>`, the sync's LEARNED lines with the file each goes in.
+- The `ledger` tool's show takes `brief`: a quick look with the newest 5 history lines and a meeting's open items.
 - The Today page, now the start page that `docket open` lands on: the next meeting with its open points and items
   first, then what is overdue or due today, with the Ledger's keys, quick buttons and act bar, then the rest of
   today's meetings and the next working day's, and what you closed today. A bar above says each source's last sync
@@ -302,6 +309,12 @@ Unreleased in the same PR.
 
 ### Changed
 
+- `/docket:sync` is leaner: each agent reads its own slice of the ledger, not all of it, and only the parts of its
+  prompt its source uses; it batches its lookups and writes its block once, and a recording's note is put once. The
+  reconcile merges a stream's lines into one, marks more look-alike adds unsure (a name written in part, a near
+  title, a series' second invite, an add that restates a meeting's minutes), and drafts up to three prep points a
+  meeting that `docket sync settle` takes with `take`, a range at a time. The LEARNED lines wait until the list is
+  said.
 - The Sync and Settings pages move into the web app's shell, so every page is in it now. Sync opens a run's card
   beside the list, `j` and `k` carry it along, and while a run is open its part reads itself again until the run
   closes. Settings asks its questions, adding a never-store value or making a source private, in a dialog, keeps the

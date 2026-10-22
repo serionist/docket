@@ -56,12 +56,15 @@ STATES: tuple[str, ...] = get_args(State)
 KINDS: tuple[str, ...] = get_args(Kind)
 K = 50
 MAX_K = 500
+# What a brief show keeps (#305): the newest history lines, and free text up to this many characters.
+BRIEF_HISTORY = 5
+BRIEF_TEXT = 300
 TITLE = 72
 OPEN = ("open", "snoozed")
 # What each view takes besides itself. Anything else given is refused, so a filter is never dropped unseen.
 TAKES: dict[str, tuple[str, ...]] = {
     "snapshot": ("since", "until"),
-    "show": ("ref",),
+    "show": ("ref", "brief"),
     "queue": (),
     "list": ("who", "stream", "kind", "state", "since", "until", "k"),
     "meetings": ("since", "until"),
@@ -310,6 +313,8 @@ class Detail(BaseModel):
     due_moves: int = 0
     reopens: int = 0
     history: list[Change] = []
+    # A brief show's older history lines, left out (#305).
+    history_left: int = 0
 
 
 class BatchLine(BaseModel):
@@ -355,6 +360,7 @@ class Ask:
     state: str = "open"
     k: int | None = K
     refs: tuple[str, ...] = ()
+    brief: bool = False
 
     def check(self) -> None:
         """Refused: a view, state or kind this Docket doesn't have, a k out of bounds, a ref missing where one is
@@ -404,7 +410,24 @@ def read(
         "snapshot": reader.snapshot, "show": reader.show, "queue": reader.queue, "list": reader.listing,
         "meetings": reader.meetings, "suggest": lambda asked: reader.suggest(asked, fits),
     }  # fmt: skip
-    return views[ask.view](ask)
+    found = views[ask.view](ask)
+    return brief(found) if ask.brief else found
+
+
+def brief(found: LedgerRead) -> LedgerRead:
+    """A show cut for a quick look (#305): its free text and a point's answer at 300 characters, a meeting's open
+    items only, and the newest 5 lines of its history, the count of the rest in `history_left`."""
+    detail = found.detail
+    if detail is None:
+        return found
+    history = detail.history[-BRIEF_HISTORY:]
+    texts = {name: cut(text, BRIEF_TEXT) for name in ("description", "notes", "outcome")
+             if (text := getattr(detail, name)) is not None}  # fmt: skip
+    shown = detail.model_copy(update={**texts, "history": history,
+                                      "history_left": len(detail.history) - len(history)})  # fmt: skip
+    items = found.items if detail.kind == "item" else [i for i in found.items if i.state in OPEN]
+    points = [p.model_copy(update={"answer": cut(p.answer, BRIEF_TEXT)}) if p.answer else p for p in found.points]
+    return found.model_copy(update={"detail": shown, "items": items, "points": points})
 
 
 def matching(conn: sqlite3.Connection, q: str) -> set[str]:
@@ -454,7 +477,7 @@ def batch_lines(conn: sqlite3.Connection, batch: str) -> list[BatchLine]:
     return [BatchLine(ref=ref, kind=kind, line=line) for _, _, ref, kind, line in rows]
 
 
-# -- the sync's reconcile (DR-0760) ------------------------------------------------------------------------------------
+# -- the sync's reconcile (DR-0798) ------------------------------------------------------------------------------------
 
 
 def trails(conn: sqlite3.Connection) -> dict[str, list[str]]:
@@ -481,13 +504,15 @@ def note_locators(text: str) -> list[str]:
 
 class MeetingFacts(BaseModel):
     """A meeting as the sync's reconcile matches an ask or a recording to it: its row, read whole, its attendees, its
-    outcome, its materials' refs and its event."""
+    outcome, its materials' refs, its event and its series."""
 
     row: MeetingRow
     attendees: list[str]
     outcome: str | None
     materials: list[str]
     event: str | None
+    # Its series, when it is an occurrence of one: the reconcile tells a series' invites apart by it (#305).
+    series: str | None = None
 
 
 @dataclass(frozen=True)
@@ -535,7 +560,7 @@ def sync_read(
     rows = reader.meeting_rows([raw[:10] for raw in raws], whole=True)
     facts = [
         MeetingFacts(row=row, attendees=json.loads(raw[10]), outcome=raw[15],
-                     materials=[m.ref for m in _materials(raw[16])], event=raw[13])
+                     materials=[m.ref for m in _materials(raw[16])], event=raw[13], series=raw[12])
         for raw, row in zip(raws, rows, strict=True)
     ]  # fmt: skip
     facts.sort(key=lambda f: (f.row.start, f.row.id))
@@ -1367,6 +1392,8 @@ def _show_lines(found: LedgerRead, tz: ZoneInfo) -> list[str]:
         rows.append(("updated", f"{stream.updated}, added by {detail.added_by}"))
         rows.append(("items", f"{_open(c)}, {c.snoozed} snoozed, {c.done} done, {c.dropped} dropped"))
         rows += [("item", item_line(i, today)) for i in found.items]
+    if detail.history_left:
+        rows.append(("history", f"{_n(detail.history_left, 'older line')} left out by brief; show without it for all"))
     return [head, *_rows([*rows, *_history(detail.history, tz)])]
 
 

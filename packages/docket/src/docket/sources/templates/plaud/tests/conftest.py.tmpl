@@ -36,14 +36,23 @@ def isolated(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.Monke
         monkeypatch.delenv(name, raising=False)
 
 
-@pytest.fixture(scope="session")
-def mapper() -> ModuleType:
-    """The example's mapper.py, loaded by path: it is a file in a skill folder, not a package."""
-    spec = importlib.util.spec_from_file_location("plaud_example_mapper", HERE.parent / "mapper.py")
+def _load(name: str, file: str) -> ModuleType:
+    """A file of the skill folder, loaded by path: it is a file in a skill folder, not a package."""
+    spec = importlib.util.spec_from_file_location(name, HERE.parent / file)
     if spec is None or spec.loader is None:  # pragma: no cover - the file is right there
-        raise RuntimeError("can't load mapper.py")
+        raise RuntimeError(f"can't load {file}")
     module = importlib.util.module_from_spec(spec)
     # Its dataclasses look their module up by name, as they do when Docket runs it.
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.fixture(scope="session")
+def mapper() -> ModuleType:
+    return _load("plaud_example_mapper", "mapper.py")
+
+
+@pytest.fixture(scope="session")
+def pull() -> ModuleType:
+    return _load("plaud_example_pull", "pull.py")

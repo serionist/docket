@@ -2375,6 +2375,10 @@
     "name": "ledger",
     "input_schema": {
       "properties": {
+        "brief": {
+          "default": false,
+          "type": "boolean"
+        },
         "k": {
           "default": 50,
           "maximum": 500,
@@ -2685,6 +2689,10 @@
                 "$ref": "#/$defs/Change"
               },
               "type": "array"
+            },
+            "history_left": {
+              "default": 0,
+              "type": "integer"
             },
             "kind": {
               "enum": [

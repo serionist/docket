@@ -34,9 +34,18 @@ Audio is optional: each run's steps end with the media step, and `media_put` fet
 Then run its tests where it was copied: `pytest .claude/skills/sources/plaud/tests`. The tests that go through
 Docket's own checks run only where `docket` can be imported, and are left out elsewhere.
 
-After upgrading Docket, copy this folder's `SKILL.md` and `mapper.py` over your copy: Docket refuses a run of a
-`SKILL.md` without the marker line at its top. What a sync learned about the route lives in `sync.md` beside it,
+After upgrading Docket, copy this folder's `SKILL.md`, `mapper.py` and `pull.py` over your copy: Docket refuses a run
+of a `SKILL.md` without the marker line at its top. What a sync learned about the route lives in `sync.md` beside it,
 under `Route`, which the copy leaves alone.
+
+## The pull
+
+`pull.py` makes the route below in code. In a sync, `docket sync start` sees it, and the Plaud agent runs `docket sync
+pull <sync> plaud --vault <vault>` instead of making the calls itself: the pull starts the Plaud MCP server, `npx -y
+@plaud-ai/mcp@latest` unless `--server` names another command, signed in with the server's own tokens, and hands each
+result to the run, so nothing Plaud returns passes through Claude's context. The audio links it reads with `get_file`
+are put four at a time and never captured. "plaud isn't signed in" means the server's `login` tool, then the pull
+again. The calls below stay the route for a run by hand and for a backfill; without `pull.py` the agent makes them.
 
 ## A run
 

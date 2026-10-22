@@ -30,7 +30,7 @@ import hashlib
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -39,7 +39,7 @@ from docket.errors import DocketError
 from docket.index import build as index_build
 from docket.ledger import views
 from docket.sources import runner
-from docket.sync import folder, reconcile, start
+from docket.sync import folder, reconcile, slices, start
 from docket.vault.anchors import encode_rid, format_time, paragraphs
 from docket.vault.records import RawRecord
 from docket.vault.segments import segments
@@ -102,7 +102,8 @@ def recordings(vault: Vault, sync: str, source: str, at: datetime) -> Wave:
     if not todo:
         return Wave(source, [], earlier, said)
     tz = ZoneInfo(info.zone)
-    meetings = _meetings(vault, tz, at, [u.ts for u in todo])
+    until = start.prep_end(info.today)
+    meetings, snapshot = _ledger(vault, tz, at, [u.ts for u in todo], until)
     owner = reconcile.Owner.of(vault)
     prompt = start.template("recording.md")
     layout = _layout(vault, source)
@@ -115,18 +116,24 @@ def recordings(vault: Vault, sync: str, source: str, at: datetime) -> Wave:
             title = views.as_field(unnoted.title or "-")
             head = f"recording {unnoted.rid} | {title} | {local:%Y-%m-%d %H:%M} {info.zone}"
             files = _write_parts(path / folder.RECORDINGS / source, k, head, records)
+            theirs = reconcile.recorded_in(meetings, unnoted.ts, owner)
+            sliced = slices.for_recording(snapshot, slices.text_people(_texts(records)), theirs, until=until)
+            ledger = [f"its meetings by time ({len(theirs)})" if line.startswith("meetings ") else line
+                      for line in views.context_lines(sliced)]  # fmt: skip
+            context = slices.write(path / slices.CONTEXTS / source, k, f"the ledger for {unnoted.rid}", ledger)
             agent = path / folder.AGENTS / source / f"{k}.md"
             block_file = path / folder.BLOCKS / source / f"{k}.txt"
             # The agent's Write lands in a folder that is there.
             block_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             values = {
                 "SOURCE": source, "VAULT": str(vault.root), "TODAY": info.today.isoformat(), "ZONE": info.zone,
-                "OWED_SINCE": info.owed_since, "CONTEXT": str(path / folder.CONTEXT), "BLOCK": str(block_file),
+                "OWED_SINCE": info.owed_since, "CONTEXT": slices.listed(context), "BLOCK": str(block_file),
                 "RECORDING": unnoted.rid, "TITLE": views.as_field(unnoted.title or "no title"),
                 "START": f"{local:%Y-%m-%d %H:%M}", "DAY": f"{local:%Y-%m-%d}",
                 "FILES": "\n".join(f"- {file}" for file in files),
-                "MEETINGS": _meetings_line(reconcile.recorded_in(meetings, unnoted.ts, owner), info),
+                "MEETINGS": _meetings_line(theirs, info),
                 "LAYOUT": layout, "SYNC_AT": f"{info.made.astimezone(tz):%Y-%m-%dT%H:%M}", "OWNER": start.owner(vault),
+                "SYNC": info.sync, "KEY": k,
             }  # fmt: skip
             _write(agent, start.fill(prompt, values))
             made = folder.Recording(
@@ -167,10 +174,25 @@ def _staged(vault: Vault, source: str) -> dict[str, str]:
     return out
 
 
-def _meetings(vault: Vault, tz: ZoneInfo, at: datetime, starts: Sequence[datetime]) -> list[views.MeetingFacts]:
+def _ledger(
+    vault: Vault, tz: ZoneInfo, at: datetime, starts: Sequence[datetime], until: date
+) -> tuple[list[views.MeetingFacts], views.LedgerRead]:
+    """The meetings the recordings may be of, and the snapshot their slices are cut from: from the earliest one's day
+    to the prep week's end."""
     window = (min(starts) - reconcile.RECORDED, max(starts) + reconcile.RECORDED)
+    since = (min(starts) - reconcile.RECORDED).astimezone(tz).date()
+    ask = views.Ask(view="snapshot", since=since.isoformat(), until=until.isoformat())
     with index_build.ledger_tables(vault) as conn:
-        return views.sync_read(conn, tz, at, window).meetings
+        return views.sync_read(conn, tz, at, window).meetings, views.read(conn, ask, tz, at)
+
+
+def _texts(records: Sequence[RawRecord]) -> list[str]:
+    """What a recording's records say and who speaks in them: whoever they name is in the call."""
+    out: list[str] = []
+    for record in records:
+        out += [record.title or "", record.text]
+        out += [f"{s.speaker or ''} {s.text}" for s in segments(record)]
+    return out
 
 
 def _meetings_line(found: list[views.MeetingFacts], info: folder.Info) -> str:
@@ -205,7 +227,7 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
-def _wrapped(line: str) -> list[str]:
+def wrapped(line: str) -> list[str]:
     """A line of at most 1,000 characters, its rest on lines of its own, indented, broken at a space where there is
     one: Claude Code's Read cuts a line at 2,000."""
     out: list[str] = []
@@ -231,7 +253,7 @@ def _section(record: RawRecord) -> tuple[str, list[str]]:
     else:
         head = f"== {record.rid} | {record.kind} | a paragraph a line, its locator r:{rid}#<its number>"
         body = [f"#{n} {_one_line(p)}" for n, p in enumerate(paragraphs(record.text), start=1)]
-    return head, [part for line in body for part in _wrapped(line)]
+    return head, [part for line in body for part in wrapped(line)]
 
 
 def parts(head: str, records: Sequence[RawRecord]) -> list[str]:

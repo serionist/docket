@@ -3,6 +3,7 @@
   "system": {
     "examples/sources/calendar/tests/test_with_docket.py": {"kind": "the examples as a user runs them", "why": "the example through docket, service and hook"},
     "examples/sources/outlook/tests/test_with_docket.py": {"kind": "the examples as a user runs them", "why": "the example through docket, service and hook"},
+    "examples/sources/plaud/tests/test_pull.py": {"kind": "the system's own calls", "why": "the pull and its MCP server as processes over pipes"},
     "examples/sources/plaud/tests/test_with_docket.py": {"kind": "the examples as a user runs them", "why": "docket ingest end to end"},
     "examples/sources/slack/tests/test_with_docket.py": {"kind": "the examples as a user runs them", "why": "the example through docket, service and hook"},
     "examples/sources/teams/tests/test_with_docket.py": {"kind": "the examples as a user runs them", "why": "the example through docket, service and hook"},
@@ -103,6 +104,7 @@
     "packages/docket/tests/test_staging.py": {"kind": "git, files, paths", "why": "staging's files and states"},
     "packages/docket/tests/test_status_render.py": {"kind": "git, files, paths", "why": "STATUS.md byte for byte"},
     "packages/docket/tests/test_sync_folder.py": {"kind": "git, files, paths", "why": "the state folder's paths"},
+    "packages/docket/tests/test_sync_pull.py": {"kind": "the system's own calls", "why": "a source's pull.py as a child process, its lines over a pipe"},
     "packages/docket/tests/test_testkit.py": {"kind": "git, files, paths", "why": "copies' stat data and git's index"},
     "packages/docket/tests/test_vault.py": {"kind": "git, files, paths", "why": "git, locks, sync with a remote"},
     "packages/docket/tests/test_web_audio.py": {"kind": "git, files, paths", "why": "the audio cache's check of a file's size and time, per file system"},
@@ -212,6 +214,7 @@
     "packages/docket/tests/test_settings_scan.py",
     "packages/docket/tests/test_speech_cli.py",
     "packages/docket/tests/test_speech_prompt.py",
+    "packages/docket/tests/test_sync_check.py",
     "packages/docket/tests/test_sync_reconcile.py",
     "packages/docket/tests/test_sync_recordings.py",
     "packages/docket/tests/test_sync_settle.py",

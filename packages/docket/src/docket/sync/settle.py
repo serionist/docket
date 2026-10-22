@@ -11,6 +11,10 @@ numbers were read at and refuses any other, since a settle before it moved the l
 | `alt`, `alt2`, ... | its first, second, ... alternative, its `# ` taken off; the lines that go with the op go |
 | `keep+alt2`, `alt+alt2` | those ops in that order: a merge kept and its other ask added too |
 | `drop` | nothing, and the lines that go with it go too |
+| `take` | a prep candidate, a `# + ` line under `# prep` (#305): its op, the mark off; left alone, it stays a comment |
+
+A range, `31-38=take`, `31-38=keep` or `31-38=drop`, settles every line from the first to the last that the choice
+fits, an unsure op for keep, a candidate for take, either for drop; any other line in it is passed over.
 
 An unsure op's block in the draft is its `# ?` lines above it, the op, its `# {...}` alternatives below it, and the ops
 that go with it after those, each marked unsure with `GOES_WITH`; a settled op's block becomes its ops alone, so the
@@ -28,10 +32,10 @@ from typing import Any, cast
 
 from docket.errors import DocketError
 from docket.sync import folder
-from docket.sync.reconcile import DRAFT, GOES_WITH
+from docket.sync.reconcile import CANDIDATE, DRAFT, GOES_WITH
 from docket.vault.vault import Vault
 
-CHOICE = re.compile(r"^(?P<n>\d{1,6})=(?P<choice>[a-z0-9+]+)$")
+CHOICE = re.compile(r"^(?P<n>\d{1,6})(?:-(?P<to>\d{1,6}))?=(?P<choice>[a-z0-9+]+)$")
 PART = re.compile(r"^(?:keep|alt(?P<k>[1-9]\d{0,2})?)$")
 HEAD = re.compile(r"^# docket sync reconcile (?P<sync>\S+): \d+ ops, \d+ unsure, rev (?P<rev>\d{1,6})$")
 PREP = "# prep:"
@@ -63,6 +67,7 @@ class Settled:
     ops: int
     unsure: list[int]
     prep: int | None
+    taken: int = 0
 
 
 def _op(line: str) -> dict[str, Any] | None:
@@ -154,17 +159,36 @@ def settle(vault: Vault, sync: str, choices: list[str], *, rev: int) -> Settled:
     for given in choices:
         found = CHOICE.match(given.strip())
         if found is None:
-            problems.append(f"{given!r} isn't <line>=<choice>, such as 12=keep")
+            problems.append(f"{given!r} isn't <line>=<choice>, such as 12=keep, or a range, such as 31-33=drop")
             continue
-        k = int(found["n"]) - 1
-        if k in asked:
-            problems.append(f"line {k + 1} is named twice")
+        first = int(found["n"]) - 1
+        choice = found["choice"]
+        if found["to"] is None:
+            named = [first]
+        elif choice not in ("keep", "drop", "take") or int(found["to"]) <= first:
+            problems.append(f"{given!r}: a range runs up, such as 31-38, and takes keep, take or drop")
             continue
-        asked[k] = found["choice"]
+        else:
+            fits = {"keep": (True, False), "take": (False, True), "drop": (True, True)}[choice]
+            named = [
+                k for k in range(first, min(int(found["to"]), len(lines)))
+                if (fits[0] and k in blocks) or (fits[1] and lines[k].startswith(CANDIDATE))
+            ]  # fmt: skip
+        for k in named:
+            if k in asked:
+                problems.append(f"line {k + 1} is named twice")
+                continue
+            asked[k] = found["choice"]
     if not choices:
         problems.append("name the lines to settle, such as 12=keep 16=alt 18=drop")
     plans: dict[int, list[str]] = {}
+    taking: dict[int, bool] = {}
     for k, choice in sorted(asked.items()):
+        if k < len(lines) and lines[k].startswith(CANDIDATE):
+            if choice not in ("take", "drop") or _op(lines[k][len(CANDIDATE) :]) is None:
+                problems.append(f"line {k + 1} is a prep candidate: take it or drop it")
+            taking[k] = choice == "take"
+            continue
         if k in owner:
             if choice not in ("keep", "drop"):
                 problems.append(f"line {k + 1} goes with the op on line {owner[k].at + 1}: keep it or drop it")
@@ -186,6 +210,10 @@ def settle(vault: Vault, sync: str, choices: list[str], *, rev: int) -> Settled:
     k = 0
     while k < len(lines):
         block = starts.get(k)
+        if k in taking:
+            out += [lines[k][len(CANDIDATE) :]] if taking[k] else []
+            k += 1
+            continue
         if block is None:
             if k in owner and k in asked:
                 out += [_bare(_op(lines[k]) or {})] if asked[k] == "keep" else []
@@ -213,7 +241,7 @@ def settle(vault: Vault, sync: str, choices: list[str], *, rev: int) -> Settled:
     temporary = draft.with_name(f".{DRAFT}.settling")
     temporary.write_text("\n".join(out) + "\n", encoding="utf-8", newline="\n")
     temporary.replace(draft)
-    return Settled(draft, now + 1, kept, swapped, dropped, len(ops), unsure, prep)
+    return Settled(draft, now + 1, kept, swapped, dropped, len(ops), unsure, prep, sum(taking.values()))
 
 
 def lines(done: Settled) -> list[str]:
@@ -221,6 +249,8 @@ def lines(done: Settled) -> list[str]:
     their new numbers, and the `# prep` line's, where the prep points go."""
     settled = done.kept + done.swapped + done.dropped
     out = [f"settled {settled} line(s): {done.kept} kept, {done.swapped} alternative(s) taken, {done.dropped} dropped"]
+    if done.taken:
+        out.append(f"took {done.taken} prep candidate(s)")
     left = f", lines {', '.join(map(str, done.unsure))}" if done.unsure else ""
     out.append(f"draft: {done.path} rev {done.rev}: {done.ops} ops, {len(done.unsure)} unsure{left}")
     if done.prep is not None:

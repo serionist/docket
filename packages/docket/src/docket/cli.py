@@ -334,6 +334,61 @@ def sync_recordings(
     say_all(recordings.lines(recordings.recordings(found, sync, source, ledger_views.now())))
 
 
+@sync_app.command("pull")
+def sync_pull(
+    ctx: typer.Context,
+    sync: Annotated[str, typer.Argument(help="The sync: its id, or its folder, as docket sync start printed it.")],
+    source: Annotated[str, typer.Argument(help="The source whose skill folder holds a pull.py.")],
+    server: Annotated[
+        str | None,
+        typer.Option("--server", help="The source's MCP server command, when not the one its pull.py names."),
+    ] = None,
+    vault: VaultOption = None,
+) -> None:
+    """Run the source's sync run with its own pull.py, straight into the service, so nothing it fetches passes
+    through Claude: open, fetch, close, the final run when one is due, the audio four at a time, then each recording
+    that waits to be classified written to files in the sync folder. Prints the RUN line and a classify line per
+    recording. Needs the service."""
+    import shlex  # noqa: PLC0415
+
+    from docket.service.token import Tokens  # noqa: PLC0415
+    from docket.sync import pull  # noqa: PLC0415
+
+    found = find_vault(vault if vault is not None else ctx.obj)
+    command = shlex.split(server, posix=sys.platform != "win32") if server else None
+    say_all(pull.lines(pull.pull(found, sync, source, post=pull.http(Tokens().read()), server=command)))
+
+
+@sync_app.command("check")
+def sync_check(
+    ctx: typer.Context,
+    sync: Annotated[str, typer.Argument(help="The sync: its id, or its folder, as docket sync start printed it.")],
+    block: Annotated[str, typer.Argument(help="The block: its source, or <source>/<key> for a recording's.")],
+    vault: VaultOption = None,
+) -> None:
+    """Read one agent's block as the reconcile will and print each field it would leave to a hand edit: a line's
+    shape, a kind, a stream the ledger doesn't hold or none, a day or a due, a who the ledger writes another way, a
+    locator that doesn't open. The agent fixes each line it names; reads only."""
+    from docket.sync import check  # noqa: PLC0415
+
+    found = find_vault(vault if vault is not None else ctx.obj)
+    say_all(check.check_lines(*check.check(found, sync, block)))
+
+
+@sync_app.command("learned")
+def sync_learned(
+    ctx: typer.Context,
+    sync: Annotated[str, typer.Argument(help="The sync: its id, or its folder, as docket sync start printed it.")],
+    vault: VaultOption = None,
+) -> None:
+    """List the sync's LEARNED lines by source, each with the file and part it goes in, for Claude to fold into the
+    source's skill files after the summary. Reads only."""
+    from docket.sync import check  # noqa: PLC0415
+
+    found = find_vault(vault if vault is not None else ctx.obj)
+    say_all(check.learned_lines(check.learned(found, sync)))
+
+
 @sync_app.command("reconcile")
 def sync_reconcile(
     ctx: typer.Context,

@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from docket_testkit import copy_vault, empty_vault, git, make_config, template_with
+from docket_testkit import copy_vault, empty_vault, git, make_config, make_record, template_with
 from ledger_kit import meeting, op, ulid, write_ops
 from recording_kit import call, doc
 from sync_kit import Session, app_of, service_client, sync_template, sync_vault
@@ -21,7 +21,7 @@ from docket import recall
 from docket.cli import main
 from docket.errors import DocketError
 from docket.index import build as index_build
-from docket.ledger import views
+from docket.ledger import store, views
 from docket.sync import block, folder, start
 from docket.vault import cursors
 from docket.vault.config import SourceConfig
@@ -117,7 +117,8 @@ def test_start_writes_the_context_and_a_prompt_per_live_source_and_nothing_else(
     path = started.folder
     assert path.parent == folder.root() and folder.ID.match(path.name)
     assert sorted(p.relative_to(path).as_posix() for p in path.rglob("*")) == [
-        "agents", "agents/plaud.md", "agents/slack.md", "blocks", "context.md", "recordings", "sync.json",
+        "agents", "agents/plaud.md", "agents/slack.md", "blocks", "context", "context.md", "context/plaud.md",
+        "context/slack.md", "recordings", "sync.json",
     ]  # fmt: skip
     info = json.loads((path / "sync.json").read_text(encoding="utf-8"))
     assert info["vault"] == str(vault.root) and info["today"] == "2026-10-20" and info["zone"] == "Europe/Budapest"
@@ -132,7 +133,7 @@ def test_start_writes_the_context_and_a_prompt_per_live_source_and_nothing_else(
         prompt = (path / "agents" / f"{source}.md").read_text(encoding="utf-8")
         assert not PLACEHOLDER.search(prompt), source
         assert prompt.startswith(f"You are the {source} agent of a Docket sync.")
-        assert f"| the ledger | {path / 'context.md'} |" in prompt
+        assert f"| the ledger | {path / 'context' / f'{source}.md'}: your slice of it |" in prompt
         assert f"| your block | {path / 'blocks' / f'{source}.txt'} |" in prompt
         assert f'`run_open(source="{source}")`' in prompt and f"--vault {vault.root}" in prompt
         assert "| owed since | the run's window |" in prompt and "local in Europe/Budapest" in prompt
@@ -349,3 +350,70 @@ def test_the_command_prints_the_folder_and_the_agents(
 
 def test_an_owner_with_no_address_is_named_alone(tmp_path: Path) -> None:
     assert start.owner(empty_vault(tmp_path, make_config(emails=[]))) == "Ada Example"
+
+
+# -- each agent's slice (#305) ---------------------------------------------------------------------------------------
+
+
+def test_each_source_agent_reads_its_own_slice_items_by_source_people_meeting_and_due(vault: Vault) -> None:
+    """Slack's slice: its own items, Cleo's because she wrote in Slack lately, Gail's on a meeting Cleo is in, and one
+    due this week; not Finn's mail, and no points. The weekly's open point stays in context.md."""
+    vault.write_run("slack", [make_record(rid="slack:C0PILOT/1791100950.000100", source="slack",
+                                          container="slack:C0PILOT", author="Cleo Test <cleo@example.invalid>",
+                                          ts=datetime(2026, 10, 19, 8, tzinfo=UTC))])  # fmt: skip
+    mail = {"kind": "reply", "stream": "pilot", "opened": "2026-10-19"}
+    store.write(vault, [
+        {"op": "meeting", "as": "sensors", "fields": {"subject": "Sensor review", "start": "2026-10-21T10:00+02:00",
+                                                     "end": "2026-10-21T11:00+02:00", "organiser": "Hugo Example",
+                                                     "attendees": ["Cleo Test", "Hugo Example"]}},
+        {"op": "add", "fields": mail | {"title": "Send Gail the sensor list", "who": "Gail Example",
+                                        "source": "outlook:AAMkADgail", "meeting": "$sensors"}},
+        {"op": "add", "fields": mail | {"title": "Send Finn the crane report", "who": "Finn Example",
+                                        "source": "outlook:AAMkADfinn"}},
+        {"op": "add", "fields": mail | {"title": "Sign the venue form", "who": "Ivy Example",
+                                        "source": "outlook:AAMkADivy", "due": "2026-10-22"}},
+    ], by="claude", now=NOW)  # fmt: skip
+    index_build.update(vault)
+    started = start.start(vault, [], NOW)
+    sliced = (started.folder / "context" / "slack.md").read_text(encoding="utf-8").splitlines()
+    assert sliced[0].endswith("owed since: the run's window  the ledger for slack")
+    assert sliced[1:] == [
+        "open items (5)",
+        "A-0001 | reply | Ben Sample | Send Ben the pilot dates | slack:C0PILOT/1791100000.000100",
+        "A-0002 | waiting | Cleo Test | Cleo's quote / the sensors | outlook:AAMkADquote1",
+        "A-0003 | task | Dan Example | Book the room for the pilot | slack:C0PILOT/1791100800.000300 @M-0002",
+        "A-0006 | reply | Gail Example | Send Gail the sensor list | outlook:AAMkADgail @M-0005",
+        "A-0008 | reply | Ivy Example | Sign the venue form | outlook:AAMkADivy",
+        "snoozed (1)",
+        "A-0004 | task | Eve Example | Draft the pilot plan | slack:C0PILOT/1791100900.000100 | until 10-25",
+        "meetings 10-13 to 10-27, or with an open point (1)",
+        "M-0005 | 10-21 10:00-11:00 | Sensor review | Hugo Example",
+        "streams (1)",
+        "pilot | active | The pilot starts on the 28th | Book the room | deadline 10-28",
+    ]
+    whole = (started.folder / "context.md").read_text(encoding="utf-8")
+    assert "Send Finn the crane report" in whole and f"  #1 open | Ben: the pilot's dates | {POINT}" in whole
+
+
+def test_a_prompt_keeps_only_the_parts_its_source_uses(vault: Vault) -> None:
+    started = start.start(vault, [], NOW)
+    slack = (started.folder / "agents" / "slack.md").read_text(encoding="utf-8")
+    plaud = (started.folder / "agents" / "plaud.md").read_text(encoding="utf-8")
+    # Slack is a work source with no recordings: nothing to classify, no recordings part.
+    assert "## Promote" in slack and "## Classify and promote" not in slack and "## Recordings" not in slack
+    assert "## Classify and promote" in plaud and "## Recordings" in plaud and "## Promote\n" not in plaud
+    assert "[[" not in slack + plaud
+    assert len(slack) < len(plaud)
+
+
+def test_without_the_index_s_records_a_slice_holds_every_item(vault: Vault) -> None:
+    index_build.db_path(vault).unlink()
+    started = start.start(vault, [], NOW)
+    sliced = (started.folder / "context" / "slack.md").read_text(encoding="utf-8")
+    assert "open items (3)" in sliced and "snoozed (1)" in sliced and "M-0001 | 10-19" in sliced
+
+
+def test_fill_keeps_a_part_by_its_flag_or_its_absence() -> None:
+    text = "a\n[[if CLASSIFY]]\nb {X}\n[[end]]\n[[if !CLASSIFY]]\nc\n[[end]]\nd\n"
+    assert start.fill(text, {"X": "{Y}"}, frozenset({"CLASSIFY"})) == "a\nb {Y}\nd\n"
+    assert start.fill(text, {}) == "a\nc\nd\n"

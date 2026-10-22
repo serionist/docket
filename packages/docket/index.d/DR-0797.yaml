@@ -1,0 +1,14 @@
+decisions:
+  - id: DR-0797
+    title: "ledger's show takes brief: its free text cut at 300 characters, a meeting's open items only and the newest 5 history lines"
+    status: proposed
+    at: "2026-10-22"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#305"]
+    description: "A stream's show came back at 41.6 KB in the fifth rehearsal, fetched three times (#305). The ledger tool's show view takes brief, false by default: true cuts the description, notes, outcome and each point's answer at 300 characters, keeps a meeting's open and snoozed items only, and keeps the newest 5 lines of the history, the count of the rest in the detail's history_left, which the text says on a line of its own. Any other view refuses it. The agents' prompts and the sync skill ask show with brief."
+    binds:
+      - The parameter's name and meaning are a one-way door, as the MCP tools' parameters are (DR-0150).
+    not_chosen:
+      - "k on show: its default of 50 would cut every show, the pages' included."
+      - "show with refs for several objects: one call's room, where several shows in one message already run side by side."
