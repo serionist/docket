@@ -172,7 +172,7 @@ def router(service: Service) -> APIRouter:
         await service.writer.run(lambda: batch.save(service.vault(), made))
         return Done(notice=curate_view.done_line(f"round-{len(made.cards)}") or "")
 
-    async def decide(body: CurateDecide) -> Response | Done:
+    async def decide_card(body: CurateDecide) -> Response | Done:
         act, round_, card_id, shown = _decision(body)
         try:
             changed = await service.writer.run(
@@ -216,7 +216,7 @@ def router(service: Service) -> APIRouter:
 
     @api.post("/curate/decide", response_model=Done, responses={**refusals, 409: {"model": Refused}})
     async def curate_decide(request: Request, body: CurateDecide) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
-        return await safely(request, lambda: decide(body))
+        return await safely(request, lambda: decide_card(body))
 
     @api.post("/curate/undo", response_model=Done, responses=refusals)
     async def curate_undo(request: Request, body: Undo) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
