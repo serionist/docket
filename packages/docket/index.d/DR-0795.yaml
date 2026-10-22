@@ -11,6 +11,7 @@ decisions:
       - "An item missing from a slice is found with ledger view list by who: the slice is where an agent looks first, never the only place."
       - Every item due by the prep week's end is in every slice.
       - "The block's labels and fields stay DR-0722's and DR-0748's: the check names problems, it changes no line."
+      - "A slice holds each of its people whole, every open item of each person it holds one of, and a source that sees every meeting gets the items on them: an agent takes a person's items in its slice as all of them."
     not_chosen:
       - "A slice by stream: a stream doesn't say which source will see an item's evidence."
       - "Dropping the meetings from the mail and calendar slices: they hold the clashes an invite is judged by."
