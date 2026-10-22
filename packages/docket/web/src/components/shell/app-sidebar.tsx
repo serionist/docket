@@ -76,16 +76,9 @@ function Entry({ page, shell, current }: { page: NavPage; shell: Shell | undefin
   return (
     <SidebarMenuItem>
       <SidebarMenuButton asChild tooltip={label}>
-        {/* A page moved into the app opens in it; the others load the server's own page. */}
-        {page.inApp ? (
-          <Link to={page.href} aria-current={here}>
-            {inner}
-          </Link>
-        ) : (
-          <a href={page.href} aria-current={here}>
-            {inner}
-          </a>
-        )}
+        <Link to={page.href} aria-current={here}>
+          {inner}
+        </Link>
       </SidebarMenuButton>
     </SidebarMenuItem>
   );

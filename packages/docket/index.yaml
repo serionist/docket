@@ -14,7 +14,7 @@ reading:
   - { path: packages/docket/src/docket/service/tools.py, role: contract, note: "the MCP tools' names and parameters, a one-way door (DR-0150); read's more and ledger's refs answer several within the room calls.py keeps (DR-0725)" }
   - { path: packages/docket/src/docket/service/security.py, role: contract, note: "what every request passes before a route: hosts, origins, the token and the session (DR-0152)" }
   - { path: packages/docket/src/docket/web/state.py, role: contract, note: "the Search page's URL: the search tool's parameters and the panel's, in one canonical form" }
-  - { path: packages/docket/src/docket/web/templates/macros.html, role: guide, note: "the web app's components, one macro each, for every page to reuse" }
+  - { path: packages/docket/src/docket/web/templates/macros.html, role: guide, note: "the web app's components, one macro each, for every page to reuse", removed: "2026-10-22", removed_why: "the Jinja templates went in #252's PR 9; the app's shared parts are web/src/components" }
   - { path: packages/docket/src/docket/vault/releaselog.py, role: contract, note: "the release log, a one-way door: the file, its lines, how several fold into one and how it fails closed" }
   - { path: packages/docket/src/docket/vault/cursors.py, role: contract, note: "each machine's cursor file, a one-way door: its keys, how it reads and fails closed, the window, the retry and waiting sets" }
   - { path: packages/docket/src/docket/service/runs.py, role: contract, note: "open sync runs in memory: bind, captures, close, drop, the caps, the marker the capture hook reads" }
@@ -30,7 +30,7 @@ reading:
   - { path: packages/docket/src/docket/documents/records.py, role: contract, note: "a folder source's records, a one-way door: the rid shape and its parts, titles, native's identity and people, gone versions and what anchors on them resolve against (DR-0482, DR-0483, DR-0487, DR-0491)" }
   - { path: packages/docket/src/docket/documents/scan.py, role: guide, note: "docket scan: the listing's skips, the cache and change detection, gone and returning versions, the guard, batches into the gate (DR-0486, DR-0487)" }
   - { path: packages/docket/src/docket/vault/settings.py, role: contract, note: "vault.yaml one writer: any change for the CLI and the pages, the commit saying who; credentials redaction off asked at the console for the CLI and refused for a page, its own or an uncommitted edit's; rewrite only in Docket form; the page's writers both ways; the lines to paste (DR-0601, DR-0602)" }
-  - { path: packages/docket/src/docket/web/settings.py, role: contract, note: "the Settings page: the sources, never-store lists, redaction and this machine's models; each change both ways with its button (a never-store value added after its question or taken off, a rule on or off, a source's sensitivity, on or off, private after its question), each a form post on the writer thread through vault.yaml's writer; credentials off named as its command; never-store values only with show=lists (DR-0505, DR-0508, DR-0509, DR-0601)" }
+  - { path: packages/docket/src/docket/web/settings.py, role: contract, note: "the Settings page's read and its three writes, JSON on the writer thread through vault.yaml's writer, each way: a never-store value added after its question or taken off, a rule on or off, a source's sensitivity, on or off, private after its question; a keyed token for the file, no value in any answer; credentials off only as its command (DR-0509, DR-0601, DR-0789, DR-0790)" }
   - { path: packages/docket/src/docket/console.py, role: contract, note: "the owner yes at their own console, for turning credentials redaction off and forgetting for real: the refusals, the OS prompt or the code, the question, nothing that answers it; and who() and signed(), the label a commit of an act carries (DR-0572, DR-0599)" }
   - { path: packages/docket/src/docket/vault/inforce.py, role: contract, note: "the settings in force: HEAD vault.yaml plus what an uncommitted edit only tightens, field by field; loosens() as the same rule; the loader and its cache by HEAD commit id (DR-0521)" }
   - { path: packages/docket/src/docket/vault/forgotten.py, role: contract, note: "the forgotten list, a one-way door: its line, the masked ledger ops among it, how it reads and fails closed, HEAD's lines and the disk's in force with HEAD's cached by commit id, what it takes, the digest the index is built under (DR-0579, DR-0593, DR-0695)" }
@@ -54,6 +54,7 @@ reading:
   - { path: packages/docket/src/docket/sync/reconcile.py, role: guide, note: "docket sync reconcile: the sync's batch drafted from every block, the recordings' too, by fixed rules, what it leaves unsure for Claude, and a sync with no close said (DR-0760, DR-0772)" }
   - { path: packages/docket/src/docket/sync/recording.md, role: contract, note: "the recording agent's prompt docket sync recordings fills: its closes pass, its block, written to blocks/<source>/<key>.txt, and its note by #211's method (DR-0748, DR-0772)" }
   - { path: packages/docket/src/docket/sync/recordings.py, role: guide, note: "docket sync recordings: each recording's files from raw, its agent's prompt and its source's list (DR-0746)" }
+  - { path: packages/docket/src/docket/web/bare.py, role: contract, note: "the pages the service writes itself with no script: sign-in, used link and a failure on a page path, naming neither the vault nor the machine (DR-0793)" }
 decisions:
   - id: DR-0019
     title: The vault's layout and run-file names are fixed
@@ -780,11 +781,12 @@ decisions:
       - "Moving the reference into the package: supersedes DR-0101 and DR-0108 for no gain a byte-identical copy doesn't give."
   - id: DR-0170
     title: The web app renders pages on the server with Jinja2 and swaps parts of them with htmx, every state a URL
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#9"]
+    superseded_by: [DR-0792]
     description: "Pages are Jinja2 templates in docket/web/templates, autoescaped, with StrictUndefined so a missing value fails the render, and one macro per component in macros.html. A whole page and its fragments live at different URLs (/search, /search/results, /search/panel), so no route reads HX-Request, and a reload, a bookmark or the back button always gets a page. A fragment names the page's canonical URL: HX-Push-Url when it differs from HX-Current-URL, else HX-Replace-Url; the waiting state's retry always replaces. Every state renders without JavaScript. Routes read their own query strings and render their own errors: a DocketError is the page's error state, anything else is logged as its type and frames and answered with the error page."
     binds:
       - Text from records and docs goes through no |safe and becomes no link.
@@ -794,11 +796,12 @@ decisions:
       - "FastAPI's typed query parameters: a bad value answers a page with JSON 422."
   - id: DR-0171
     title: The web app's front-end files are vendored in the package and served by the service
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#9"]
+    superseded_by: [DR-0705]
     description: "htmx 4.0.0 (0BSD), Inter 4.1 and JetBrains Mono 2.304 (OFL-1.1) and the Lucide icons the pages use (ISC) are files in docket/web, each pinned in docket/web/assets.py by version, source and sha256 with its licence file beside it, and a test hashes each. /static/ serves only the files in the package's static folder, read at start, with content types from a fixed table, never mimetypes, and Cache-Control: no-cache with a strong ETag. The htmx script carries its pin as integrity. Nothing loads from a CDN, so the app works offline on 127.0.0.1."
     binds:
       - A new vendored file lands with its pin, its licence file and the test that hashes it.
@@ -809,11 +812,12 @@ decisions:
       - "htmx 2.0.11: the maintenance line, which snapshots pages into localStorage unless turned off."
   - id: DR-0172
     title: Pages carry a strict CSP and keep the user's words out of browser storage
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#9"]
+    superseded_by: [DR-0706]
     description: "Every page and fragment carries Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none', and Cache-Control: no-store. No inline script, style element, style attribute, handler attribute or javascript: URL, and no htmx feature that needs new Function() (event filters, hx-on, js: values). htmx 4 keeps no history snapshot, and the browser keeps two cookies of one word each, docket_theme and docket_keys. A test walks every rendered state for these."
     not_chosen:
       - "The Guard's floor alone: inline styles and scripts would pass unnoticed."
@@ -867,11 +871,12 @@ decisions:
       - "A placeholder page per slot: routes that only say later."
   - id: DR-0177
     title: Static files need no session, and the web renders the pages a stranger can reach
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: medium
     sources: ["#9"]
+    superseded_by: [DR-0793]
     description: GET and HEAD under /static/ pass the Guard's session check; the Host check still applies, and a write there still needs the session. The files are the package's own, the same for everyone. The sign-in, used-link and not-found pages come from the web's templates in a bare layout, with no navigation and no footer, so they name neither the vault's folder nor the machine; a static miss is a plain-text 404. It narrows DR-0152's rule that the pages take the cookie to the pages themselves.
     not_chosen:
       - "Static files behind the session: the sign-in page can't load its stylesheet."
@@ -1574,11 +1579,12 @@ decisions:
       - "The old_paths table alone: read would still parse every doc for superseded_by and the citing lines."
   - id: DR-0300
     title: The Sync page is read-only and shows what needs doing, what failed, the runs and the cursors
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#72"]
+    superseded_by: [DR-0788]
     description: "/sync shows, in this order: what needs a Claude session or the user first, the failures still current with what to do about each, the open and recent runs, and each machine's cursor of each source. Its sources are those whose vault.yaml entry lists tools, and any other a cursor file or the run history names. It reads the open runs in the service's memory, the run history (DR-0301) and the cursor files, and runs run_open's own checks, in the service's process and never through /api. It adds no write route: nothing on it opens, closes or drops a run or edits a cursor, and the run routes keep the bearer token only (DR-0243)."
     binds:
       - "Nothing from a capture's arguments or result, and no session or agent id, reaches the page: ids, counts, times and Docket's own messages only."
@@ -1615,11 +1621,12 @@ decisions:
     not_chosen: ["Matching the drop messages: rewording one would break the page's advice."]
   - id: DR-0303
     title: The Sync page's URL holds source, run and k
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#72"]
+    superseded_by: [DR-0788]
     description: "/sync takes source (one source's name: every part narrows to it), run (a run's id: its card opens at the top of the runs, open or in the history) and k (how many recent runs: 20 by default, Show more adds 20, up to 500). One canonical form: that order, defaults left out. A malformed value is the page's own error with status 400; a well-formed source or run the page doesn't know says so with 200; unknown parameters are ignored. /sync is always a whole page and /sync/runs always the runs part, for the refresh (DR-0306), naming the page's canonical URL by DR-0170's rule. The page's own links are plain links."
     binds:
       - Parameters only gain optional ones whose default keeps today's meaning, so a bookmark or a link to a run keeps opening.
@@ -1650,11 +1657,12 @@ decisions:
       - "An acknowledge button: a write from the browser, and the next whole close clears it anyway."
   - id: DR-0306
     title: The Sync page's runs part refreshes every 5 seconds while a run is open
-    status: proposed
+    status: superseded
     at: "2026-10-15"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#72"]
+    superseded_by: [DR-0788]
     description: While a run is open, the runs part asks /sync/runs again after 5 seconds (hx-trigger load delay:5s, as the Search page's waiting state) and swaps only itself, so a list opened elsewhere on the page stays open. With no run open the answer carries no trigger, and says to reload for the cursors and what is due. The refresh reads the service's memory only. Without JavaScript the page shows the same at load, with a reload link.
     not_chosen:
       - "Every part refreshed: the cursor files, staging and the index read every 5 seconds, and every open list closed."

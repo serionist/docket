@@ -71,7 +71,7 @@ def a_session(sessions: Sessions) -> dict[str, str]:
 # -- the table of checks ---------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("path", ["/", "/api/status", "/mcp", "/session", "/api/health", "/static/css/base.css"])
+@pytest.mark.parametrize("path", ["/", "/api/status", "/mcp", "/session", "/api/health", "/static/icon.svg"])
 @pytest.mark.parametrize("method", ["GET", "POST"])
 def test_a_forged_host_is_refused_everywhere(guarded: TestClient, path: str, method: str) -> None:
     for host in ("evil.example", f"evil.example:{PORT}", "127.0.0.1:9999", "127.0.0.1"):
@@ -142,9 +142,9 @@ def test_the_session_link_takes_only_the_token(guarded: TestClient, sessions: Se
 
 
 def test_static_files_need_no_session_but_only_to_be_read(guarded: TestClient) -> None:
-    assert guarded.get("/static/css/base.css").text == "reached GET /static/css/base.css"
-    assert guarded.head("/static/css/base.css").status_code == 200
-    assert guarded.post("/static/css/base.css").status_code == 401
+    assert guarded.get("/static/icon.svg").text == "reached GET /static/icon.svg"
+    assert guarded.head("/static/icon.svg").status_code == 200
+    assert guarded.post("/static/icon.svg").status_code == 401
     assert guarded.get("/staticky").status_code == 401
     assert guarded.get("/static").status_code == 401
 
@@ -246,15 +246,23 @@ def test_a_code_starts_one_session_and_moves_on_with_a_page(app_client: TestClie
     assert "Secure" not in cookie
     session = re.match(f"{COOKIE}=([^;]+)", cookie)
     assert session is not None
-    # Signed in, `/` moves on to Search; without the session it is the sign-in page.
+    # Signed in, `/` moves on to Today; without the session it is the sign-in page.
     assert app_client.get("/", headers={"Cookie": f"{COOKIE}={session.group(1)}"}).status_code == 303
-    assert app_client.get(f"/session?code={code}").status_code == 401
+    # The code is used: the used-link page, with no session.
+    used = app_client.get(f"/session?code={code}&next=/search")
+    assert used.status_code == 401
+    assert "set-cookie" not in used.headers
+    assert "This link was used, or is over a minute old" in used.text
 
 
 def test_a_code_is_good_for_a_minute(app_client: TestClient, clock: Clock) -> None:
     code = code_from(app_client)
     clock.now += CODE_SECONDS + 1
-    assert app_client.get(f"/session?code={code}").status_code == 401
+    stale = app_client.get(f"/session?code={code}&next=/sync?source=memo")
+    assert stale.status_code == 401
+    assert "set-cookie" not in stale.headers
+    assert "This link was used, or is over a minute old" in stale.text
+    assert 'docket open "/sync?source=memo"' in stale.text.replace("&quot;", '"')
 
 
 def test_a_session_ends_after_twelve_hours(app_client: TestClient, sessions: Sessions, clock: Clock) -> None:
@@ -281,6 +289,13 @@ def test_a_made_up_code_or_none_starts_nothing(app_client: TestClient) -> None:
         ("https://evil.example", "/"),
         ("search", "/"),
         ("/a\r\nSet-Cookie: x", "/"),
+        # A browser strips a tab or a line break from a URL, so these would leave this origin as //evil.example.
+        ("/\t/evil.example", "/"),
+        ("/\n/evil.example", "/"),
+        ("/search?query=a\x00b", "/"),
+        ("/search?query=a\x7f", "/"),
+        ("/search?query=a\x85", "/"),
+        ("/search?query=%09ok", "/search?query=%09ok"),
         (None, "/"),
     ],
 )

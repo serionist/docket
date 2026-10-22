@@ -1,6 +1,6 @@
 /**
  * The app's routes, in code. Each page's state is its URL as a plain query string, read and written by our own
- * parseSearch and stringifySearch (DR-0704), never TanStack Router's JSON. The paths the service answers with the
+ * parseSearch and stringifySearch (DR-0792), never TanStack Router's JSON. The paths the service answers with the
  * app's document are routes.json's, which a test holds to this tree.
  */
 import {
@@ -10,7 +10,7 @@ import {
   lazyRouteComponent,
   type RouterHistory,
 } from "@tanstack/react-router";
-import { NotFound, Shell } from "@/components/shell/shell";
+import { NotFound, PageFailed, Shell } from "@/components/shell/shell";
 import { freshPage, PageLoadError } from "@/lib/build";
 import { parseSearch, type Search, stringifySearch } from "@/lib/search";
 import { BriefsPage } from "@/pages/briefs";
@@ -83,7 +83,7 @@ export const briefsRoute = createRoute({
 export const stagingRoute = createRoute({
   getParentRoute: () => root,
   path: "/staging",
-  // Staging and Curate load when first opened: the first page's script keeps to its budget (DR-0712).
+  // Staging, Curate, Sync and Settings load when first opened: the first page's script keeps to its budget (DR-0712).
   component: lazyRouteComponent(
     freshPage(() => import("@/pages/staging")),
     "StagingPage",
@@ -103,6 +103,28 @@ export const curateRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): Search => search as Search,
 });
 
+export const syncRoute = createRoute({
+  getParentRoute: () => root,
+  path: "/sync",
+  component: lazyRouteComponent(
+    freshPage(() => import("@/pages/sync")),
+    "SyncPage",
+  ),
+  errorComponent: PageLoadError,
+  validateSearch: (search: Record<string, unknown>): Search => search as Search,
+});
+
+export const settingsRoute = createRoute({
+  getParentRoute: () => root,
+  path: "/settings",
+  component: lazyRouteComponent(
+    freshPage(() => import("@/pages/settings")),
+    "SettingsPage",
+  ),
+  errorComponent: PageLoadError,
+  validateSearch: (search: Record<string, unknown>): Search => search as Search,
+});
+
 export const routeTree = root.addChildren([
   designRoute,
   todayRoute,
@@ -114,6 +136,8 @@ export const routeTree = root.addChildren([
   briefsRoute,
   stagingRoute,
   curateRoute,
+  syncRoute,
+  settingsRoute,
 ]);
 
 export function createAppRouter(history?: RouterHistory) {
@@ -123,6 +147,8 @@ export function createAppRouter(history?: RouterHistory) {
     parseSearch,
     stringifySearch,
     defaultPreload: false,
+    // A page that fails as it draws says so and nothing more: never the error's words, which may quote a record.
+    defaultErrorComponent: PageFailed,
     scrollRestoration: false,
     // A page scrolls to its own hash once its read answers, as the Recording page does to #at; the router's scroll
     // came on render, before the read, and found the line the last read had marked.

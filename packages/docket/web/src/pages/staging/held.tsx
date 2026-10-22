@@ -4,28 +4,13 @@
  * Claude's cuts skill. Nothing here releases: the page shows the command, and the owner runs it, or says yes to
  * Claude. A value a shell would act on stays its placeholder, listed beside the commands.
  */
-import { ChevronRightIcon, CopyIcon } from "lucide-react";
+import { ChevronRightIcon } from "lucide-react";
 import { Locator } from "@/components/doc";
-import { Button } from "@/components/ui/button";
+import { Paste } from "@/components/paste";
 import type { HeldSource, StagingList } from "./api";
 
 function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
-}
-
-/** A command or the words to paste, in the mono face, with the button that copies it. */
-export function Paste({ text, label, onCopy }: { text: string; label: string; onCopy: (text: string) => void }) {
-  return (
-    <div className="flex items-start gap-2 rounded-sm border border-rule bg-paper py-1 pr-1 pl-2">
-      <code dir="ltr" className="min-w-0 flex-1 py-1 font-mono text-xs break-all text-ink" data-paste>
-        {text}
-      </code>
-      <Button size="sm" variant="ghost" onClick={() => onCopy(text)} aria-label={`Copy ${label}`}>
-        <CopyIcon />
-        Copy
-      </Button>
-    </div>
-  );
 }
 
 function Source({ held, onCopy }: { held: HeldSource; onCopy: (text: string) => void }) {

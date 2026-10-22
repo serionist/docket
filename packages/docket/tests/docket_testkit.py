@@ -186,7 +186,7 @@ def git_calls(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
 
 def cant_place(monkeypatch: pytest.MonkeyPatch) -> None:
     """vault.yaml's in-place editor finds no place for any change, as for a file with an alias in it: the change is
-    left to the user, with its line (DR-0602)."""
+    left to the user, with its line (DR-0791)."""
     monkeypatch.setattr(yamledit, "patch", lambda text, before, after: None)
 
 

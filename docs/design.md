@@ -301,7 +301,7 @@ flowchart TB
   never-store lists and the redaction rules, and queries past the same lists (DR-0538).
 - Security on localhost (DR-0152): bound to 127.0.0.1; every request's Host checked; the browser gets a session
   cookie (SameSite=Strict) from a one-time link `docket open` opens, and only the web app's static files go without
-  it (DR-0177); every write checks Origin and Sec-Fetch-Site;
+  it (DR-0793); every write checks Origin and Sec-Fetch-Site;
   the API and MCP take a bearer token from the keychain, or from a file only the user can read where there is no
   keychain; the MCP endpoint also uses the MCP SDK's DNS-rebinding protection. The service runs the consuming repo's
   mappers, never code from the vault, a downloads folder or a drop folder.
@@ -336,7 +336,7 @@ flowchart TB
 
 **Stack:** Python 3.12 and uv; SQLite with FTS5 (and sqlite-vec for vectors); JSONL for the raw log; age for media
 encryption; Pydantic for schemas; the MCP Python SDK; FastAPI, serving a React app with shadcn/ui that Vite builds into
-the package, so an install needs no Node, its pages moving there from Jinja2 and htmx one by one (DR-0703, DR-0705);
+the package, so an install needs no Node (DR-0703, DR-0705);
 faster-whisper on CTranslate2, in an environment `docket models install --speech` builds (DR-0567); ONNX Runtime with
 tokenizers for the embedder, in an environment `docket models install` builds (DR-0331, DR-0332); pypdf, openpyxl and
 Docket's own docx and pptx readers on defusedxml for documents' text, in a child process with limits (DR-0484, DR-0485).
@@ -743,10 +743,10 @@ change lands on whoever uses that vendor, while the core still checks every rid 
 Every page has the actions that belong on it. An action runs in the service, runs Claude headless, or hands the job
 to Claude Code with the command ready to paste.
 
-How it is built (DR-0170 to DR-0175, DR-0546), and where it is going (#252, DR-0703 to DR-0712):
+How it is built (#252, DR-0703 to DR-0712, DR-0792):
 
-- The pages move into one React app, a PR a page, the day pages first: TanStack Router keeps each page's state in its
-  URL as a plain query string, encoded by the one rule every page link the service writes follows (DR-0704);
+- Every page is one React app: TanStack Router keeps each page's state in its
+  URL as a plain query string, encoded by the one rule every page link the service writes follows (DR-0792);
   TanStack Query reads in memory; shadcn/ui's components on Radix and Tailwind CSS 4. Vite builds it into
   `docket/web/app/`, committed, and CI builds it again and fails on any difference (DR-0705). The service serves its
   files under `/static/app/` and its document for each of its routes, with a style nonce of its own each time under a
@@ -796,27 +796,29 @@ How it is built (DR-0170 to DR-0175, DR-0546), and where it is going (#252, DR-0
   starts only on the owner's click. Every write is a JSON write on the writer thread, and a decision is refused when
   the round isn't this machine's current one, or answered 409 when the entity file changed since the card was shown
   (DR-0786). Its URL holds the open card or its edit form.
-- Staging and Curate load their scripts when first opened, so the first page's script keeps to its budget.
-- A page not moved yet is its Jinja page, as below.
-- Pages rendered by the service with Jinja2, parts of them swapped by htmx; every state is a URL that renders without
-  JavaScript, and the navigation shows every page above with its phase.
-- htmx, the fonts and the icons are files in the package, served under `/static/`; nothing comes from the network,
-  so the app works offline, under a CSP that allows no inline script or style and no eval.
+- Staging, Curate, Sync and Settings load their scripts when first opened, so the first page's script keeps to its
+  budget.
+- The app, its fonts and the icons are files in the package, served under `/static/`; nothing comes from the
+  network, so the app works offline, under a CSP that allows no inline script and no eval.
 - The user's words stay out of the browser's storage: pages aren't cached, and the browser keeps only the theme and
   the keys switch.
-- The Sync page only reads (DR-0300): what needs a Claude session or the user first, by `run_open`'s own checks and
-  final-run rule (DR-0304); the failures still current, each with what to do (DR-0305); the runs open and ended; each
-  machine's cursors. Its URL holds `source`, `run` and `k` (DR-0303), and its runs part refreshes while a run is open
-  (DR-0306).
+- The sign-in and used-link pages, and the page a failure on a page path answers, are plain HTML the service writes,
+  with no script, naming neither the vault nor the machine; a page path the app has no route for shows its not-found
+  page in the shell (DR-0792, DR-0793).
+- The Sync page only reads, over `/api/web/sync` (DR-0788): what needs a Claude session or the user first, by
+  `run_open`'s own checks and final-run rule (DR-0304); the failures still current, each with what to do (DR-0305);
+  the runs open and ended, a run's card in the panel; each machine's cursors. Its URL holds `source`, `run` and `k`,
+  and while a run is open its runs part, `/api/web/sync/runs`, is read again every 5 seconds.
 - The Settings page shows each source, the never-store lists (their values only with `show=lists`), redaction and
-  this machine's models (DR-0505, DR-0510). Its buttons make changes both ways through the CLI's writer: a source's
-  sensitivity, a source on or off, a redaction rule on or off, a never-store value added or taken off, each committed
-  via page (DR-0601). Turning credentials redaction off is the one change no page makes: it asks at the owner's
+  this machine's models, over `/api/web/settings` (DR-0789, DR-0510). Its buttons make changes both ways through the
+  CLI's writer, as JSON writes carrying a keyed token for the file the page read: a source's sensitivity, a source on
+  or off, a redaction rule on or off, a never-store value added after its question or taken off, each committed via
+  page (DR-0601, DR-0790). Turning credentials redaction off is the one change no page makes: it asks at the owner's
   console. What has no button (a new source, a media folder, the api provider) is named as its command. Each change
   is one form post on the writer thread, and a source made private asks once more first. A never-store value is
   added in two form posts on the writer thread: the first answers a view naming the staged records it drops and what
   already stored holds it, the second adds it if `vault.yaml` is still the file the view counted; the value travels
-  in the posts' bodies only (DR-0508, DR-0509, DR-0602).
+  in the posts' bodies only (DR-0790, DR-0509, DR-0791).
   The Claude API key and a spend cap come with the features they set.
 - The day pages, Today, the Queue, the Ledger and Meetings, are the React app's. They read the ledger beside the writer through the `ledger`
   tool's reads and two of their own, `matching` and `batch_lines`, and write only through the ledger's writer: each

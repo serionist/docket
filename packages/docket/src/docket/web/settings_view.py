@@ -1,12 +1,12 @@
-"""The Settings page's parts (DR-0505, DR-0601, DR-0510 to DR-0512): what vault.yaml says about the sources, the
-never-store lists and redaction, what this machine's models are, and for every change its button, its command or its
-line.
+"""The Settings page's parts (DR-0601, DR-0510, DR-0511, DR-0789, DR-0790): what vault.yaml says about the sources,
+the never-store lists and redaction, what this machine's models are, and for every change its button, its command or
+its line.
 
 `SettingsState` is the URL. `build` and `build_confirm` take the facts the route gathered and do no I/O, so every rule
-here is tested on invented settings. The never-store values are in the view only when the URL asks for them
-(`show=lists`), so a page read for anything else holds none; a value typed to add travels only in a post's body and
-its confirm view, never in a URL (DR-0508). Every line to paste comes from `vault.settings`, quoted as vault.yaml holds
-it.
+here is tested on invented settings; `page`, `add_question` and `private_question` turn them into the JSON the app
+reads, leaving out what the page never shows. The never-store values are in the view only when the URL asks for them
+(`show=lists`), so a page read for anything else holds none; a value typed to add travels only in a write's body,
+never in a URL or an answer (DR-0790). Every line to paste comes from `vault.settings`, quoted as vault.yaml holds it.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from pydantic import BaseModel
 from starlette.datastructures import QueryParams
 
 from docket.copied import filled
@@ -30,7 +31,7 @@ from docket.vault.settings import BUILTIN_RULES, LISTS, RANK, item_line, key_lin
 PATH = "/settings"
 ADD = "/settings/never-store"
 SHOWS = ("lists",)
-# What the last post did, by kind and count only: never a value (DR-0512).
+# What the last post did, by kind and count only: never a value (DR-0789).
 DONE = re.compile(
     r"^(?:(?P<listed>listed|unlisted)-(?P<list>people|containers|keywords)-(?P<count>[01])"
     r"|(?P<rule>credentials|phone|pattern)-(?P<state>on|off)"
@@ -72,10 +73,11 @@ class SettingsStateError(DocketError):
 
 @dataclass(frozen=True)
 class SettingsState:
-    """The Settings page's URL (DR-0512): `show=lists` puts the never-store values in the page."""
+    """The Settings page's URL (DR-0789): `show=lists` puts the never-store values in the page; `done`, from a URL
+    before the app, says once what a write did."""
 
     show: str | None = None
-    # What the last post did, as DONE has it; never in a link the page makes.
+    # What the last write did, as DONE has it; never in a link the page makes, nor in its canonical URL.
     done: str | None = None
 
     @staticmethod
@@ -128,7 +130,7 @@ class Facts:
     service: list[str] = field(default_factory=list[str])
     service_errors: list[str] = field(default_factory=list[str])
     vectors: list[VectorCoverage] = field(default_factory=list[VectorCoverage])
-    # vault.yaml's hash as read, which the page's forms carry back (DR-0602).
+    # vault.yaml's hash as read, which the page's forms carry back (DR-0791).
     shown: str = ""
 
 
@@ -549,3 +551,194 @@ def build_source_confirm(
         line=key_line("sensitivity", "private"),
         stale=stale,
     )
+
+
+# -- the JSON reads ---------------------------------------------------------------------------------------------------
+
+
+class Pair(BaseModel):
+    name: str
+    value: str
+
+
+class ChangeRead(BaseModel):
+    """A source's change as its button makes it: what it posts, its words, what it does, and whether it lets more in."""
+
+    act: str
+    what: str
+    effect: str
+    looser: bool
+
+
+class SourceRead(BaseModel):
+    name: str
+    folder: bool
+    sensitivity: str
+    enabled: bool
+    facts: list[Pair]
+    problem: str | None
+    changes: list[ChangeRead]
+    # Its entry as Docket writes it, to change by hand under sources.
+    entry: str
+
+
+class ListedRead(BaseModel):
+    value: str
+    # Its line in vault.yaml, quoted as the file holds it.
+    line: str
+
+
+class NeverListRead(BaseModel):
+    name: str
+    count: int
+    matches: str
+    # The values, only with show=lists (DR-0789).
+    values: list[ListedRead]
+    ask: str
+
+
+class RuleRead(BaseModel):
+    name: str
+    pattern: bool
+    on: bool
+    what: str
+    note: str
+    looser: bool
+    # A button turns it the other way; credentials off never has one (DR-0601).
+    button: bool
+    # The command that turns it the other way, for a rule with no button.
+    command: str | None
+
+
+class CommandRead(BaseModel):
+    what: str
+    text: str
+
+
+class ModelsRead(BaseModel):
+    on: bool
+    rows: list[Pair]
+    errors: list[str]
+    commands: list[CommandRead]
+    config_path: str
+    off_line: str
+
+
+class SettingsPage(BaseModel):
+    """The page for a URL (DR-0789): what vault.yaml says about the sources, the never-store lists and redaction, and
+    this machine's models; each change's button, command or line."""
+
+    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0792); never `done`.
+    canonical: str
+    # vault.yaml as this read found it, which each write carries back (DR-0790): a keyed hash, never the file's own.
+    token: str
+    lead: str
+    form: str
+    machine: str
+    primary: str
+    # What a write did, for a URL from before the app that still names it.
+    notice: str | None
+    waiting: str | None
+    unfilled: list[Pair]
+    folders_problem: str | None
+    sources: list[SourceRead]
+    shown: bool
+    lists: list[NeverListRead]
+    rules: list[RuleRead]
+    credentials_off: str | None
+    names: str
+    pattern_example: str
+    models: ModelsRead
+
+
+def page(view: SettingsView, state: SettingsState, token: str) -> SettingsPage:
+    """The page as the app reads it: what the old page showed and nothing more, so a line to paste or an example the
+    page never drew stays out."""
+    models = view.models
+    return SettingsPage(
+        canonical=SettingsState(show=state.show).url(),
+        token=token,
+        lead=view.lead,
+        form=view.form,
+        machine=view.machine,
+        primary=view.primary,
+        notice=view.done,
+        waiting=view.waiting,
+        unfilled=[Pair(name=n, value=v) for n, v in view.unfilled],
+        folders_problem=view.folders_problem,
+        sources=[
+            SourceRead(
+                name=s.name,
+                folder=s.folder,
+                sensitivity=s.sensitivity,
+                enabled=s.enabled,
+                facts=[Pair(name=n, value=v) for n, v in s.facts],
+                problem=s.problem,
+                changes=[ChangeRead(act=c.act, what=c.what, effect=c.effect, looser=c.looser) for c in s.changes],
+                entry=s.entry,
+            )
+            for s in view.sources
+        ],
+        shown=view.shown,
+        lists=[
+            NeverListRead(
+                name=n.name,
+                count=n.count,
+                matches=n.matches,
+                values=[ListedRead(value=v.value, line=v.line) for v in n.values],
+                ask=n.ask,
+            )
+            for n in view.lists
+        ],
+        rules=[
+            RuleRead(
+                name=r.name,
+                pattern=r.pattern,
+                on=r.on,
+                what=r.what,
+                note=r.note,
+                looser=r.looser,
+                button=r.button,
+                command=None if r.button else r.command,
+            )
+            for r in view.rules
+        ],
+        credentials_off=view.credentials_off,
+        names=view.names,
+        pattern_example=view.pattern_example,
+        models=ModelsRead(
+            on=models.on,
+            rows=[Pair(name=n, value=v) for n, v in models.rows],
+            errors=models.errors,
+            commands=[CommandRead(what=c.what, text=c.text) for c in models.commands],
+            config_path=models.config_path,
+            off_line=models.off_line,
+        ),
+    )
+
+
+class AddQuestion(BaseModel):
+    """An add's own question (DR-0509, DR-0790): what the value drops now and what already stored holds it, what it
+    commits, and the token the add carries. Never the value: the page holds it."""
+
+    name: str
+    lines: list[str]
+    broad: str | None
+    commits: str
+    token: str
+
+
+def add_question(view: ConfirmView, token: str) -> AddQuestion:
+    return AddQuestion(name=view.name, lines=view.lines, broad=view.broad, commits=view.commits, token=token)
+
+
+class PrivateQuestion(BaseModel):
+    """Making a source private, asked once more (DR-0509): what it drops now and what it stops, and the token."""
+
+    source: str
+    lines: list[str]
+    token: str
+
+
+def private_question(view: SourceConfirm, token: str) -> PrivateQuestion:
+    return PrivateQuestion(source=view.source, lines=view.lines, token=token)

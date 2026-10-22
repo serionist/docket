@@ -1,5 +1,5 @@
 """How every page link the service builds encodes its query string: one rule, which the React app's router encodes by
-too, so a URL the server writes and one the app writes are the same bytes (DR-0704).
+too, so a URL the server writes and one the app writes are the same bytes (DR-0792).
 
 ASCII letters and digits, `_ . - ~` and `URL_SAFE` stay as they are, a space is `+`, and everything else is
 percent-encoded in upper-case hex, `* ! ' ( )` included: the standard library's `urlencode` with `quote_plus`.

@@ -1,5 +1,5 @@
 """Values as the pages show them, as text: a time in the owner's zone, a time into a recording, and the words for a
-failure. The Jinja pages' filters and the app's JSON reads both use these, so a time reads the same on both, and the
+failure. The app's JSON reads all use these, so a time reads the same on every page, and the
 app formats none of its own (DR-0709).
 """
 

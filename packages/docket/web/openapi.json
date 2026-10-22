@@ -1,6 +1,50 @@
 {
   "components": {
     "schemas": {
+      "AddQuestion": {
+        "description": "An add's own question (DR-0509, DR-0790): what the value drops now and what already stored holds it, what it\ncommits, and the token the add carries. Never the value: the page holds it.",
+        "properties": {
+          "broad": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Broad"
+          },
+          "commits": {
+            "title": "Commits",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "lines",
+          "broad",
+          "commits",
+          "token"
+        ],
+        "title": "AddQuestion",
+        "type": "object"
+      },
       "AnchorLink": {
         "description": "An anchor at a doc line's end, with where it opens; none for one that names no record.",
         "properties": {
@@ -1013,6 +1057,35 @@
         "title": "CardRow",
         "type": "object"
       },
+      "ChangeRead": {
+        "description": "A source's change as its button makes it: what it posts, its words, what it does, and whether it lets more in.",
+        "properties": {
+          "act": {
+            "title": "Act",
+            "type": "string"
+          },
+          "effect": {
+            "title": "Effect",
+            "type": "string"
+          },
+          "looser": {
+            "title": "Looser",
+            "type": "boolean"
+          },
+          "what": {
+            "title": "What",
+            "type": "string"
+          }
+        },
+        "required": [
+          "act",
+          "what",
+          "effect",
+          "looser"
+        ],
+        "title": "ChangeRead",
+        "type": "object"
+      },
       "Changed": {
         "properties": {
           "changed": {
@@ -1208,6 +1281,24 @@
           "seen"
         ],
         "title": "Classify",
+        "type": "object"
+      },
+      "CommandRead": {
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "what": {
+            "title": "What",
+            "type": "string"
+          }
+        },
+        "required": [
+          "what",
+          "text"
+        ],
+        "title": "CommandRead",
         "type": "object"
       },
       "CurateDecide": {
@@ -1430,6 +1521,59 @@
           "round"
         ],
         "title": "CurateView",
+        "type": "object"
+      },
+      "CursorRead": {
+        "properties": {
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/MachineRead"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "window_since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Since"
+          }
+        },
+        "required": [
+          "source",
+          "window_since",
+          "notes",
+          "rows",
+          "problem"
+        ],
+        "title": "CursorRead",
         "type": "object"
       },
       "CutBefore": {
@@ -1919,6 +2063,60 @@
         "title": "Edited",
         "type": "object"
       },
+      "EntryRead": {
+        "properties": {
+          "age": {
+            "title": "Age",
+            "type": "string"
+          },
+          "final_due": {
+            "title": "Final Due",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "retry",
+              "waiting"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "leaves": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leaves"
+          },
+          "since": {
+            "title": "Since",
+            "type": "string"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "why",
+          "since",
+          "age",
+          "leaves",
+          "final_due"
+        ],
+        "title": "EntryRead",
+        "type": "object"
+      },
       "Facet": {
         "properties": {
           "favours": {
@@ -1999,6 +2197,92 @@
           "value"
         ],
         "title": "Fact",
+        "type": "object"
+      },
+      "FailureRead": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "run": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run"
+          },
+          "run_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Url"
+          },
+          "severity": {
+            "enum": [
+              "error",
+              "warn"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "todo": {
+            "title": "Todo",
+            "type": "string"
+          },
+          "what": {
+            "title": "What",
+            "type": "string"
+          },
+          "when": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "When"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "source",
+          "what",
+          "todo",
+          "when",
+          "ids",
+          "run",
+          "run_url",
+          "severity"
+        ],
+        "title": "FailureRead",
         "type": "object"
       },
       "Filters": {
@@ -2622,6 +2906,32 @@
         "title": "HitRead",
         "type": "object"
       },
+      "IdListRead": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          },
+          "more": {
+            "title": "More",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "ids",
+          "more"
+        ],
+        "title": "IdListRead",
+        "type": "object"
+      },
       "ItemPanel": {
         "description": "An item as its panel shows it (DR-0664): its call, its fields, the meeting it hangs on, its free text, its\nmaterials, where it came from, its counts and its history.",
         "properties": {
@@ -3033,6 +3343,24 @@
         "title": "Linked",
         "type": "object"
       },
+      "ListedRead": {
+        "properties": {
+          "line": {
+            "title": "Line",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "line"
+        ],
+        "title": "ListedRead",
+        "type": "object"
+      },
       "LogRow": {
         "properties": {
           "at": {
@@ -3096,6 +3424,84 @@
           "undone_by"
         ],
         "title": "LogRow",
+        "type": "object"
+      },
+      "MachineRead": {
+        "properties": {
+          "ahead": {
+            "title": "Ahead",
+            "type": "boolean"
+          },
+          "handed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Handed"
+          },
+          "lookback": {
+            "title": "Lookback",
+            "type": "string"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          },
+          "mark": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mark"
+          },
+          "mark_age": {
+            "title": "Mark Age",
+            "type": "string"
+          },
+          "more": {
+            "title": "More",
+            "type": "integer"
+          },
+          "retry": {
+            "items": {
+              "$ref": "#/components/schemas/EntryRead"
+            },
+            "title": "Retry",
+            "type": "array"
+          },
+          "this": {
+            "title": "This",
+            "type": "boolean"
+          },
+          "waiting": {
+            "items": {
+              "$ref": "#/components/schemas/EntryRead"
+            },
+            "title": "Waiting",
+            "type": "array"
+          }
+        },
+        "required": [
+          "machine",
+          "this",
+          "mark",
+          "mark_age",
+          "lookback",
+          "retry",
+          "waiting",
+          "more",
+          "handed",
+          "ahead"
+        ],
+        "title": "MachineRead",
         "type": "object"
       },
       "MeasureRow": {
@@ -3642,6 +4048,213 @@
         "title": "Missing",
         "type": "object"
       },
+      "ModelsRead": {
+        "properties": {
+          "commands": {
+            "items": {
+              "$ref": "#/components/schemas/CommandRead"
+            },
+            "title": "Commands",
+            "type": "array"
+          },
+          "config_path": {
+            "title": "Config Path",
+            "type": "string"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "off_line": {
+            "title": "Off Line",
+            "type": "string"
+          },
+          "on": {
+            "title": "On",
+            "type": "boolean"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/Pair"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "on",
+          "rows",
+          "errors",
+          "commands",
+          "config_path",
+          "off_line"
+        ],
+        "title": "ModelsRead",
+        "type": "object"
+      },
+      "NeedRead": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "you",
+              "due",
+              "final"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "line": {
+            "title": "Line",
+            "type": "string"
+          },
+          "paste": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paste"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "word": {
+            "title": "Word",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "kind",
+          "word",
+          "line",
+          "paste"
+        ],
+        "title": "NeedRead",
+        "type": "object"
+      },
+      "NeverListRead": {
+        "properties": {
+          "ask": {
+            "title": "Ask",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "matches": {
+            "title": "Matches",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "$ref": "#/components/schemas/ListedRead"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "count",
+          "matches",
+          "values",
+          "ask"
+        ],
+        "title": "NeverListRead",
+        "type": "object"
+      },
+      "NeverStoreAnswer": {
+        "description": "What a never-store write did: its notice, a warning when vault.yaml's layout left it to the owner, or the add's\nquestion. `by_hand` says the add's line goes in by hand: the page writes it from the value it holds.",
+        "properties": {
+          "by_hand": {
+            "default": false,
+            "title": "By Hand",
+            "type": "boolean"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AddQuestion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning"
+          }
+        },
+        "title": "NeverStoreAnswer",
+        "type": "object"
+      },
+      "NeverStoreWrite": {
+        "additionalProperties": false,
+        "description": "A never-store value: `ask` for the add's question, `add` once it is answered, `off` to take one off. The value\nis the body's only, and no answer to it holds it (DR-0790).",
+        "properties": {
+          "act": {
+            "enum": [
+              "ask",
+              "add",
+              "off"
+            ],
+            "title": "Act",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "act",
+          "name",
+          "value",
+          "token"
+        ],
+        "title": "NeverStoreWrite",
+        "type": "object"
+      },
       "Notice": {
         "description": "What the last write did (DR-0710): its words, the batch's lines, and Undo or Redo by its batch.",
         "properties": {
@@ -3770,6 +4383,24 @@
           "url"
         ],
         "title": "OtherTranscript",
+        "type": "object"
+      },
+      "Pair": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "Pair",
         "type": "object"
       },
       "PairRow": {
@@ -4089,6 +4720,33 @@
           "proposed"
         ],
         "title": "Prep",
+        "type": "object"
+      },
+      "PrivateQuestion": {
+        "description": "Making a source private, asked once more (DR-0509): what it drops now and what it stops, and the token.",
+        "properties": {
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "lines",
+          "token"
+        ],
+        "title": "PrivateQuestion",
         "type": "object"
       },
       "Promote": {
@@ -4694,6 +5352,260 @@
         "title": "Row",
         "type": "object"
       },
+      "RuleAnswer": {
+        "properties": {
+          "notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning"
+          }
+        },
+        "title": "RuleAnswer",
+        "type": "object"
+      },
+      "RuleRead": {
+        "properties": {
+          "button": {
+            "title": "Button",
+            "type": "boolean"
+          },
+          "command": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command"
+          },
+          "looser": {
+            "title": "Looser",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "on": {
+            "title": "On",
+            "type": "boolean"
+          },
+          "pattern": {
+            "title": "Pattern",
+            "type": "boolean"
+          },
+          "what": {
+            "title": "What",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "pattern",
+          "on",
+          "what",
+          "note",
+          "looser",
+          "button",
+          "command"
+        ],
+        "title": "RuleRead",
+        "type": "object"
+      },
+      "RuleWrite": {
+        "additionalProperties": false,
+        "description": "A redaction rule, built in or the owner's pattern by its name, turned on or off.",
+        "properties": {
+          "rule": {
+            "title": "Rule",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "on",
+              "off"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule",
+          "state",
+          "token"
+        ],
+        "title": "RuleWrite",
+        "type": "object"
+      },
+      "RunRead": {
+        "properties": {
+          "badges": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Badges",
+            "type": "array"
+          },
+          "facts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Facts",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "lists": {
+            "items": {
+              "$ref": "#/components/schemas/IdListRead"
+            },
+            "title": "Lists",
+            "type": "array"
+          },
+          "opened": {
+            "title": "Opened",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "closed",
+              "dropped"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "took": {
+            "title": "Took",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Why"
+          },
+          "word": {
+            "title": "Word",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "state",
+          "word",
+          "badges",
+          "opened",
+          "took",
+          "facts",
+          "why",
+          "lists",
+          "url"
+        ],
+        "title": "RunRead",
+        "type": "object"
+      },
+      "RunsRead": {
+        "description": "The runs part, which the page asks again every 5 seconds while a run is open (DR-0788).",
+        "properties": {
+          "as_of": {
+            "title": "As Of",
+            "type": "string"
+          },
+          "focus": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "live": {
+            "title": "Live",
+            "type": "boolean"
+          },
+          "more": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "More"
+          },
+          "open": {
+            "items": {
+              "$ref": "#/components/schemas/RunRead"
+            },
+            "title": "Open",
+            "type": "array"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/RunRead"
+            },
+            "title": "Recent",
+            "type": "array"
+          }
+        },
+        "required": [
+          "as_of",
+          "live",
+          "focus",
+          "open",
+          "recent",
+          "more"
+        ],
+        "title": "RunsRead",
+        "type": "object"
+      },
       "Saved": {
         "description": "A field saved: the item's row and panel after it, and the versions before and after its write (DR-0710). A\npage whose read had `before` refetches nothing else; one whose read is older missed a write from the CLI, Claude\nor a sync while the poll held for the field, and refetches its reads.",
         "properties": {
@@ -4852,6 +5764,144 @@
         "title": "SegmentView",
         "type": "object"
       },
+      "SettingsPage": {
+        "description": "The page for a URL (DR-0789): what vault.yaml says about the sources, the never-store lists and redaction, and\nthis machine's models; each change's button, command or line.",
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "credentials_off": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credentials Off"
+          },
+          "folders_problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folders Problem"
+          },
+          "form": {
+            "title": "Form",
+            "type": "string"
+          },
+          "lead": {
+            "title": "Lead",
+            "type": "string"
+          },
+          "lists": {
+            "items": {
+              "$ref": "#/components/schemas/NeverListRead"
+            },
+            "title": "Lists",
+            "type": "array"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          },
+          "models": {
+            "$ref": "#/components/schemas/ModelsRead"
+          },
+          "names": {
+            "title": "Names",
+            "type": "string"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice"
+          },
+          "pattern_example": {
+            "title": "Pattern Example",
+            "type": "string"
+          },
+          "primary": {
+            "title": "Primary",
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/RuleRead"
+            },
+            "title": "Rules",
+            "type": "array"
+          },
+          "shown": {
+            "title": "Shown",
+            "type": "boolean"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceRead"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "unfilled": {
+            "items": {
+              "$ref": "#/components/schemas/Pair"
+            },
+            "title": "Unfilled",
+            "type": "array"
+          },
+          "waiting": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waiting"
+          }
+        },
+        "required": [
+          "canonical",
+          "token",
+          "lead",
+          "form",
+          "machine",
+          "primary",
+          "notice",
+          "waiting",
+          "unfilled",
+          "folders_problem",
+          "sources",
+          "shown",
+          "lists",
+          "rules",
+          "credentials_off",
+          "names",
+          "pattern_example",
+          "models"
+        ],
+        "title": "SettingsPage",
+        "type": "object"
+      },
       "Shell": {
         "description": "What the sidebar shows beside its pages (DR-0708): the counts and marks, and the vault, machine and index line\nat its foot. A count is None when its part of the vault doesn't read; `problem` says why the vault doesn't open.",
         "properties": {
@@ -5002,6 +6052,135 @@
           "title"
         ],
         "title": "Snooze",
+        "type": "object"
+      },
+      "SourceAnswer": {
+        "properties": {
+          "notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrivateQuestion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning"
+          }
+        },
+        "title": "SourceAnswer",
+        "type": "object"
+      },
+      "SourceRead": {
+        "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/ChangeRead"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "entry": {
+            "title": "Entry",
+            "type": "string"
+          },
+          "facts": {
+            "items": {
+              "$ref": "#/components/schemas/Pair"
+            },
+            "title": "Facts",
+            "type": "array"
+          },
+          "folder": {
+            "title": "Folder",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "sensitivity": {
+            "title": "Sensitivity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "folder",
+          "sensitivity",
+          "enabled",
+          "facts",
+          "problem",
+          "changes",
+          "entry"
+        ],
+        "title": "SourceRead",
+        "type": "object"
+      },
+      "SourceWrite": {
+        "additionalProperties": false,
+        "description": "A source made work, mixed or private, or turned off or on; private only `confirmed`, after its question.",
+        "properties": {
+          "act": {
+            "title": "Act",
+            "type": "string"
+          },
+          "confirmed": {
+            "default": false,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "act",
+          "token"
+        ],
+        "title": "SourceWrite",
         "type": "object"
       },
       "SpanView": {
@@ -5694,6 +6873,30 @@
         "title": "SummaryLink",
         "type": "object"
       },
+      "SyncChip": {
+        "description": "A source chip: All, or one source; the page narrows to the one that is on.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "on": {
+            "title": "On",
+            "type": "boolean"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "url",
+          "on"
+        ],
+        "title": "SyncChip",
+        "type": "object"
+      },
       "SyncLine": {
         "description": "A live source's last sync: when, in words that never count down, and whether it is due one, as the sidebar's\nSync mark says (DR-0304); one with a run open is syncing, never due.",
         "properties": {
@@ -5731,6 +6934,108 @@
           "href"
         ],
         "title": "SyncLine",
+        "type": "object"
+      },
+      "SyncPage": {
+        "description": "The whole page for a URL (DR-0788): its lead and notes, what needs a session, the failures, the runs and each\nmachine's cursors, in the order the page shows them (DR-0304, DR-0305).",
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "chips": {
+            "items": {
+              "$ref": "#/components/schemas/SyncChip"
+            },
+            "title": "Chips",
+            "type": "array"
+          },
+          "cursors": {
+            "items": {
+              "$ref": "#/components/schemas/CursorRead"
+            },
+            "title": "Cursors",
+            "type": "array"
+          },
+          "failures": {
+            "items": {
+              "$ref": "#/components/schemas/FailureRead"
+            },
+            "title": "Failures",
+            "type": "array"
+          },
+          "lead": {
+            "title": "Lead",
+            "type": "string"
+          },
+          "live_sources": {
+            "title": "Live Sources",
+            "type": "integer"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          },
+          "needs": {
+            "items": {
+              "$ref": "#/components/schemas/NeedRead"
+            },
+            "title": "Needs",
+            "type": "array"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "paste_all": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paste All"
+          },
+          "runs": {
+            "$ref": "#/components/schemas/RunsRead"
+          }
+        },
+        "required": [
+          "canonical",
+          "lead",
+          "chips",
+          "notes",
+          "needs",
+          "paste_all",
+          "live_sources",
+          "failures",
+          "runs",
+          "cursors",
+          "machine"
+        ],
+        "title": "SyncPage",
+        "type": "object"
+      },
+      "SyncRuns": {
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "runs": {
+            "$ref": "#/components/schemas/RunsRead"
+          }
+        },
+        "required": [
+          "canonical",
+          "runs"
+        ],
+        "title": "SyncRuns",
         "type": "object"
       },
       "TextLine": {
@@ -7223,6 +8528,208 @@
         "summary": "Search Panel"
       }
     },
+    "/api/web/settings": {
+      "get": {
+        "operationId": "settings_read_api_web_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Settings Read"
+      }
+    },
+    "/api/web/settings/never-store": {
+      "post": {
+        "operationId": "settings_never_store_api_web_settings_never_store_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NeverStoreWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NeverStoreAnswer"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Settings Never Store"
+      }
+    },
+    "/api/web/settings/redaction": {
+      "post": {
+        "operationId": "settings_redaction_api_web_settings_redaction_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleAnswer"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Settings Redaction"
+      }
+    },
+    "/api/web/settings/source": {
+      "post": {
+        "operationId": "settings_source_api_web_settings_source_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceAnswer"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Settings Source"
+      }
+    },
     "/api/web/shell": {
       "get": {
         "operationId": "shell_api_web_shell_get",
@@ -7401,6 +8908,62 @@
           }
         },
         "summary": "Staging Promote"
+      }
+    },
+    "/api/web/sync": {
+      "get": {
+        "operationId": "sync_read_api_web_sync_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Sync Read"
+      }
+    },
+    "/api/web/sync/runs": {
+      "get": {
+        "operationId": "sync_runs_api_web_sync_runs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncRuns"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refused"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Sync Runs"
       }
     },
     "/api/web/today": {

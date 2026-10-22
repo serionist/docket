@@ -1,6 +1,7 @@
 """What the web app's tests share: a signed-in client on a copy of the index fixture vault, a small HTML tree built
-with the standard library's parser, and the two checks every rendered state passes: the HTML check (nothing the
-page CSP would refuse, nothing that needs htmx's eval) and the structural accessibility rules."""
+with the standard library's parser, and the two checks every page the service writes itself passes (the sign-in,
+used-link and error pages, DR-0793): the HTML check (no script at all, nothing the page's CSP would refuse, nothing
+from elsewhere) and the structural accessibility rules."""
 
 from __future__ import annotations
 
@@ -16,19 +17,12 @@ from starlette.testclient import TestClient
 from docket.service.app import create_app
 from docket.service.sessions import COOKIE, Sessions
 from docket.service.state import Settings
-from docket.web import assets
+from docket.web import assets, frontend
 
 PORT = 8741
 OURS = f"http://127.0.0.1:{PORT}"
 TOKEN = "t0ken-for-tests-only"  # noqa: S105 - an invented token
 VOID = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"})
-# The htmx attributes the pages may use; none of them runs code. Filters in hx-trigger, hx-on and js: values do.
-HTMX_ATTRIBUTES = frozenset(
-    {
-        "hx-get", "hx-post", "hx-target", "hx-trigger", "hx-headers", "hx-history-elt", "hx-swap", "hx-swap-oob",
-        "hx-push-url", "hx-replace-url",
-    }
-)  # fmt: skip
 
 
 @dataclass
@@ -113,13 +107,21 @@ def parse(html: str) -> Element:
     return builder.root
 
 
+def served(target: str) -> bool:
+    """Whether /static/ serves the path: the package's own static files, or the app's build under app/."""
+    path = target.removeprefix("/static/")
+    return path in assets.ASSETS or (path.startswith("app/") and path.removeprefix("app/") in frontend.BUILD.files)
+
+
 def html_problems(html: str) -> list[str]:
-    """What the page CSP would refuse, or what would need htmx's eval: each a line naming the element."""
+    """What a plain page's CSP would refuse, which allows no script at all: each a line naming the element."""
     problems: list[str] = []
     for el in parse(html).walk():
         where = f"<{el.tag} {el.attrs}>"
-        if el.tag == "script" and "src" not in el.attrs:
-            problems.append(f"an inline script: {where}")
+        if el.tag == "script":
+            problems.append(f"a script: {where}")
+        if el.tag == "form":
+            problems.append(f"a form: {where}")
         if el.tag == "style":
             problems.append(f"a style element: {where}")
         for name, value in el.attrs.items():
@@ -129,14 +131,9 @@ def html_problems(html: str) -> list[str]:
                 problems.append(f"a handler attribute {name}: {where}")
             if value.strip().lower().startswith(("javascript:", "js:")):
                 problems.append(f"a script in {name}: {where}")
-            if name.startswith(("hx-", "data-hx-")) and name.removeprefix("data-") not in HTMX_ATTRIBUTES:
-                problems.append(f"an htmx attribute outside the list, {name}: {where}")
-            if name == "hx-trigger" and "[" in value:
-                problems.append(f"an htmx event filter, which needs eval: {where}")
         for name in ("src", "href"):
             target = el.attrs.get(name, "")
-            served = target.removeprefix("/static/") in assets.ASSETS
-            if el.tag in ("script", "link") and target.startswith("/static/") and not served:
+            if el.tag in ("script", "link") and target.startswith("/static/") and not served(target):
                 problems.append(f"an asset that isn't served: {target}")
             if el.tag in ("script", "link") and target.startswith(("http:", "https:", "//")):
                 problems.append(f"an asset from elsewhere: {target}")

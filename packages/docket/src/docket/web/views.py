@@ -3,7 +3,7 @@ filters as chips, the facets with their links, and the groups of hits, each a mo
 is (DR-0709).
 
 Every link is the page's own URL for the state it opens, from `SearchState`, so the app puts it in the address bar as
-the server wrote it (DR-0704). Sources and time narrow; people and entities favour, as the `search` tool's parameters
+the server wrote it (DR-0792). Sources and time narrow; people and entities favour, as the `search` tool's parameters
 do (DR-0175). A snippet is text in pieces, each marked or not by the query's words, never HTML: text from a record is
 data.
 """

@@ -355,6 +355,10 @@ def test_the_panel_is_an_item_s_or_a_meeting_s(reader: TestClient) -> None:
     meeting = read(reader, f"{API}/panel?open=M-0003&suggest=1")
     assert (meeting["item"], meeting["meeting"]["ref"]) == (None, "M-0003")
     assert meeting["meeting"]["suggestions"] is not None, "suggest=1 reads them, as on Meetings"
+    # Opened by its id, as two meetings sharing a number after a merge are, it keeps suggest and reads them too.
+    by_id = read(reader, f"{API}/panel?open={meeting['meeting']['id']}&suggest=1")
+    assert by_id["canonical"] == f"/today?open={meeting['meeting']['id']}&suggest=1"
+    assert (by_id["meeting"]["ref"], by_id["meeting"]["suggestions"]) == ("M-0003", meeting["meeting"]["suggestions"])
     assert [p["text"] for p in meeting["meeting"]["points"]] == ["Ben: the spring numbers"]
     gone = read(reader, f"{API}/panel?open=A-0999")
     assert (gone["item"], gone["meeting"]) == (None, None) and gone["missing"]

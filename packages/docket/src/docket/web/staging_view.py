@@ -387,7 +387,7 @@ class StagedRow(BaseModel):
     why: Why
     line: str
     on_hold: bool
-    # The URL that opens it beside the list, written by the server (DR-0704).
+    # The URL that opens it beside the list, written by the server (DR-0792).
     url: str
 
 

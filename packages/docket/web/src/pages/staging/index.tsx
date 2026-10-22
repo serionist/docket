@@ -12,6 +12,7 @@ import * as React from "react";
 import { SHELL_KEY } from "@/components/shell/app-sidebar";
 import { Note } from "@/components/doc";
 import { NoticeBar, Page, PageHeader, Panel, Refusal, Workspace } from "@/components/shell/page";
+import { COPIED_MS } from "@/components/paste";
 import { useShowKeys, useTitle } from "@/components/shell/shell";
 import { Button } from "@/components/ui/button";
 import { useBand } from "@/hooks/use-width";
@@ -35,7 +36,6 @@ import { FilterBar, rowsOf, WaitingList } from "./list";
 import { type Choice, chosenOf, RecordActions, RecordBody } from "./record";
 
 export const STAGING = ["staging"] as const;
-const COPIED_MS = 2500;
 
 function focusRow(key: string | undefined): void {
   if (key === undefined) return;

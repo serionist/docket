@@ -1,4 +1,4 @@
-"""A vault.yaml laid out by hand, edited in place (DR-0602): each change between the settings before and after spliced
+"""A vault.yaml laid out by hand, edited in place (DR-0791): each change between the settings before and after spliced
 into the text where PyYAML's composed nodes say the value stands, so every comment, every key's order and the file's
 own indentation stay as they were.
 
@@ -200,7 +200,7 @@ def _pairs(node: MappingNode) -> dict[str, tuple[Node, Node]]:
 
 def _touched(node: Node) -> Node:
     """A node a change splices at or takes out, refused when it holds a block scalar (`|` or `>`): its text runs on to
-    the next line, so a splice there would take a line the change didn't ask for (DR-0602)."""
+    the next line, so a splice there would take a line the change didn't ask for (DR-0791)."""
     todo = [node]
     while todo:
         found = todo.pop()

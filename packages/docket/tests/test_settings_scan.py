@@ -1,4 +1,4 @@
-"""vault.yaml's one writer, scanned over the whole package (DR-0602): the file is written in one place, its general
+"""vault.yaml's one writer, scanned over the whole package (DR-0791): the file is written in one place, its general
 entry is called by the writers listed here, and the web and the service write it no other way: no settings dumped
 whole, no file write in code that names the file. And the console's yes is asked for the one change that keeps it,
 turning credentials redaction off (DR-0599)."""
@@ -185,7 +185,7 @@ def read(vault, CONFIG_FILE):
 
 def test_outside_the_writer_only_init_writes_vault_yaml_as_a_file() -> None:
     """A new vault's first vault.yaml is Vault.init's; every later change is rewrite's, through write_config, so a
-    command added later can't write the file around the one writer (DR-0602)."""
+    command added later can't write the file around the one writer (DR-0791)."""
     found = {
         (rel, node.name)
         for rel, module in _modules()

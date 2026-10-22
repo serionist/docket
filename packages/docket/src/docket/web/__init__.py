@@ -1,48 +1,54 @@
-"""The web app: pages rendered on the server with Jinja2, parts of them swapped by htmx, every state a URL that
-renders without JavaScript (DR-0170). Nothing loads from the network: htmx, the fonts and the icons are files in this
-package, served under `/static/` (DR-0171), and every page carries a CSP stricter than the service's floor (DR-0172).
+"""The web app: one React app (DR-0703), its build served under `/static/app/` and its document for each route its
+`routes.json` lists (`frontend`), beside its JSON routes under `/api/web` (`webapi`, with the pages' own: `day_api`,
+`search`, `recording`, `briefs`, `staging`, `curate`, `sync` and `settings`). `/` answers 303 to Today, the start page
+(DR-0669); any other page path with a session answers the same document and 404, which the app shows as not found
+(DR-0792).
 
-The pages move one by one into the React app (#252): its build is served under `/static/app/` and its document for
-each route its `routes.json` lists, the day pages, Search, the Recording page, Briefs, Staging, Curate and `/design` so
-far, beside its JSON routes under `/api/web` (`frontend`, `webapi`, `day_api`, `search`, `recording`, `briefs`,
-`staging`, `curate`). `/` answers 303 to Today, the start page (DR-0669).
-
-`install` mounts it on the service's FastAPI app; `sign_in_page` and `used_link_page` are the pages the service shows
-a browser without a session, in the bare layout that names neither the vault nor the machine.
+The pages a browser reaches without a session, the sign-in and used-link pages, and the page a failure on a page path
+answers, are plain HTML the service writes, with no script (`bare`, DR-0793); they name neither the vault nor the
+machine. `install` mounts it all on the service's FastAPI app.
 """
 
 from __future__ import annotations
 
 from fastapi import FastAPI, Request
-from fastapi.exception_handlers import http_exception_handler
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException
-from starlette.responses import RedirectResponse, Response
+from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from docket.service.sessions import open_command
 from docket.service.state import Service
-from docket.web import assets, frontend, settings, sync, templating, webapi
+from docket.web import assets, bare, frontend, webapi
 
 # Paths whose 404 stays JSON: the clients of these read JSON, never a page.
 MACHINE_PATHS = ("/api", "/mcp")
 # The icon every page the service answers names, served without a session like the other static files.
-ICON = "/static/icon.svg"
+ICON = bare.ICON
 # Where the React app's build is served, under /static/.
 APP_FILES = "app/"
+READS = ("GET", "HEAD")
 
 
-def sign_in_page(wanted: str) -> str:
-    """The page a browser without a session gets, naming the command that opens the page it asked for."""
-    return templating.render("signin.html", {"command": open_command(wanted), "title": "Sign in"})
+def sign_in_page(wanted: str) -> Response:
+    """What the Guard answers a browser without a session: the plain sign-in page, 401."""
+    return bare.sign_in(wanted)
 
 
-def used_link_page(after: str) -> str:
-    """The page a used or stale one-time link gets: run `docket open` again, for the same page."""
-    return templating.render("used_link.html", {"command": open_command(after), "title": "Link used"})
+def used_link(after: str) -> Response:
+    """What a used or stale one-time link gets: the plain used-link page, 401."""
+    return bare.used_link(after)
+
+
+def failed() -> Response:
+    """What an unexpected failure on a page path answers: the plain page that says so, 500, naming no detail."""
+    return bare.failed()
+
+
+def _machine(path: str) -> bool:
+    return any(path == p or path.startswith(f"{p}/") for p in MACHINE_PATHS)
 
 
 def install(app: FastAPI, service: Service) -> None:
-    app.include_router(sync.router(service))
-    app.include_router(settings.router(service))
     app.include_router(webapi.router(service))
     app.add_middleware(webapi.WriteBodies)
 
@@ -65,8 +71,23 @@ def install(app: FastAPI, service: Service) -> None:
 
     async def not_found(request: Request, error: Exception) -> Response:
         path = request.url.path
-        if not isinstance(error, HTTPException) or error.status_code != 404 or path.startswith(MACHINE_PATHS):
+        missing = isinstance(error, HTTPException) and error.status_code == 404
+        if not missing or _machine(path) or request.method not in READS:
             return await http_exception_handler(request, error)  # pyright: ignore[reportArgumentType]
-        return templating.page("not_found.html", {"title": "Not found"}, status=404)
+        # The app's own document, which shows its not-found page in the shell; the path itself is never echoed.
+        return frontend.document(request, status=404)
+
+    async def unreadable(request: Request, error: Exception) -> Response:
+        # A body the app's routes can't read: where and why, never what it held, which can be a never-store value,
+        # nor the name of a key the model doesn't have, which a body could have made of one.
+        if not request.url.path.startswith(f"{webapi.PREFIX}/") or not isinstance(error, RequestValidationError):
+            return await request_validation_exception_handler(request, error)  # pyright: ignore[reportArgumentType]
+        said: list[dict[str, object]] = []
+        for e in error.errors():
+            loc = list(e.get("loc", ()))
+            kind = str(e.get("type", ""))
+            said.append({"loc": loc[:-1] if kind == "extra_forbidden" else loc, "msg": e.get("msg", ""), "type": kind})
+        return JSONResponse({"detail": said}, status_code=422)
 
     app.add_exception_handler(HTTPException, not_found)
+    app.add_exception_handler(RequestValidationError, unreadable)

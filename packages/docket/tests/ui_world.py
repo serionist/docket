@@ -22,6 +22,10 @@ it (its own config and state folders, the failing keyring), which is where the f
 | | recordings with their import folder, one held again after its release |
 | `curate` | curate_kit's recordings, mail and notes with Northwind a customer, indexed, and a round started on |
 | | this machine: one card accepted, one rejected, the rest open |
+| `sync` | a vault in a consuming project: calls synced an hour ago, memo whole yesterday then dropped twice and |
+| | owing ids, another machine's mark, chat refused for want of its skill, a folder source |
+| `settings` | settings_kit's sources, lists and pattern, memos by Ada stored and indexed, two waiting at the gate |
+| `edited` | the settings world with vault.yaml edited by hand and not committed: credentials off |
 
 Invented people only: Ada Example, Ben Sample and Cleo Example.
 """
@@ -40,7 +44,7 @@ from briefs_kit import brief, fill_briefs
 from curate_kit import NORTHWIND, fill_curate
 from day_kit import ZONE, add, day, seed
 from decisions_kit import fill_decisions
-from docket_testkit import fill_index_vault, fixture_records, index_config, make_config, make_record
+from docket_testkit import fill_index_vault, fixture_records, index_config, make_config, make_record, sh, write_mapper
 from ledger_kit import write_ops
 from recording_kit import TOUR_POLISHED, doc, fill_recording_vault, recording_sources, with_audio
 from staging_kit import PHONE, TALK, mail, memo, transcript
@@ -50,18 +54,26 @@ from docket import recall
 from docket.curate import batch
 from docket.index import build as index_build
 from docket.ledger import ops, store
+from docket.service.history import RunHistory, RunLine
+from docket.service.sync import MARKER_LINE
 from docket.service.token import Tokens
 from docket.sources import local
 from docket.vault import cursors, holds, releaselog
-from docket.vault.config import SourceConfig, VaultConfig
+from docket.vault.config import NeverStore, Redaction, RedactionPattern, SourceConfig, VaultConfig
 from docket.vault.cuts import Cut
 from docket.vault.docstore import DocStore
 from docket.vault.gate import Gate
+from docket.vault.records import RawRecord
 from docket.vault.releaselog import LoggedCut, Release
 from docket.vault.staging import Staging
 from docket.vault.vault import Vault
 
-WORLDS = ("empty", "week", "meetings", "today", "stale", "search", "recording", "briefs", "staging", "curate")
+WORLDS = (
+    "empty", "week", "meetings", "today", "stale", "search", "recording", "briefs", "staging", "curate", "sync",
+    "settings", "edited",
+)  # fmt: skip
+# The worlds whose vault sits in a consuming project, beside its sources' skills and mappers.
+PROJECTS = ("sync", "settings", "edited")
 # The worlds Today is shot on: the meetings world, a second live source and the day's syncs.
 DAYS = ("today", "stale")
 MACHINE = "ui-box"
@@ -76,6 +88,10 @@ Book the room first, then the caterer.
 
 
 def config(world: str = "week") -> VaultConfig:
+    if world == "sync":
+        return sync_config()
+    if world in ("settings", "edited"):
+        return settings_config()
     if world == "staging":
         found = staging_config()
         found.primary_machine = MACHINE
@@ -339,10 +355,159 @@ def curated(vault: Vault) -> None:
     batch.reject(vault, found, new[-1:])
 
 
+# The runs the sync world's history holds, by fixed ids so a state can open one.
+CALLS_RUN = "run-20261020T081500-a1b2c3d4e5f60718"
+MAPPER_RUN = "run-20261020T063000-0f1e2d3c4b5a6978"
+COUNT_RUN = "run-20261019T171000-9a8b7c6d5e4f3021"
+MEMO_RUN = "run-20261019T071000-1122334455667788"
+SKILL = f"""---
+name: {{name}}
+description: Harvest invented {{name}} records for Docket's screenshots.
+---
+
+{MARKER_LINE}
+
+# {{name}}
+
+List newest first, then fetch each one.
+"""
+SYNC_MAPPER = "def map_run(run):\n    return {'contract': 1, 'records': []}\n"
+
+
+def project_of(folder: Path) -> Path:
+    """The consuming project a world's vault sits in: the throwaway folder devkit ui made, as a repo, so a source's
+    skill and mapper sit outside the vault, where run_open and the runner look for them."""
+    project = folder.parent
+    sh(project, "git", "init", "-q", "-b", "main")
+    return project
+
+
+def sync_config() -> VaultConfig:
+    """memo and calls with their skills and mappers, chat with its tools and no skill, a folder source."""
+    made = make_config()
+    made.primary_machine = MACHINE
+    made.sources["memo"] = SourceConfig(
+        sensitivity="mixed", mapper=".claude/skills/sources/memo/mapper.py", tools=["list_memos", "get_memo"]
+    )
+    made.sources["calls"] = SourceConfig(mapper=".claude/skills/sources/calls/mapper.py", tools=["list_calls"])
+    made.sources["chat"] = SourceConfig(mapper=".claude/skills/sources/chat/mapper.py", tools=["read_channel"])
+    made.sources["documents"] = SourceConfig(folder="docs")
+    return made
+
+
+def run_line(run: str, source: str, ended: datetime, minutes: int, **fields: Any) -> RunLine:
+    opened = ended - timedelta(minutes=minutes)
+    return RunLine.model_validate({"run": run, "source": source, "opened": opened, "ended": ended, **fields})
+
+
+def synced(vault: Vault, project: Path) -> None:
+    """A working week's syncs: calls synced an hour ago with two ids expired at its close; memo whole yesterday
+    morning, then dropped twice since, its mapper failing and a count short, owing two ids to retry and one waiting
+    for a final run; another machine's mark of memo two days back; chat refused before any work, for want of its
+    skill."""
+    for source in ("memo", "calls"):
+        write_mapper(project, source, SYNC_MAPPER)
+        skill = project / ".claude" / "skills" / "sources" / source / "SKILL.md"
+        skill.write_text(SKILL.format(name=source), encoding="utf-8", newline="\n")
+    write_mapper(project, "chat", SYNC_MAPPER)
+    now = datetime.now(UTC).replace(microsecond=0)
+    today = now.date()
+    cursors.save(vault, "calls", cursors.Cursor(mark=now - timedelta(hours=1)))
+    cursors.save(
+        vault,
+        "memo",
+        cursors.Cursor(
+            mark=now - timedelta(hours=26),
+            retry={
+                "m-017": cursors.Retry("m-017", "rate-limited", today - timedelta(days=3)),
+                "m-009": cursors.Retry("m-009", "gone", today - timedelta(days=10)),
+            },
+            waiting={"m-021": cursors.Waiting("m-021", "summary", today - timedelta(days=8))},
+        ),
+    )
+    other = cursors.file_path(vault.root, "desk-2")
+    other.write_text(cursors.dump({"memo": cursors.Cursor(mark=now - timedelta(days=2))}), encoding="utf-8")
+    vault.commit([f"{cursors.STATE}/{other.name}"], "Sync: desk-2's cursors")
+    history = RunHistory(lambda: vault.home)
+    history.add(
+        run_line(
+            MEMO_RUN, "memo", now - timedelta(hours=26), 6, outcome="closed", kind="closed", captures=14,
+            bytes=61_000, staged={"pending": 5, "ready": 0, "skipped": 2}, mark={"moved": True,
+            "after": now - timedelta(hours=26)}, owed={"retry": 2, "waiting": 1}, waiting=["m-021"], waiting_count=1,
+        )
+    )  # fmt: skip
+    history.add(
+        run_line(
+            COUNT_RUN, "memo", now - timedelta(hours=14), 3, outcome="dropped", kind="count", captures=3,
+            bytes=9_000, why="the manifest counts 4 capture(s) and 3 arrived",
+        )
+    )  # fmt: skip
+    history.add(
+        run_line(
+            MAPPER_RUN, "memo", now - timedelta(hours=3), 2, outcome="dropped", kind="mapper", captures=6,
+            bytes=22_000, why="the mapper failed: KeyError in map_run, line 14",
+        )
+    )  # fmt: skip
+    history.add(
+        run_line(
+            CALLS_RUN, "calls", now - timedelta(hours=1), 4, outcome="closed", kind="closed", captures=9,
+            bytes=37_000, staged={"pending": 0, "ready": 3, "skipped": 1}, mark={"moved": True,
+            "after": now - timedelta(hours=1)}, owed={"retry": 0, "waiting": 0}, expired=["c-301", "c-302"],
+            expired_count=2,
+        )
+    )  # fmt: skip
+
+
+SETTINGS_MAPPER = "def map_run(run):\n    return {'contract': 1, 'records': []}\n"
+
+
+def settings_config() -> VaultConfig:
+    """settings_kit's: a mixed calls with its mapper, a work memo with none, a folder source, invented never-store
+    values and a pattern of the owner's."""
+    made = make_config()
+    made.primary_machine = MACHINE
+    made.sources["calls"] = SourceConfig(
+        sensitivity="mixed", mapper=".claude/skills/sources/calls/mapper.py", tools=["list_calls", "get_call"]
+    )
+    made.sources["memo"] = SourceConfig(tools=["get_memo"])
+    made.sources["documents"] = SourceConfig(folder="docs", exclude=["archive/*"])
+    made.never_store = NeverStore(
+        people=["Cleo Test", "Dora #2"], containers=["chat:garden"], keywords=["Project: Phoenix"]
+    )
+    made.redaction = Redaction(patterns=[RedactionPattern(name="ticket-id", pattern=r"TCK-\d{6}")])
+    return made
+
+
+def settled(vault: Vault, project: Path, world: str) -> None:
+    """The Settings worlds: calls' mapper in place; memos by Ada stored and indexed, so an add's question counts what
+    already holds her, and two waiting at the gate; for `edited`, vault.yaml edited by hand and not committed,
+    credentials off, which isn't in force until committed."""
+    write_mapper(project, "calls", SETTINGS_MAPPER)
+    run = datetime(2026, 10, 15, 8, 0, tzinfo=UTC)
+    vault.write_run("memo", [settings_memo(1, "Ada Example", "Lunch with the supplier on Friday."),
+                             settings_memo(2, "Ben Sample", "The day rates, attached.")], run)  # fmt: skip
+    Gate(vault).stage([settings_memo(3, "Ada Example", "Dinner plans."), settings_memo(4, "Ben Sample", "Badges.")])
+    if world == "edited":
+        found = VaultConfig.load(vault.root / "vault.yaml")
+        found.redaction.credentials = False
+        (vault.root / "vault.yaml").write_text(found.dump(), encoding="utf-8", newline="\n")
+
+
+def settings_memo(n: int, author: str, text: str) -> RawRecord:
+    return make_record(
+        n, rid=f"memo:m-{n}", source="memo", kind="memo", container=f"memo:m-{n}", author=author, text=text
+    )
+
+
 def build(folder: Path, world: str) -> Vault:
     if world not in WORLDS:
         raise ValueError(f"no world {world!r}; the worlds are {', '.join(WORLDS)}")
+    project = project_of(folder) if world in PROJECTS else None
     vault = Vault.init(folder, config(world), MACHINE)
+    if project is not None and world == "sync":
+        synced(vault, project)
+    if project is not None and world != "sync":
+        settled(vault, project, world)
     if world in ("week", "meetings", *DAYS):
         Gate(vault).stage([transcript(), mail(), memo()])
         store.write(vault, seed(), by="claude", via="cli")
@@ -372,7 +537,7 @@ def build(folder: Path, world: str) -> Vault:
         hour_ago = time.time_ns() - 3600 * 10**9
         for path in (vault.root / ops.OPS_DIR).iterdir():
             os.utime(path, ns=(hour_ago, hour_ago))
-    if world in ("meetings", "search", "recording", "briefs", *DAYS):
+    if world in ("meetings", "search", "recording", "briefs", "settings", "edited", *DAYS):
         index_build.rebuild(vault)
     return vault
 

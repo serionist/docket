@@ -1,12 +1,13 @@
 decisions:
   - id: DR-0602
     title: vault.yaml's writer edits a file in any layout in place, keeping its comments and order; Docket's own form is rewritten whole as before
-    status: decided
+    status: superseded
     at: "2026-10-18"
     by: Soma Osvay
     cost: medium
     sources: ["#191", "18 Oct, in chat"]
     supersedes: [DR-0507]
+    superseded_by: [DR-0791]
     description: "rewrite writes a file in Docket's form whole, as before. Any other file is patched in place: each change between the settings before and after (a scalar set, a key added, a list item added or taken off, a source's block added or replaced) is found through PyYAML's composed nodes and their marks and spliced into the text, new values written as the lines to paste are (key_line, item_line, source_block), in the file's own line endings; every other byte stays, comments and order included. The result must read back as exactly the settings asked for. When it doesn't, or a change can't be placed (an anchor or alias on its path, a flow mapping, a scalar over several lines), nothing is written and the command prints the line, as every write did before. The rest is DR-0507's: one writer for the CLI and the pages; the sha256 of the file a page showed checked under the lock (409); an uncommitted edit committed first as Config: vault.yaml as edited; a temp file and a rename; the change committed alone as Config: <what>; the sweep after; the page's writes as same-origin form posts on the writer thread."
     binds:
       - A write never changes a byte of vault.yaml outside the changes it was asked for; a test holds it on a file with comments, its own indentation, flow lists and keys out of order.

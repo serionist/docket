@@ -1,5 +1,6 @@
 import { Outlet, useRouterState } from "@tanstack/react-router";
 import * as React from "react";
+import { Button } from "@/components/ui/button";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useKeys } from "@/lib/keys";
@@ -62,6 +63,23 @@ export function NotFound() {
     <main id="main" className="flex flex-1 flex-col items-start gap-2 p-8">
       <h1 className="text-xl font-semibold">Not found</h1>
       <p className="text-ink-muted">There is no page here. The sidebar lists every page.</p>
+    </main>
+  );
+}
+
+/** What a page that failed as it drew shows (DR-0792): that something failed and where its words are, never what they
+ * are, a path or a trace, with the way to try again. */
+export function PageFailed({ reload = () => window.location.reload() }: { reload?: () => void }) {
+  useTitle("Something failed");
+  return (
+    <main id="main" className="flex flex-1 flex-col items-start gap-2 p-8">
+      <h1 className="text-xl font-semibold">Something failed in Docket</h1>
+      <p className="max-w-prose text-ink-muted">
+        The service log says what, and never holds your words; docket service status names it.
+      </p>
+      <Button size="sm" onClick={reload}>
+        Reload the page
+      </Button>
     </main>
   );
 }

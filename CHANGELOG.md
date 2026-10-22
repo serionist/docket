@@ -302,6 +302,13 @@ Unreleased in the same PR.
 
 ### Changed
 
+- The Sync and Settings pages move into the web app's shell, so every page is in it now. Sync opens a run's card
+  beside the list, `j` and `k` carry it along, and while a run is open its part reads itself again until the run
+  closes. Settings asks its questions, adding a never-store value or making a source private, in a dialog, keeps the
+  value you typed out of every answer, and says on the field why a value is refused. A change another tab, the CLI or
+  Claude made since you opened the page is refused and the page shows `vault.yaml` as it stands. Turning credentials
+  redaction off is still only your own terminal's. The sign-in and used-link pages, and the page a failure answers,
+  need no script; a page that isn't there shows its not-found page in the shell.
 - The Staging and Curate pages move into the web app's shell. Staging's open record sits beside the list with its
   ticks, Preview, Work and Private at the panel's foot, and a record another tab, the CLI or Claude changed since you
   opened it is refused and shown as it stands; the sidebar's count follows each write. On Curate the open card's edit

@@ -1,6 +1,6 @@
 /**
  * The Staging page's reads and writes under /api/web (DR-0709, DR-0784, DR-0785): the list for the URL's source,
- * state and k, the open record's panel for the whole URL, each with the canonical URL for what it read (DR-0704); and
+ * state and k, the open record's panel for the whole URL, each with the canonical URL for what it read (DR-0792); and
  * the two writes, a classification and a promotion. A value the URL or the body can't hold, or a write the gate
  * refuses, throws an HttpError with the server's words; a record that changed since its panel was read, with 409.
  */

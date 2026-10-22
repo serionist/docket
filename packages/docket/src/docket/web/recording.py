@@ -40,7 +40,7 @@ from docket.web.recording_view import Facts, NoAudio, RecordingView, build, is_r
 
 
 class RecordingRead(BaseModel):
-    # The URL as the server writes it, without the `#at` a link adds (DR-0704).
+    # The URL as the server writes it, without the `#at` a link adds (DR-0792).
     canonical: str
     # None while the index is being built.
     view: RecordingView | None

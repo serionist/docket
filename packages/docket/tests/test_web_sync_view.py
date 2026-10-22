@@ -1,5 +1,5 @@
-"""The Sync page's rules on invented facts and a fixed clock (DR-0303 to DR-0305): the URL, what is due, what failed
-and what to do, the run cards and the cursors."""
+"""The Sync page's rules on invented facts and a fixed clock (DR-0304, DR-0305, DR-0788): the URL, what is due, what
+failed and what to do, the run cards and the cursors."""
 
 from __future__ import annotations
 
@@ -97,10 +97,7 @@ def test_the_url_reads_and_writes_back_one_canonical_form() -> None:
     assert (state.source, state.run, state.k) == ("memo", RUN, 40)
     assert state.url() == f"/sync?source=memo&run={RUN}&k=40"
     assert SyncState.read(QueryParams("source=&k=")).url() == "/sync"
-    assert SyncState(source="memo").url(sync_view.RUNS) == "/sync/runs?source=memo"
-    assert sync_view.canonical("http://127.0.0.1:8750/sync?k=40&source=memo") == "/sync?source=memo&k=40"
-    assert sync_view.canonical("http://127.0.0.1:8750/search?query=x") is None
-    assert sync_view.canonical("http://127.0.0.1:8750/sync?k=0") is None
+    assert SyncState(source="memo").with_run(RUN).url() == f"/sync?source=memo&run={RUN}"
 
 
 @pytest.mark.parametrize(
@@ -507,7 +504,12 @@ def test_the_page_puts_its_parts_together() -> None:
     assert view.more == "/sync?k=22"
     assert [r.id for r in view.open_runs] == [open_run.id]
     assert view.notes == ["Recent runs aren't kept across a restart: PermissionError"]
-    assert (view.live, view.refresh, view.focus, view.as_of) == (True, "/sync/runs?k=2", None, NOW)
+    assert (view.live, view.focus, view.as_of) == (True, None, NOW)
+    # The JSON the page reads: times in the owner's zone, an open run's time so far, the runs part the same.
+    read = sync_view.page(view, SyncState(k=2), ZoneInfo("UTC"), "test-box")
+    assert read.runs == sync_view.runs_part(view, ZoneInfo("UTC"))
+    assert read.runs.open[0].took.endswith(" so far") and not read.runs.recent[0].took.endswith(" so far")
+    assert (read.canonical, read.machine, read.runs.more) == ("/sync?k=2", "test-box", "/sync?k=22")
     assert view.live_sources == 2
     assert [b.source for b in view.cursors] == ["chat", "files", "memo"]
 

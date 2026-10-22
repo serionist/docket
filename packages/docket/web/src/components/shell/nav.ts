@@ -1,7 +1,7 @@
 /**
  * The sidebar's pages in the maintainer's order (DR-0708): the day pages, then the rest, Settings at the foot. It
- * lists built pages only, each joining in the PR that builds or moves it; a page still on the server's own templates
- * is a plain link that loads it. Today leads, the start page (DR-0669); Queue carries the untriaged count.
+ * lists built pages only, each in the app. Today leads, the start page (DR-0669); Queue carries the untriaged count,
+ * Staging what waits at the gate and Sync its due mark.
  */
 import {
   BookOpenTextIcon,
@@ -24,24 +24,22 @@ export interface NavPage {
   title: string;
   href: string;
   icon: LucideIcon;
-  /** Moved into the app: a router link; otherwise the link loads the server's own page. */
-  inApp: boolean;
   mark?: Mark;
 }
 
 export const DAY: NavPage[] = [
-  { key: "today", title: "Today", href: "/today", icon: SunriseIcon, inApp: true },
-  { key: "queue", title: "Queue", href: "/queue", icon: ListTodoIcon, inApp: true, mark: "queue" },
-  { key: "ledger", title: "Ledger", href: "/ledger", icon: BookOpenTextIcon, inApp: true },
-  { key: "meetings", title: "Meetings", href: "/meetings", icon: CalendarDaysIcon, inApp: true },
+  { key: "today", title: "Today", href: "/today", icon: SunriseIcon },
+  { key: "queue", title: "Queue", href: "/queue", icon: ListTodoIcon, mark: "queue" },
+  { key: "ledger", title: "Ledger", href: "/ledger", icon: BookOpenTextIcon },
+  { key: "meetings", title: "Meetings", href: "/meetings", icon: CalendarDaysIcon },
 ];
 
 export const REST: NavPage[] = [
-  { key: "search", title: "Search", href: "/search", icon: SearchIcon, inApp: true },
-  { key: "briefs", title: "Briefs", href: "/briefs", icon: NotebookTextIcon, inApp: true },
-  { key: "staging", title: "Staging", href: "/staging", icon: InboxIcon, inApp: true, mark: "staging" },
-  { key: "curate", title: "Curate", href: "/curate", icon: ListChecksIcon, inApp: true },
-  { key: "sync", title: "Sync", href: "/sync", icon: RefreshCwIcon, inApp: false, mark: "sync" },
+  { key: "search", title: "Search", href: "/search", icon: SearchIcon },
+  { key: "briefs", title: "Briefs", href: "/briefs", icon: NotebookTextIcon },
+  { key: "staging", title: "Staging", href: "/staging", icon: InboxIcon, mark: "staging" },
+  { key: "curate", title: "Curate", href: "/curate", icon: ListChecksIcon },
+  { key: "sync", title: "Sync", href: "/sync", icon: RefreshCwIcon, mark: "sync" },
 ];
 
 export const SETTINGS: NavPage = {
@@ -49,5 +47,4 @@ export const SETTINGS: NavPage = {
   title: "Settings",
   href: "/settings",
   icon: Settings2Icon,
-  inApp: false,
 };

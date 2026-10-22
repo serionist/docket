@@ -12,6 +12,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
+from starlette.responses import Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from docket import __version__, web
@@ -33,16 +34,17 @@ def create_fastapi(service: Service, lifespan: object = None) -> FastAPI:
         openapi_url=None,
         lifespan=lifespan,  # pyright: ignore[reportArgumentType]
     )
-    api.handle_errors(app)
+    # A failure on a page path answers the page that says so, the API's its JSON.
+    api.handle_errors(app, page=web.failed)
     app.include_router(api.router(service))
 
     @app.get("/session", response_class=HTMLResponse)
     def session_page(  # pyright: ignore[reportUnusedFunction]
         code: str = "", after: str = Query(default="/", alias="next")
-    ) -> HTMLResponse:
+    ) -> Response:
         started = service.sessions.redeem(code) if code else None
         if started is None:
-            return HTMLResponse(web.used_link_page(safe_next(after)), status_code=401)
+            return web.used_link(safe_next(after))
         # A page that moves on, not a redirect: coming from a file, a redirect's navigation stays cross-site and the
         # browser would hold back the Strict cookie on it.
         page = HTMLResponse(moving_on(safe_next(after), icon=web.ICON))

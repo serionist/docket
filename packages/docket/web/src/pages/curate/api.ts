@@ -1,6 +1,6 @@
 /**
  * The Curate page's reads and writes under /api/web (DR-0709, DR-0786): this machine's round with its log and
- * stoplist, the open card's panel for the whole URL, each with the canonical URL for what it read (DR-0704); and the
+ * stoplist, the open card's panel for the whole URL, each with the canonical URL for what it read (DR-0792); and the
  * four writes, a round, a decision, an undo and a lift. A value the URL or the body can't hold, or a write the store
  * refuses, throws an HttpError with the server's words; a decision on an entity file that changed since, with 409.
  */

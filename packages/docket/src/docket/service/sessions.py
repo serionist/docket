@@ -11,6 +11,7 @@ from __future__ import annotations
 import html
 import secrets
 import time
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -65,8 +66,12 @@ class Sessions:
 
 
 def safe_next(target: str | None) -> str:
-    """A path on this origin to go on to after the session starts; anything else goes to the start page."""
-    if not target or not target.startswith("/") or target.startswith(("//", "/\\")) or any(c in target for c in "\r\n"):
+    """A path on this origin to go on to after the session starts; anything else goes to the start page. A control
+    character anywhere is refused: a browser strips a tab or a line break from a URL, so a slash, a tab and
+    `/evil.example` would go off this origin as `//evil.example`."""
+    if not target or not target.startswith("/") or target.startswith(("//", "/\\")):
+        return "/"
+    if any(unicodedata.category(c) == "Cc" for c in target):
         return "/"
     return target
 

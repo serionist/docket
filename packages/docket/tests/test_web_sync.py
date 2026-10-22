@@ -1,5 +1,6 @@
-"""The Sync page over HTTP, signed in, on a consuming project with an invented `memo` source (DR-0300 to DR-0306):
-what is due, the runs open and ended, the failures and the cursors, the URL's states, and nothing of a capture."""
+"""The Sync page's JSON reads, signed in, on a consuming project with an invented `memo` source (DR-0304, DR-0305,
+DR-0788): what is due, the runs open and ended, the failures and the cursors, the URL's states, the runs part the page
+asks while a run is open, and nothing of a capture."""
 
 from __future__ import annotations
 
@@ -12,7 +13,6 @@ from typing import Any
 
 import pytest
 from docket_testkit import commit_config
-from docket_webkit import a11y_problems, html_problems, parse
 from starlette.testclient import TestClient
 from sync_kit import BEARER, OURS, PORT, TITLE, TOKEN, Session, app_of, memo, service_client, sync_template, sync_vault
 
@@ -23,10 +23,12 @@ from docket.vault import cursors
 from docket.vault.config import SourceConfig, VaultConfig
 from docket.vault.vault import Vault
 from docket.web import sync as sync_routes
-from docket.web.templating import PAGE_CSP
+from docket.web.display import FAILED
 
 SESSION = "session-4e7a"
 TODAY = datetime.now(UTC).date()
+PAGE = "/api/web/sync"
+RUNS = "/api/web/sync/runs"
 
 
 @pytest.fixture(autouse=True)
@@ -63,18 +65,16 @@ def client(vault: Vault) -> Iterator[TestClient]:
         yield found
 
 
-def page(client: TestClient, path: str = "/sync", status: int = 200) -> str:
-    answer = client.get(path)
+def read(client: TestClient, query: str = "", status: int = 200, path: str = PAGE) -> dict[str, Any]:
+    answer = client.get(f"{path}?{query}" if query else path)
     assert answer.status_code == status, answer.text
-    assert answer.headers["Content-Security-Policy"] == PAGE_CSP
-    assert answer.headers["Cache-Control"] == "no-store"
-    assert not html_problems(answer.text), path
-    assert not a11y_problems(answer.text, whole=not path.startswith("/sync/runs")), path
-    return answer.text
+    found: dict[str, Any] = answer.json()
+    return found
 
 
-def text_of(html: str, cls: str) -> list[str]:
-    return [el.text() for el in parse(html).find_all(class_=cls)]
+def runs_of(found: dict[str, Any]) -> list[dict[str, Any]]:
+    runs = found["runs"]
+    return [*runs["open"], *runs["recent"]]
 
 
 def write_cursor(vault: Vault, machine: str, cursor: cursors.Cursor) -> None:
@@ -103,30 +103,27 @@ def whole_run(client: TestClient, *items: dict[str, Any], **close: Any) -> Sessi
 
 
 def test_a_source_never_synced_is_due_with_the_words_to_paste(client: TestClient) -> None:
-    html = page(client)
-    tree = parse(html)
-    assert tree.find("h1").text() == "Sync"
-    assert tree.find("a", aria_current="page").attrs["href"] == "/sync"
-    assert text_of(html, "lead") == ["1 source due a sync; 0 runs open; no whole run here yet"]
-    assert text_of(html, "need-line") == ["due: never synced"]
-    assert text_of(html, "paste-text") == ['Sync memo with Docket: run_open("memo") and follow its steps.']
-    empty = text_of(html, "empty-line")
-    assert "Nothing failed since each source's last whole run." in empty
-    assert "No run yet on this machine. Runs show here when Claude syncs a source." in empty
-    assert "No machine has synced memo yet." in empty
-    # Its keys are its own: the dialog and the footer name only the keys dialog's key.
-    dialog = tree.find("dialog", id="keys-dialog")
-    assert [k.attrs["data-key"] for k in dialog.find_all("kbd") if "data-key" in k.attrs] == ["?"]
-    assert tree.find("span", class_="hints").text().split() == ["?", "keys"]
+    found = read(client)
+    assert found["canonical"] == "/sync"
+    assert found["lead"] == "1 source due a sync; 0 runs open; no whole run here yet"
+    assert [(n["kind"], n["word"], n["line"]) for n in found["needs"]] == [("due", "due a sync", "due: never synced")]
+    assert found["needs"][0]["paste"] == 'Sync memo with Docket: run_open("memo") and follow its steps.'
+    assert (found["failures"], runs_of(found), found["live_sources"]) == ([], [], 1)
+    [cursor] = found["cursors"]
+    assert (cursor["source"], cursor["rows"], cursor["problem"]) == ("memo", [], None)
+    assert found["machine"] == "test-box"
+    assert [(c["label"], c["url"], c["on"]) for c in found["chips"]] == [
+        ("All", "/sync", True),
+        ("memo", "/sync?source=memo", False),
+    ]
 
 
 def test_a_source_run_open_would_refuse_needs_you_in_its_words(client: TestClient, vault: Vault) -> None:
     (vault.root.parent / ".claude" / "skills" / "sources" / "memo" / "SKILL.md").write_text("# old\n", encoding="utf-8")
     refused = client.post("/api/runs", json={"source": "memo"}, headers=BEARER).json()["error"]
-    html = page(client)
-    assert text_of(html, "need-line") == [refused]
-    assert text_of(html, "paste-text") == []
-    assert text_of(html, "lead") == ["1 needs you first; 0 runs open; no whole run here yet"]
+    found = read(client)
+    assert [(n["kind"], n["line"], n["paste"]) for n in found["needs"]] == [("you", refused, None)]
+    assert found["lead"] == "1 needs you first; 0 runs open; no whole run here yet"
 
 
 def test_a_source_off_or_without_tools_needs_nothing(client: TestClient, vault: Vault) -> None:
@@ -135,25 +132,22 @@ def test_a_source_off_or_without_tools_needs_nothing(client: TestClient, vault: 
         config.sources["notes"] = SourceConfig(sensitivity="work")
 
     set_config(vault, change)
-    html = page(client)
-    assert text_of(html, "need-line") == []
-    assert "Nothing needs a session now." in text_of(html, "empty-line")
+    found = read(client)
+    assert (found["needs"], found["live_sources"]) == ([], 1)
     set_config(vault, lambda c: setattr(c.sources["memo"], "tools", []))
-    empty = " ".join(text_of(page(client), "empty-line"))
-    assert "No source syncs live yet" in empty
-    assert "then list its tools in vault.yaml and commit it" in empty
+    assert read(client)["live_sources"] == 0
 
 
 def test_a_private_source_with_tools_needs_nothing(client: TestClient, vault: Vault) -> None:
     set_config(vault, lambda c: setattr(c.sources["memo"], "sensitivity", "private"))
-    html = page(client)
-    assert text_of(html, "need-line") == []
-    assert text_of(html, "lead") == ["nothing needs a session; 0 runs open; no whole run here yet"]
+    found = read(client)
+    assert found["needs"] == []
+    assert found["lead"] == "nothing needs a session; 0 runs open; no whole run here yet"
 
 
 def test_a_vault_yaml_that_doesnt_decode_doesnt_stop_the_service(vault: Vault) -> None:
     text = (vault.root / "vault.yaml").read_text(encoding="utf-8")
-    (vault.root / "vault.yaml").write_bytes((text + "# j\u00f3 \u0151sz\n").encode("cp1250"))
+    (vault.root / "vault.yaml").write_bytes((text + "# jó ősz\n").encode("cp1250"))
     app = create_app(Settings(port=PORT, vault=vault.root, token=lambda: TOKEN))
     assert app.service.history.problem == "UnicodeDecodeError"
     (vault.root / "vault.yaml").write_text(text, encoding="utf-8")
@@ -164,32 +158,27 @@ def test_a_vault_yaml_that_doesnt_decode_doesnt_stop_the_service(vault: Vault) -
 # -- the runs ----------------------------------------------------------------------------------------------------------
 
 
-def test_an_open_run_shows_and_refreshes_until_it_closes(client: TestClient) -> None:
+def test_an_open_run_shows_and_its_part_reads_alone_until_it_closes(client: TestClient) -> None:
     run = Session(client, session=SESSION)
     run.open()
     run.listing(memo("o1"))
     run.fetch(memo("o1"))
-    html = page(client)
-    [card] = parse(html).find_all("li", class_="state-open")
-    assert card.attrs["id"] == run.run
-    assert "2 captures" in card.text()
-    poll = parse(html).find("div", class_="poll")
-    assert (poll.attrs["hx-get"], poll.attrs["hx-trigger"], poll.attrs["hx-target"]) == (
-        "/sync/runs",
-        "load delay:5s",
-        "#runs",
-    )
-    assert text_of(html, "lead") == ["nothing needs a session; 1 run open; no whole run here yet"]
-    fragment = client.get("/sync/runs", headers={"HX-Current-URL": f"{OURS}/sync"})
-    assert fragment.headers["HX-Replace-Url"] == "/sync"
-    assert "<html" not in fragment.text
-    assert parse(fragment.text).find_all("div", class_="poll")
+    found = read(client)
+    [card] = found["runs"]["open"]
+    assert (card["id"], card["state"], card["word"], card["url"]) == (run.run, "open", "open", f"/sync?run={run.run}")
+    assert card["facts"][0].startswith("2 captures, ")
+    assert card["took"].endswith(" so far")
+    assert found["runs"]["live"] is True
+    assert found["lead"] == "nothing needs a session; 1 run open; no whole run here yet"
+    # The runs part on its own, as the page asks it every 5 seconds: the service's memory, the page's canonical URL.
+    part = read(client, "k=5", path=RUNS)
+    assert (part["canonical"], part["runs"]["live"], part["runs"]["open"][0]["id"]) == ("/sync?k=5", True, run.run)
     assert run.close().status_code == 200
-    after = page(client, "/sync/runs")
-    assert parse(after).find_all("div", class_="poll") == []
-    assert "No run is open now. Reload the page for the cursors and what is due." in after
-    [closed] = parse(after).find_all("li", class_="state-closed")
-    assert closed.attrs["id"] == run.run
+    after = read(client, path=RUNS)["runs"]
+    assert (after["live"], after["open"]) == (False, [])
+    [closed] = after["recent"]
+    assert (closed["id"], closed["state"], closed["word"]) == (run.run, "closed", "closed")
+    assert not closed["took"].endswith("so far")
 
 
 def test_ended_runs_show_their_kinds_and_advice_and_outlive_the_service(client: TestClient, vault: Vault) -> None:
@@ -202,37 +191,37 @@ def test_ended_runs_show_their_kinds_and_advice_and_outlive_the_service(client: 
     crashed.open()
     crashed.fetch(memo("e3", crash=TITLE))
     assert crashed.close().status_code == 400
-    html = page(client)
-    words = {
-        li.attrs["id"]: li.find("span", class_="outcome").text() for li in parse(html).find_all("li", class_="run")
-    }
+    found = read(client)
+    words = {r["id"]: r["word"] for r in runs_of(found)}
     assert words == {whole.run: "closed", counted.run: "count", crashed.run: "mapper"}
-    failures = {f.find("span", class_="badge").text(): f.text() for f in parse(html).find_all("li", class_="failure")}
+    failures = {f["label"]: f for f in found["failures"]}
     assert set(failures) == {"count", "mapper", "rate-limited"}
-    assert "run the mapper's tests" in failures["mapper"]
-    assert "the manifest counts 4 capture(s) and 1 arrived" in failures["count"]
-    assert "1 id in retry since" in failures["rate-limited"]
+    assert "run the mapper's tests" in failures["mapper"]["todo"]
+    assert "the manifest counts 4 capture(s) and 1 arrived" in failures["count"]["what"]
+    assert failures["count"]["run_url"] == f"/sync?run={counted.run}"
+    assert failures["count"]["when"]
+    assert "1 id in retry since" in failures["rate-limited"]["what"]
     # A whole close later clears the drops; the rate-limited id stays while the cursor file holds it.
     whole_run(client, memo("e4"))
-    later = {f.find("span", class_="badge").text() for f in parse(page(client)).find_all("li", class_="failure")}
-    assert later == {"rate-limited"}
+    assert {f["label"] for f in read(client)["failures"]} == {"rate-limited"}
     with signed_in(vault) as again:
-        ids = [li.attrs["id"] for li in parse(page(again)).find_all("li", class_="run")]
+        ids = [r["id"] for r in runs_of(read(again))]
         assert ids[-3:] == [crashed.run, counted.run, whole.run]
 
 
-def test_a_run_in_the_url_opens_at_the_top_and_more_runs_come_by_k(client: TestClient) -> None:
+def test_a_run_in_the_url_is_the_focus_and_more_runs_come_by_k(client: TestClient) -> None:
     runs = [whole_run(client, memo(f"k{n}")) for n in range(3)]
-    html = page(client, f"/sync?run={runs[0].run}")
-    [focus] = parse(html).find("ol", class_="focus").find_all("li", class_="run")
-    assert focus.attrs["id"] == runs[0].run
-    assert "focused" in focus.attrs["class"]
-    short = parse(page(client, "/sync?k=2"))
-    assert len(short.find("ol", class_="runs").find_all("li", class_="run")) == 2
-    assert short.find("p", class_="more").find("a").attrs["href"] == "/sync?k=22"
+    found = read(client, f"run={runs[0].run}")
+    assert found["canonical"] == f"/sync?run={runs[0].run}"
+    assert found["runs"]["focus"]["id"] == runs[0].run
+    assert runs[0].run not in [r["id"] for r in found["runs"]["recent"]]
+    short = read(client, "k=2")
+    assert len(short["runs"]["recent"]) == 2
+    assert short["runs"]["more"] == "/sync?k=22"
     unknown = "run-20261015T000000-ffffffffffffffff"
-    note = parse(page(client, f"/sync?run={unknown}")).text()
-    assert f"Run {unknown} isn't open, nor among the 500 the history keeps." in note
+    missing = read(client, f"run={unknown}")
+    assert missing["runs"]["focus"] is None
+    assert f"Run {unknown} isn't open, nor among the 500 the history keeps." in missing["notes"]
 
 
 # -- the URL -----------------------------------------------------------------------------------------------------------
@@ -247,9 +236,14 @@ def test_a_run_in_the_url_opens_at_the_top_and_more_runs_come_by_k(client: TestC
         ("k=%C2%B2", "k is a"),
     ],
 )
-def test_a_value_the_url_cant_hold_is_the_pages_own_error(client: TestClient, query: str, error: str) -> None:
-    assert error in parse(page(client, f"/sync?{query}", status=400)).text()
-    assert error in parse(page(client, f"/sync/runs?{query}", status=400)).text()
+def test_a_value_the_url_cant_hold_is_refused_with_its_words(client: TestClient, query: str, error: str) -> None:
+    assert error in read(client, query, status=400)["error"]
+    assert error in read(client, query, status=400, path=RUNS)["error"]
+
+
+def test_the_url_comes_back_in_one_canonical_form(client: TestClient) -> None:
+    assert read(client, "k=40&source=memo&other=kept+out")["canonical"] == "/sync?source=memo&k=40"
+    assert read(client, "k=20")["canonical"] == "/sync"
 
 
 def test_one_source_narrows_the_page_and_an_unknown_one_says_so(client: TestClient, vault: Vault) -> None:
@@ -257,12 +251,11 @@ def test_one_source_narrows_the_page_and_an_unknown_one_says_so(client: TestClie
     write_cursor(vault, "desktop-2", cursors.Cursor(mark=datetime.now(UTC)))
     other = cursors.file_path(vault.root, "desktop-2")
     other.write_text(other.read_text(encoding="utf-8").replace("memo:", "chat:"), encoding="utf-8")
-    html = page(client, "/sync?source=chat")
-    assert [h.text() for h in parse(html).find_all("h3")] == ["chat"]
-    assert parse(html).find_all("ol", class_="runs") == []
-    chips = {a.text(): a.attrs.get("aria-current") for a in parse(html).find_all("a", class_="source-chip")}
-    assert chips == {"All": None, "chat": "true", "memo": None}
-    assert "No source nothing on this page" in parse(page(client, "/sync?source=nothing")).text()
+    found = read(client, "source=chat")
+    assert [b["source"] for b in found["cursors"]] == ["chat"]
+    assert runs_of(found) == []
+    assert {c["label"]: c["on"] for c in found["chips"]} == {"All": False, "chat": True, "memo": False}
+    assert "No source nothing on this page" in " ".join(read(client, "source=nothing")["notes"])
 
 
 # -- failures and cursors ----------------------------------------------------------------------------------------------
@@ -272,11 +265,13 @@ def test_this_machines_cursor_file_that_doesnt_read_is_named_by_its_line(client:
     path = cursors.file_path(vault.root, "test-box")
     path.parent.mkdir(exist_ok=True)
     path.write_text("schema_version: 1\n<<<<<<< ours\nsources: {}\n", encoding="utf-8")
-    html = page(client)
-    [failure] = parse(html).find_all("li", class_="failure")
-    assert "line 2 is a merge conflict's marker" in failure.text()
-    assert "keep one side, the one with the older mark is safe" in failure.text()
-    assert "line 2" in text_of(html, "need-line")[0]
+    found = read(client)
+    [failure] = found["failures"]
+    assert "line 2 is a merge conflict's marker" in failure["what"]
+    assert "keep one side, the one with the older mark is safe" in failure["todo"]
+    assert failure["severity"] == "error"
+    assert "line 2" in found["needs"][0]["line"]
+    assert found["cursors"][0]["problem"] is not None
 
 
 def test_each_machines_mark_entries_and_hand_over(client: TestClient, vault: Vault) -> None:
@@ -304,75 +299,92 @@ def test_each_machines_mark_entries_and_hand_over(client: TestClient, vault: Vau
         ),
     )
     (vault.root / "state" / "cursors-broken-box.yaml").write_text("nonsense: [\n", encoding="utf-8")
-    html = page(client)
-    machines = parse(html).find_all("li", class_="machine")
-    assert [m.find("dd").text().split()[0] for m in machines] == ["test-box", "desktop-2", "old-box"]
-    assert "its sets are handed over" in machines[1].text()
-    assert "its sets aren't handed over" in machines[2].text()
-    entries = machines[0].find("details", class_="entries").text()
+    found = read(client)
+    [block] = found["cursors"]
+    rows = block["rows"]
+    assert [(r["machine"], r["this"]) for r in rows] == [("test-box", True), ("desktop-2", False), ("old-box", False)]
+    assert rows[0]["mark_age"] == "2 h ago"
+    assert rows[0]["mark"]
+    assert rows[1]["handed"] == "its sets are handed over"
+    assert rows[2]["handed"] == "its sets aren't handed over: its mark is 30 days old or none"
+    [retry] = rows[0]["retry"]
     leaves = (TODAY - timedelta(days=3) + cursors.EXPIRES).isoformat()
-    assert f"leaves {leaves}" in entries
-    assert "waits for summary" in entries
-    assert "due a final run" in entries
-    assert any("1 id due a final run" in line for line in text_of(html, "need-line"))
-    failures = text_of(html, "failure")
+    assert (retry["kind"], retry["why"], retry["leaves"]) == ("retry", "rate-limited", leaves)
+    [waiting] = rows[0]["waiting"]
+    since = (TODAY - timedelta(days=8)).isoformat()
+    assert (waiting["kind"], waiting["why"], waiting["since"], waiting["final_due"]) == (
+        "waiting",
+        "summary",
+        since,
+        True,
+    )
+    assert any("1 id due a final run" in n["line"] for n in found["needs"])
+    failures = [f["what"] for f in found["failures"]]
     assert any("cursors-broken-box.yaml doesn't read" in f for f in failures)
-    [limited] = [f for f in failures if f.startswith("rate-limited")]
-    assert "1 id in retry since" in limited
-    assert "on test-box;" in limited
-    assert "r8" not in limited
-    assert "due a final run" not in machines[2].text()
+    [limited] = [f for f in found["failures"] if f["label"] == "rate-limited"]
+    assert "1 id in retry since" in limited["what"]
+    assert "on test-box;" in limited["what"]
+    assert "r8" not in limited["ids"]
+    assert not any(e["final_due"] for e in rows[2]["retry"])
 
 
 def test_each_row_shows_the_lookback_the_window_takes(client: TestClient, vault: Vault) -> None:
     write_cursor(vault, "test-box", cursors.Cursor(mark=datetime.now(UTC) - timedelta(hours=2)))
-    [row] = parse(page(client)).find_all("li", class_="machine")
-    assert "7 days" in [dd.text() for dd in row.find_all("dd")]
+    [row] = read(client)["cursors"][0]["rows"]
+    assert row["lookback"] == "7 days"
     set_config(vault, lambda c: setattr(c.sources["memo"], "lookback_days", 1))
     commit_config(vault.root)
-    [row] = parse(page(client)).find_all("li", class_="machine")
-    assert "1 day" in [dd.text() for dd in row.find_all("dd")]
+    [row] = read(client)["cursors"][0]["rows"]
+    assert row["lookback"] == "1 day"
+    assert read(client)["cursors"][0]["window_since"]
 
 
 # -- what never reaches the page ---------------------------------------------------------------------------------------
 
 
-def test_nothing_of_a_capture_and_no_session_reaches_the_page(client: TestClient, vault: Vault) -> None:
+def test_nothing_of_a_capture_and_no_session_reaches_the_reads(client: TestClient) -> None:
     whole_run(client, memo("p1"), memo("p2"))
     run = Session(client, session=SESSION)
     run.open()
     run.listing(memo("p3"))
-    for path in ("/sync", f"/sync?run={run.run}", "/sync/runs"):
-        html = client.get(path).text
+    for path in (PAGE, f"{PAGE}?run={run.run}", RUNS, f"{RUNS}?run={run.run}"):
+        said = client.get(path).text
         for never in (TITLE, "Ada Example", SESSION):
-            assert never not in html, (path, never)
+            assert never not in said, (path, never)
 
 
-def test_the_page_writes_nothing(client: TestClient) -> None:
-    for path in ("/sync", "/sync/runs"):
-        answer = client.post(path, headers={"Origin": OURS})
-        assert answer.status_code == 405, path
+def test_the_page_writes_nothing_and_takes_the_session_only(client: TestClient) -> None:
+    for path in (PAGE, RUNS, "/sync", "/sync/runs"):
+        answer = client.post(path, json={}, headers={"Origin": OURS})
+        assert answer.status_code in (404, 405), path
+    assert client.get(PAGE, headers=BEARER).status_code == 403
+    client.cookies.clear()
+    assert client.get(PAGE).status_code == 401
 
 
-def test_without_a_vault_or_on_a_failure_the_page_says_so(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_page_path_answers_the_apps_document(client: TestClient) -> None:
+    for path in ("/sync", "/sync?source=memo&run=run-20261015T000000-ffffffffffffffff"):
+        page = client.get(path)
+        assert page.status_code == 200
+        assert '<div id="root"></div>' in page.text
+
+
+def test_without_a_vault_or_on_a_failure_the_reads_say_so(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sessions = Sessions()
     app = create_app(Settings(port=PORT, vault=None, token=lambda: TOKEN), sessions=sessions)
     with TestClient(app, base_url=OURS) as client:
         started = sessions.redeem(sessions.new_code())
         assert started is not None
         client.cookies.set(COOKIE, started)
-        assert "the service has no vault" in page(client, status=400)
-        assert "the service has no vault" in page(client, "/sync/runs", status=400)
+        assert "the service has no vault" in read(client, status=400)["error"]
+        assert "the service has no vault" in read(client, status=400, path=RUNS)["error"]
 
         def broken(_service: object) -> None:
             raise RuntimeError(TITLE)
 
         monkeypatch.setattr(sync_routes, "gather", broken)
         monkeypatch.setattr(sync_routes, "runs_only", broken)
-        failed = client.get("/sync")
-        assert failed.status_code == 500
-        assert "Something failed in Docket" in failed.text
-        assert TITLE not in failed.text
-        fragment = client.get("/sync/runs")
-        assert fragment.status_code == 500
-        assert "<html" not in fragment.text
+        for path in (PAGE, RUNS):
+            failed = client.get(path)
+            assert (failed.status_code, failed.json()) == (500, {"error": FAILED})
+            assert TITLE not in failed.text

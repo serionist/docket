@@ -1,6 +1,6 @@
-"""The smoke set's pages (DR-0754): every page of both apps once in the system's own browser, failing on a console
-error, a failed request or a CSP violation. The server's pages are the navigation's built ones, the React app's the
-routes its build serves, both read from the code, so a new page is loaded here without a line of its own. Windows and
+"""The smoke set's pages (DR-0754): every page of the app once in the system's own browser, failing on a console
+error, a failed request or a CSP violation. The pages are the routes its build serves, read from the build, so a new
+page is loaded here without a line of its own. Windows and
 macOS run it on every PR with the smoke set, Linux in its browser shares; the other browser files test each page's
 states and their accessibility.
 
@@ -20,7 +20,7 @@ from browser_kit import WATCH_CSP, live, sign_in, watched
 from docket_testkit import index_template
 from playwright.sync_api import Browser, sync_playwright
 
-from docket.web import frontend, pages
+from docket.web import frontend
 
 BROWSER = os.environ.get("DOCKET_TEST_BROWSER", "")
 pytestmark = [
@@ -46,9 +46,8 @@ def service(tmp_path_factory: pytest.TempPathFactory, tmp_path: Path) -> Iterato
 
 
 def every_page() -> list[str]:
-    """The server's built pages, then the React app's routes, each once."""
-    found = [page.path for page in pages.PAGES if page.built]
-    return [*found, *(route for route in frontend.BUILD.routes if route not in found)]
+    """The app's routes, each once."""
+    return list(frontend.BUILD.routes)
 
 
 def problems(browser: Browser, port: int, token: str, path: str) -> list[str]:
@@ -73,6 +72,6 @@ def test_every_page_of_both_apps_loads_clean_in_the_system_s_browser(
 ) -> None:
     port, token = service
     paths = every_page()
-    assert {"/search", "/ledger", "/queue", "/design"} <= set(paths)
+    assert {"/search", "/ledger", "/queue", "/design", "/sync", "/settings"} <= set(paths)
     found = {path: problems(browser, port, token, path) for path in paths}
     assert {path: said for path, said in found.items() if said} == {}

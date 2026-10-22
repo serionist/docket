@@ -1,6 +1,6 @@
 /**
  * The Briefs page's read and write under /api/web (DR-0709, DR-0780, DR-0781): the page its URL names, with the
- * canonical URL for what it read (DR-0704), and the owner's pick on a waiting decision at the rev the page showed. A
+ * canonical URL for what it read (DR-0792), and the owner's pick on a waiting decision at the rev the page showed. A
  * value the URL or the body can't hold, a pick refused and a decision that moved since all throw an HttpError with the
  * server's words, a moved one with 409.
  */

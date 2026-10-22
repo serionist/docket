@@ -88,7 +88,7 @@ def gather(service: Service, state: StagingState, *, held: bool = True) -> Facts
 
 
 class StagingRead(BaseModel):
-    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0704); never `done`.
+    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0792); never `done`.
     canonical: str
     view: StagingList
     held: list[HeldSource]

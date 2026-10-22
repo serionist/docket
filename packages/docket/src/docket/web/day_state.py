@@ -1,4 +1,4 @@
-"""The day pages' URL (DR-0664 to DR-0666, DR-0704): one state for the Ledger, the Queue, Meetings and Today, the
+"""The day pages' URL (DR-0664 to DR-0666, DR-0792): one state for the Ledger, the Queue, Meetings and Today, the
 shared parameters first, then each page's own, in one canonical form with the defaults left out. The Queue takes the
 shared ones; `state`, `group` and `archived` are the Ledger's alone, and its canonical URL leaves them out. Meetings
 takes `q` and `stream` of the shared filters, `kind`, `who` and `k` being the items' (DR-0768), and `suggest` of its
@@ -23,7 +23,7 @@ own. Today takes no filter: `open`, `at`, `drop` with an item open, `text`, and 
 | `skipped` | the rows a bulk's op didn't take | none |
 
 Unknown parameters are ignored, and the URLs only gain optional ones, since the tasks skill opens them (DR-0669). The
-app sends a page's query string to its read as it is, and writes back the canonical URL the read answers (DR-0704);
+app sends a page's query string to its read as it is, and writes back the canonical URL the read answers (DR-0792);
 `done`, `said` and `skipped` show their notice once and leave the canonical URL, since the notice is the page's own
 after a write (DR-0710).
 """
@@ -78,6 +78,10 @@ def ref_of(given: str, name: str) -> str:
 
 def is_meeting(ref: str) -> bool:
     return ref.startswith("M-")
+
+
+def is_item(ref: str) -> bool:
+    return ref.startswith("A-")
 
 
 @dataclass(frozen=True)
@@ -186,7 +190,11 @@ class DayState:
         items = self.page in ("ledger", "queue")
         filtered = self.page in FILTERED
         panels = self.page in MEETING_PANELS
-        meeting = self.open is not None and (self.page == "meetings" or is_meeting(self.open))
+        # On Today an id may be a meeting's, as when two meetings share a number after a merge: only an A- number is
+        # surely an item's, whose panel takes no suggestions.
+        meeting = self.open is not None and (
+            self.page == "meetings" or is_meeting(self.open) or (self.page == "today" and not is_item(self.open))
+        )
         return replace(
             self,
             state=self.state if ledger else "open",

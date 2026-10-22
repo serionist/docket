@@ -11,6 +11,7 @@ import { KeyboardIcon, SearchIcon } from "lucide-react";
 import * as React from "react";
 import { AppLink } from "@/components/app-link";
 import { Empty, NoticeBar, Page, PageHeader, Panel, Refusal, Workspace } from "@/components/shell/page";
+import { COPIED_MS } from "@/components/paste";
 import { useShowKeys, useTitle } from "@/components/shell/shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,7 +29,6 @@ import { hitOf, PATH, queryHref, resultsQuery } from "./url";
 
 export const QUERY = "query";
 const WAIT_MS = 5000;
-const COPIED_MS = 2500;
 export const SEARCH = ["search"] as const;
 
 /** Move to the row `by` from `at`, staying on the list's ends; the first or last when none is selected. */

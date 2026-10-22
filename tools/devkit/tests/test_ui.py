@@ -63,7 +63,10 @@ def test_the_shots_and_their_checks_are_named_and_summed() -> None:
     assert ui.summary([good]) == ["1 shots, every check passed"]
 
 
-WORLDS = ("empty", "week", "meetings", "today", "stale", "search", "recording", "briefs", "staging", "curate")
+WORLDS = (
+    "empty", "week", "meetings", "today", "stale", "search", "recording", "briefs", "staging", "curate", "sync",
+    "settings", "edited",
+)  # fmt: skip
 
 
 def test_every_page_s_states_open_a_path_and_fit_a_size() -> None:
@@ -71,7 +74,8 @@ def test_every_page_s_states_open_a_path_and_fit_a_size() -> None:
         assert page.world in WORLDS, name
         assert len({s.name for s in page.states}) == len(page.states)
         for state in page.states:
-            assert state.url.startswith(f"/{name}"), state.name
+            # The sign-in page's states are the pages a stranger, a miss or a failure reaches, on any path.
+            assert state.url.startswith(f"/{name}") or name == "signin", state.name
             assert state.only in (None, *ui.SIZES), state.name
             assert state.world in (None, *WORLDS), state.name
             assert all(verb in ui.VERBS for verb, _ in (*state.steps, *state.after)), state.name
@@ -391,3 +395,100 @@ def test_another_tab_s_click_comes_first_on_the_page_s_own_url() -> None:
     ]
     assert {s.name for s in ui.PAGES["staging"].states if ("other", ui.WORK) in s.steps} == {"conflict"}
     assert all(s.fresh for p in ("staging", "curate") for s in ui.PAGES[p].states if s.name == "conflict")
+
+
+def test_the_steps_open_a_run_fail_or_hold_a_read_and_reload() -> None:
+    """A run opened as Claude's session does, a read answered with a failure or never, and the page reloaded: the
+    states that show a run open, a failed read with its retry, and the skeleton while a read is on its way."""
+    log: list[str] = []
+    routes: list[tuple[Any, Any]] = []
+
+    class Tab:
+        def route(self, url: Any, handler: Any) -> None:
+            routes.append((url, handler))
+
+        def reload(self, wait_until: str) -> None:
+            log.append(f"reload {wait_until}")
+
+        def wait_for_timeout(self, ms: int) -> None:
+            pass
+
+    steps = [("run", "memo"), ("fail", "/api/web/sync"), ("hang", "/api/web/settings"), ("reload", "")]
+    ui._steps(Tab(), steps, log.append)  # pyright: ignore[reportPrivateUsage]
+    assert log == ["memo", "reload domcontentloaded"]
+    (failing, failed), (holding, held) = routes
+    assert failing("http://localhost:61234/api/web/sync?source=memo") and not failing("http://localhost:1/sync")
+    assert holding("http://localhost:61234/api/web/settings?show=lists")
+
+    class Route:
+        def __init__(self) -> None:
+            self.answered: dict[str, Any] = {}
+
+        def fulfill(self, **answer: Any) -> None:
+            self.answered = answer
+
+    route = Route()
+    failed(route)
+    assert route.answered["status"] == 500
+    assert json.loads(route.answered["body"])["error"].startswith("Something failed in Docket")
+    quiet = Route()
+    held(quiet)
+    assert quiet.answered == {}, "a held read is never answered"
+    with pytest.raises(KitError, match="token"):
+        ui._steps(Tab(), [("run", "memo")])  # pyright: ignore[reportPrivateUsage]
+
+
+def test_a_run_is_opened_and_bound_with_the_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked: list[Any] = []
+
+    def answer(request: Any, timeout: float) -> Any:
+        asked.append(request)
+        return _Answer(json.dumps({"run": "run-20261020T093000-0011223344556677"}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", answer)
+    ui.open_run(61234, "t0ken", "memo")
+    assert [r.full_url for r in asked] == [
+        "http://127.0.0.1:61234/api/runs",
+        "http://127.0.0.1:61234/api/runs/run-20261020T093000-0011223344556677/session",
+    ]
+    assert all(r.get_header("Authorization") == "Bearer t0ken" for r in asked)
+    assert json.loads(asked[0].data) == {"source": "memo"}
+
+
+def test_a_stranger_s_state_opens_its_url_unsigned_and_a_failed_one_is_served_the_failure_page(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ui.AXE).parent.mkdir(parents=True)
+    (tmp_path / ui.AXE).write_text("window.axe = {};", encoding="utf-8")
+    routed: list[Any] = []
+
+    class Tab(_Tab):
+        def route(self, url: Any, handler: Any) -> None:
+            routed.append((url, handler))
+
+    class Browser(_Browser):
+        def new_page(self) -> _Tab:
+            return Tab(self.log)
+
+    browser = Browser()
+    monkeypatch.setattr(ui, "sign_in_link", lambda port, token, after: f"http://localhost:{port}/session?next={after}")
+    states = [ui.State("stranger", "/settings", signed=False), ui.State("failed", "/today", failed=True)]
+    ui.shoot(browser, states, 61234, "t0ken", out=tmp_path, axe=tmp_path / ui.AXE, sizes=("wide",), themes=("light",))
+    assert [line for line in browser.log if line.startswith("goto")] == [
+        "goto http://localhost:61234/settings",
+        "goto http://localhost:61234/session?next=/today",
+    ]
+    [(on_today, serve)] = routed
+    assert on_today("http://localhost:61234/today") and not on_today("http://localhost:61234/today/x")
+
+    answered: list[dict[str, Any]] = []
+
+    class Route:
+        def fulfill(self, **answer: Any) -> None:
+            answered.append(answer)
+
+    serve(Route())
+    [page] = answered
+    assert page["status"] == 500
+    assert "script-src" not in page["headers"]["Content-Security-Policy"]
+    assert "Something failed in Docket" in page["body"]

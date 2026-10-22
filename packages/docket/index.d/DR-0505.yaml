@@ -1,11 +1,12 @@
 decisions:
   - id: DR-0505
     title: The Settings page shows the sources, the never-store lists, redaction and this machine's models, never-store values only on request
-    status: proposed
+    status: superseded
     at: "2026-10-16"
     by: Claude (autonomy grant)
     cost: cheap
     sources: ["#73"]
+    superseded_by: [DR-0789]
     description: "GET /settings writes nothing and reads beside the writer: vault.yaml and whether its text is Docket's own form; each source's sensitivity, on or off, tools, mapper (checked as find_mapper checks it), media hosts, and a folder source's folder, this machine's folder from config.yaml and exclude; each never-store list's count and what it matches; the redaction rules and the user's patterns with the rows docket redaction prints and the warnings docket redaction set prints; this machine's models. The never-store values appear only with show=lists, so a page read for anything else, on a shared screen or by a browser agent, carries none. Every change the page doesn't make shows its command or its vault.yaml line, quoted as the CLI prints it."
     binds:
       - Never-store values are in the page only with show=lists.
