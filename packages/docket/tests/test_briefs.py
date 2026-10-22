@@ -325,14 +325,15 @@ def test_commits_that_share_raw_share_one_listing_and_the_keep_holds_the_last_fe
     with git_calls(monkeypatch) as calls:
         assert briefs.report(vault, stale_only=False) == before
     assert asked(calls) == []
-    # A new raw/, then Ben's next rev on it: its time, its raw/ tree and that tree's listing; a keep of one holds it.
+    # A new raw/, then Ben's next rev on it: its time, its raw/ tree and that tree's listing. A keep of one holds one
+    # listing, so Northwind's is listed again too when Ben's commit comes first, as the commits' ids order them.
     monkeypatch.setattr(briefs, "TREES_KEPT", 1)
     vault.write_run("chat", [make_record(902, text="Ben Sample asked for the drawings.")])
     vault.commit([], "Raw: a chat about Ben")
     put_ben(vault, rev="1", said=[f"- Cleo sends the offer by Friday. {cite(vault, FRIDAY)}"])
     with git_calls(monkeypatch) as calls:
         briefs.report(vault, stale_only=False)
-    assert asked(calls) == ["log", "cat-file", "ls-tree"]
+    assert asked(calls) in (["log", "cat-file", "ls-tree"], ["log", "cat-file", "ls-tree", "ls-tree"])
     assert len(briefs._TREES) == 1  # pyright: ignore[reportPrivateUsage]
     # The commits' keep holds small strings, and empties when it would pass its own cap.
     monkeypatch.setattr(briefs, "COMMITS_KEPT", 1)
