@@ -6,13 +6,22 @@ asyncio's proactor loop, Windows' own, closes the listening socket on any OSErro
 lives, its task says Running, and nothing answers on the port again. Here the proactor tries the accept again on the
 same socket, so `_start_serving` only sees a connection, a cancel, or the error of a socket already closed; and the
 loop leaves out the "Task exception was never retrieved" asyncio logs for the task each accept starts beside it, whose
-error is the accept's own, logged once here. `test_service_accepts.py` holds CPython to what this relies on:
-`_start_serving` accepts through the proactor's `accept` and closes the socket on its error, and that task's name.
+error is the accept's own, logged once here.
+
+The proactor also makes each accepted connection's socket, of a class whose shutdown doesn't fail on a connection its
+client already broke off (DR-0787). asyncio's transport shuts its socket down before it closes it and detaches it from
+its server (`_call_connection_lost`), and on a connection a browser reset that shutdown raises WinError 10054: the
+socket stays open, and the server's `wait_closed()` waits on it for good, so uvicorn's stop never ends and the process
+outlives it.
+
+`test_service_accepts.py` holds CPython to what this relies on: `_start_serving` accepts through the proactor's
+`accept` and closes the socket on its error, that task's name, and the transport's shutdown before its close.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import socket
 import sys
@@ -40,14 +49,33 @@ def loop_setup(system: str = SYSTEM) -> str:
 if sys.platform == "win32":  # pragma: no cover - Windows' own loop; test_service_accepts runs it there
     from asyncio.windows_events import IocpProactor, ProactorEventLoop
 
+    class Accepted(socket.socket):
+        """An accepted connection's socket, whose shutdown doesn't fail on a connection its client broke off."""
+
+        __slots__ = ()
+
+        def shutdown(self, how: int) -> None:
+            # The connection is gone already (a reset is WinError 10054), so there is nothing to shut down, and the
+            # transport's close and its server's detach come right after this call only if it returns.
+            with contextlib.suppress(ConnectionError):
+                super().shutdown(how)
+
     class KeepAccepting(IocpProactor):
-        """Windows' proactor, with an accept that fails tried again on the same listening socket."""
+        """Windows' proactor, with an accept that fails tried again on the same listening socket, and each accepted
+        connection's socket an Accepted."""
 
         loop: asyncio.AbstractEventLoop
 
         def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
             super().set_loop(loop)
             self.loop = loop
+
+        def _get_accept_socket(self, family: int) -> socket.socket:
+            # IocpProactor.accept asks here for the socket it accepts a connection into: made as CPython makes it, an
+            # Accepted.
+            sock = Accepted(family)
+            sock.settimeout(0)
+            return sock
 
         def accept(self, listener: socket.socket) -> asyncio.Future[Any]:
             # A task is a future: _start_serving keeps it, cancels it when the server closes, and reads its result.

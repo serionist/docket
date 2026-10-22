@@ -1,15 +1,18 @@
-"""The service's loop on Windows keeps its listening socket after an accept fails (DR-0762), and the CPython behaviour
-it relies on: the stock proactor loop accepts through `IocpProactor.accept`, closes the socket on its OSError, and
-reports the task that accept starts beside it by its name. A pin that fails means CPython changed: read
-`docket.service.accepts` again before trusting it.
+"""The service's loop on Windows keeps its listening socket after an accept fails (DR-0762) and closes a connection its
+client reset, and the CPython behaviour it relies on: the stock proactor loop accepts through `IocpProactor.accept`,
+closes the socket on its OSError, reports the task that accept starts beside it by its name, and leaves a connection
+open when the shutdown before its close fails. A pin that fails means CPython changed: read `docket.service.accepts`
+again before trusting it.
 
-The failures are real: while the loop is blocked, one client takes the accept already posted and three more reset in
-the backlog, so each accept the loop posts next fails as Windows fails one whose client went."""
+The failed accepts are real: while the loop is blocked, one client takes the accept already posted and three more
+reset in the backlog, so each accept the loop posts next fails as Windows fails one whose client went. The failed
+shutdown is made, as a browser's reset fails one only in a race."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import gc
 import importlib
 import logging
@@ -40,10 +43,12 @@ ours: Any = vars(accepts)
 # ERROR_NETNAME_DELETED: what Windows fails an accept with when its client went while it completed.
 GONE = 64
 # IocpProactor.accept leaves the socket it made for an accept that failed to the collector, which closes it with a
-# ResourceWarning: stock asyncio's way, here as in any loop on Windows, so only those warnings are let through.
+# ResourceWarning: stock asyncio's way, here as in any loop on Windows, so only those warnings are let through. The
+# service's loop makes that socket an Accepted.
 left_to_the_collector = pytest.mark.filterwarnings(
     # Python 3.12's words, then 3.14's.
-    "ignore:Exception ignored (in. |while finalizing socket )<socket.socket:pytest.PytestUnraisableExceptionWarning"
+    "ignore:Exception ignored (in. |while finalizing socket )<(socket.socket|docket.service.accepts.Accepted) "
+    ":pytest.PytestUnraisableExceptionWarning"
 )
 
 
@@ -264,6 +269,115 @@ def test_the_loop_reports_every_other_error_nobody_read() -> None:
 
     reported = asyncio.run(main(), loop_factory=ours["proactor_loop"])
     assert reported == [(ours["NEVER_RETRIEVED"], "test_the_loop_reports_every_other_error_nobody_read.<locals>.fails")]
+
+
+# -- connections a client reset, on the proactor -----------------------------------------------------------------------
+
+# WSAECONNRESET: what Windows fails a shutdown with on a connection its client reset.
+RESET = 10054
+
+
+class Resets:
+    """socket.socket.shutdown failing, while `failing`, as Windows fails it on a connection a browser reset; `asked`
+    counts the calls."""
+
+    def __init__(self, patch: pytest.MonkeyPatch) -> None:
+        self.failing = True
+        self.asked = 0
+        real = socket.socket.shutdown
+
+        def shutdown(sock: socket.socket, how: int) -> None:
+            self.asked += 1
+            if self.failing:
+                raise ConnectionResetError(
+                    errno.ECONNRESET, "An existing connection was forcibly closed by the remote host", None, RESET
+                )
+            real(sock, how)
+
+        patch.setattr(socket.socket, "shutdown", shutdown)
+
+
+class Held(asyncio.Protocol):
+    """The server's side of a connection, kept for the test to close."""
+
+    def __init__(self, made: list[asyncio.Transport]) -> None:
+        self.made = made
+
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
+        assert isinstance(transport, asyncio.Transport)
+        self.made.append(transport)
+
+
+@dataclass
+class Closed:
+    # Whether the accepted connection's socket was still open after its transport closed.
+    left_open: bool
+    # Whether the server's wait_closed() returned once the server closed too.
+    stopped: bool
+    reported: Reported
+
+
+async def a_reset_connection_closed(resets: Resets) -> Closed:
+    loop = asyncio.get_running_loop()
+    reported: Reported = []
+    loop.set_exception_handler(collect(reported))
+    made: list[asyncio.Transport] = []
+    served = await loop.create_server(lambda: Held(made), "127.0.0.1", 0)
+    port = served.sockets[0].getsockname()[1]
+    with socket.create_connection(("127.0.0.1", port), timeout=5):
+        deadline = time.monotonic() + 5
+        while not made and time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
+        transport: Any = made[0]
+        accepted = transport.get_extra_info("socket")
+        transport.close()
+        await asyncio.sleep(0.1)
+    left_open = accepted.fileno() != -1
+    served.close()
+    try:
+        await asyncio.wait_for(served.wait_closed(), 2)
+        stopped = True
+    except TimeoutError:
+        stopped = False
+    if left_open:
+        # CPython's leak undone, so the test leaves no socket behind: the transport's last step again, with a shutdown
+        # that works, closes the socket and lets the server go.
+        resets.failing = False
+        transport._call_connection_lost(None)
+        await asyncio.wait_for(served.wait_closed(), 5)
+    return Closed(left_open, stopped, reported)
+
+
+@windows_only
+def test_cpython_leaves_a_connection_open_when_its_shutdown_fails() -> None:
+    """The pin on CPython: the transport shuts its socket down before it closes it and detaches it from its server, so
+    a shutdown that raises leaves the socket open and the server's wait_closed() waiting for good, which kept uvicorn's
+    stop from ending. If this fails, Accepted may not be needed any more."""
+    with pytest.MonkeyPatch.context() as patch:
+        resets = Resets(patch)
+        closed = asyncio.run(a_reset_connection_closed(resets), loop_factory=events.ProactorEventLoop)
+    assert resets.asked >= 1
+    assert closed.left_open
+    assert not closed.stopped
+    assert [m for m, _ in closed.reported if "_call_connection_lost" in m] != []
+
+
+@windows_only
+def test_the_services_loop_closes_a_connection_its_client_reset() -> None:
+    with pytest.MonkeyPatch.context() as patch:
+        resets = Resets(patch)
+        closed = asyncio.run(a_reset_connection_closed(resets), loop_factory=ours["proactor_loop"])
+    assert resets.asked >= 1
+    assert not closed.left_open
+    assert closed.stopped
+    assert closed.reported == []
+
+
+@windows_only
+def test_an_accepted_socket_s_shutdown_still_raises_every_other_error() -> None:
+    with ours["Accepted"](socket.AF_INET) as never_connected, pytest.raises(OSError) as raised:
+        never_connected.shutdown(socket.SHUT_RDWR)
+    assert not isinstance(raised.value, ConnectionError)
 
 
 # -- the service, end to end -------------------------------------------------------------------------------------------

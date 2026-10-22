@@ -331,6 +331,9 @@ Unreleased in the same PR.
   at logon. Before, its port stopped answering until it was restarted by hand, though its process and its task still
   ran. On every system the service also checks its own port every 30 seconds and exits when nothing answers there, so
   its registration starts it again: within 5 minutes on Windows, in seconds on macOS and Linux.
+- On Windows, the service closes a connection your browser reset, as a browser can when it closes a page, and stops
+  when it is asked to. Before, such a connection stayed open for as long as the service ran, and a stop after one,
+  such as Ctrl+C on `docket serve`, never finished.
 - `/docket:sync` spends less after its agents. Each source's agent starts fresh from its prompt, which now names you,
   instead of carrying the session into every turn. The draft quotes what settling each unsure line needs, an item's
   due and what was last said on it, an outcome or an answer already there, a meeting's points, a stream, so Claude
