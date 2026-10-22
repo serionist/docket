@@ -115,7 +115,7 @@ segment is always started whole.
   generic go back into `template/`, lessons into the role briefs, new traps into `SKILL.md`, each in its own reviewed
   change.
 
-**Iteration accounting:** pass 1 is iteration 0; only a pass that follows a fix commit counts toward the cap; a
+**Iteration accounting:** the cap is 4 at most, DR-0712's four rounds a page; pass 1 is iteration 0; only a pass that follows a fix commit counts toward the cap; a
 re-judge on pixel deltas alone and the final pass don't.
 
 **Acceptance:** every journey `completed`, `wontfix` or `blocked(env)`; no `blocked(question)` left (the questions were

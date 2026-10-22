@@ -11,6 +11,7 @@ decisions:
       - A change to the web app's pages runs check-ui on each page it changes, and its coverage table goes in the PR.
       - check-ui and ui-audit drive only a throwaway service they started and identified, never port 8741, the owner's vault, cookie or keychain, or the owner's browser.
       - No UI baseline or shot is committed.
+      - "ui-audit keeps DR-0712's cap: at most four fix-and-verify rounds a page, its default 4."
     not_chosen:
       - "Copying the skills as they were: their stack, a dev deployment with seed and fault hooks, roles and committed baselines, isn't Docket's."
       - "A second screenshot tool for check-ui beside devkit ui: two sets of checks to keep in step."

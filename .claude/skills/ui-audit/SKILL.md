@@ -29,7 +29,7 @@ defaults" skips the question. Write the answers into the run's `STATE.md`.
 | redesign | how far an improve may go: `conservative`, `improve`, `overhaul` (reworks what exists; never adds what the text of record lacks) | improve |
 | lenses | `standard`, or `extended` (adds the extended lenses in `reality-lenses.md`) | standard |
 | mode | `autonomous`: questions wait in the journal and go out as one batch; `interactive`: ask as they come | autonomous |
-| cap | fix-and-verify iterations before stopping | 6 |
+| cap | fix-and-verify iterations before stopping, at most DR-0712's four rounds a page | 4 |
 
 ## Where things go
 
