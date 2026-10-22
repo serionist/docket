@@ -73,6 +73,12 @@ class CloseBody(BaseModel):
     folder: str | None = None
 
 
+class MediaBody(BaseModel):
+    rid: str
+    url: str | None = None
+    path: str | None = None
+
+
 class Bound(BaseModel):
     run: str
     session: str
@@ -271,6 +277,14 @@ def router(service: Service) -> APIRouter:
             size=size,
         )
         return KeptCapture(capture=kept.number, used=kept.used, budget=BUDGET)
+
+    @api.post("/media")
+    async def media(request: Request) -> calls.MediaPut:  # pyright: ignore[reportUnusedFunction]
+        # media_put's own call (DR-0547), for `docket sync pull`, which puts a pull's audio side by side (#305).
+        bearer_only(request)
+        body = parsed(MediaBody, await capped_body(request, RUN_BODY))
+        stored, _ = await calls.media_put(service, body.rid, path=body.path, url=body.url)
+        return stored
 
     @api.post("/runs/{run}/close")
     async def close(run: str, request: Request) -> sync.RunClosed:  # pyright: ignore[reportUnusedFunction]

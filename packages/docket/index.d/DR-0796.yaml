@@ -1,0 +1,18 @@
+decisions:
+  - id: DR-0796
+    title: "A source may keep a pull.py beside its SKILL.md that makes its run in code: docket sync pull drives it through the run routes, pull contract 1"
+    status: proposed
+    at: "2026-10-22"
+    by: Claude (autonomy grant)
+    cost: one-way
+    sources: ["#305"]
+    description: "The fifth rehearsal's Plaud agent pulled 293 KB of transcripts and notes through its own context and read none of them for asks, and put the audio one recording at a time; its recordings' agents waited 11 minutes for it (#305). A source's skill folder may hold a pull.py, standard library only like its mapper. docket sync pull <sync> <source> opens the run through the service's run routes under a session of its own, docket-pull-<sync>, which no Claude Code session has, so the capture hook never adds to it; runs pull.py with Docket's interpreter in isolated mode from its folder, with the command's environment, since it starts the source's MCP server, its stderr dropped; posts each capture line to the run as it comes, as the hook would; closes the run with the count and the skips; opens the final run and does the same when one is due; when the run's steps have the media step, asks the script's media phase for each fetched recording's audio link, never captured, and puts them four at a time through a new route, POST /api/media, media_put's own call, bearer token only; then writes each recording that waits to be classified, never a held one, to files in the sync folder, its notes apart from its transcript, and prints the RUN line and a classify line per recording. Pull contract 1: one JSON request on stdin, contract, phase (run, final or media), window, kept, held, ids and server; JSON lines on stdout: capture with tool, arguments and result, skip with id and reason, fetched, media with id and url, and stop with why. A stop line, a line that isn't a JSON object or is past 32 MiB, an exit that isn't 0 or 20 minutes leave the run unclosed, so it drops with the mark kept. docket sync start gives such a source pull.md, a prompt that pulls, classifies from the notes file first and the transcript only when needed, promotes and writes RUN and LEARNED. The Plaud example ships a pull.py that speaks MCP over stdio to the user's own Plaud server, npx -y @plaud-ai/mcp@latest unless --server names another, signed in with the server's own tokens, which Docket never reads, and follows SKILL.md's route."
+    binds:
+      - "pull.py's request and lines are a one-way door: a field is only added, and a contract 1 script keeps working."
+      - What a pull fetches reaches the vault only through the run, its mapper and the gate, as a capture from Claude would.
+      - "A signed audio link is never captured, printed or logged: it goes from the script to media_put and nowhere else."
+    not_chosen:
+      - "Having the agent write MCP results to disk: an MCP result always lands in the agent's context first."
+      - "Docket calling Plaud's API itself with the server's token file: Docket would hold a credential it has no use for, and follow an API Plaud doesn't publish."
+      - "A hook that swaps big results for a digest: medium risk, left for a later step (#305)."
+      - "Running the pull in the service: the service would start the user's MCP server, with a browser sign-in it can't answer."

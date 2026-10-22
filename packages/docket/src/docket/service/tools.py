@@ -299,10 +299,10 @@ def create_mcp(service: Service) -> MCPServer:
             "Read the ledger: counts first, then a line per item, meeting, point or stream, each source a locator for "
             "`read`. view: snapshot (the open and snoozed items, the meetings in the window or with an open point "
             "with their points, the streams), show (one item, meeting or stream whole by ref: notes, materials, "
-            "points, linked items, history, counts), queue (the open items, untriaged first, then by triage), list "
-            "(items by who, stream, kind, state and opened in the window: counts over all, then the first k), meetings "
-            "(those overlapping the window), suggest (what to raise in the meeting ref names, or in each of refs, "
-            "those past the room in later). A view refuses a parameter it doesn't take."
+            "points, linked items, history, counts; brief for a quick look), queue (the open items, untriaged first, "
+            "then by triage), list (items by who, stream, kind, state and opened in the window: counts over all, "
+            "then the first k), meetings (those overlapping the window), suggest (what to raise in the meeting ref "
+            "names, or in each of refs, those past the room in later). A view refuses a parameter it doesn't take."
         ),
     )
     async def ledger(  # pyright: ignore[reportUnusedFunction]
@@ -347,8 +347,17 @@ def create_mcp(service: Service) -> MCPServer:
             Sequence[str],
             Field(description="suggest: several meetings instead of ref, in order, each item saying its meeting."),
         ] = (),
+        brief: Annotated[
+            bool,
+            Field(
+                description=(
+                    "show: a quick look, its free text cut at 300 characters, a meeting's open items only and the "
+                    "newest 5 history lines."
+                )
+            ),
+        ] = False,
     ) -> Annotated[CallToolResult, views.LedgerRead]:
-        ask = views.Ask(view, ref, since, until, who, stream, kind, state, k, refs=tuple(refs))
+        ask = views.Ask(view, ref, since, until, who, stream, kind, state, k, refs=tuple(refs), brief=brief)
         found, text = await _guarded(calls.ledger(service, ask))
         return result(found, text)
 

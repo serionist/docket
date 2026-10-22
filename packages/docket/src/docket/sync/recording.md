@@ -16,7 +16,7 @@ the sync's other recordings and sources at the same time, and only the sync's ma
 | vault | {VAULT}: put `--vault {VAULT}` on every `docket` command |
 | today | {TODAY}; the owner's times are local in {ZONE} |
 | owed since | {OWED_SINCE} |
-| the ledger | {CONTEXT} |
+| the ledger | {CONTEXT}: your slice of it |
 | the recording | {RECORDING}, {TITLE}, from {START} |
 | your block | {BLOCK} |
 | the note's layout | {LAYOUT} |
@@ -38,12 +38,14 @@ Its meetings by time: {MEETINGS}.
 
 ## 1. Read
 
-- One ToolSearch for Docket's tools you will use: `read`, `search`, `ledger`, `doc_put`, `verify`.
-- Read {CONTEXT} whole, with the Read tool: every open item a line (`A-0012 | kind | who | title | source @M-0003`),
-  the snoozed, the meetings with their points by id, and the streams. Find in it; `ledger` view `show` only for an item
-  whose line can't settle a question.
-- Read each of the recording's files whole, a Read each. They are the recording once: never read its transcript again
-  with `read`.
+- One ToolSearch for Docket's tools you will use: `read`, `search`, `ledger`, `doc_put`.
+- Read {CONTEXT} once, whole: the open and snoozed items whose who the call names or that hang on its meetings, a line
+  each (`A-0012 | kind | who | title | source @M-0003`), every item due by the prep week's end, its meetings with
+  their points by id, and the streams. Find in it; for an item that isn't there, `ledger` view `list` with its `who`.
+- Read each of the recording's files whole, a Read each, all in one message. They are the recording once: never read
+  its transcript again with `read`.
+- Every turn carries all that came before it: lookups of one kind in one message, `ledger` view `show` with
+  `brief=true` and only for an item whose line can't settle a question.
 
 ## 2. Find
 
@@ -68,7 +70,7 @@ Its meetings by time: {MEETINGS}.
 
 ## 3. Closes
 
-Before the block, go through the open and snoozed items in {CONTEXT} whose people are in the call, and only those: the
+Before the block, go through the open and snoozed items in your slice whose people are in the call, and only those: the
 item's who among its speakers or named in it, or for an item on a meeting (`@M-0003`), this call's meeting by time, or
 that meeting's organiser or attendees in the call. An item whose people aren't in it is left alone.
 
@@ -81,8 +83,10 @@ that shows it. None found: nothing for that item.
 
 ## 4. Write the block
 
-Write the block to {BLOCK} with the Write tool: the block and nothing else, a line per finding, no line for a label with
-nothing, and the NOTES line always.
+Write the block to {BLOCK} with the Write tool, once: the block and nothing else, a line per finding, no line for a
+label with nothing, and the NOTES line always. Never read it back or write it again: `docket sync check {SYNC}
+{SOURCE}/{KEY} --vault {VAULT}` reads it as the reconcile will and names each field it would leave to a hand edit;
+fix each with an Edit of that line.
 
 ```
 OWED:     <who> | <locator> | <asked, a day> | <the ask, short> | <why still open> | today / this week / whenever | reply / decision / task | <stream> | <the A- ref it continues, else -> | <due: YYYY-MM-DD, else ->
@@ -103,9 +107,9 @@ LEARNED:  SKILL.md / sync.md | <what differs from it, for next time>
   it. The reconcile links an ask made in a meeting by it.
 - OWED's kind: `reply` when someone waits for the owner's answer, `decision` for their call, `task` for work they
   promised that is more than a message.
-- `<stream>` is a stream {CONTEXT} lists, else `-`. The due is a day the ask names; "today" is {TODAY}; "this week"
-  without a day is `-`.
-- `who` is the name the ledger already uses for the person, as {CONTEXT} writes it, else the name the call gives.
+- `<stream>` is the stream of your slice the ask's topic belongs to; `-` only when none does. The due is a day the ask
+  names; "today" is {TODAY}; "this week" without a day is `-`.
+- `who` is the name the ledger already uses for the person, as your slice writes it, else the name the call gives.
 - NOTES: the note's id first, then {RECORDING}, its local start and end as `HH:MM`, and the M- ref of the meeting
   its content names when it has two. Choose the id now, by step 5's rule, `recording-note:{DAY}-<slug>`, and put the
   note under it: a line such as `NOTES:    recording-note:{DAY}-pilot-weekly | {RECORDING} | 10:01 | 10:58`. Five
@@ -115,18 +119,19 @@ LEARNED:  SKILL.md / sync.md | <what differs from it, for next time>
 
 By #211's method:
 
-1. Context: `search` its people and terms back two weeks, at most three calls. Its people's open items and its
-   meeting's points are in {CONTEXT} already.
+1. Context: `search` its people and terms back two weeks, at most three calls, in one message. Its people's open
+   items and its meeting's points are in your slice already.
 2. Write the `recording-note`: id `recording-note:{DAY}-<slug>`, at most 80 characters after the colon, the slug in
    lowercase letters, digits and inner hyphens, saying what the call was about; `covers` each transcript's rid in the
    files; `by: claude, sync {SYNC_AT}`; the layout above; every content line ending with its anchor, `@mm:ss` when it
    covers one transcript, else `[r:<rid>@mm:ss]`, one bullet a line. A recording over several meetings gets a part per
    meeting.
-3. Just before `doc_put`, `read` the transcript's rid with view `summary`: when a doc covers it now, another session
+3. Check it before the put, not after: each line with a number, a date, a name or a commitment against the line of
+   the files its anchor points at, which you read whole. The note is put once.
+4. Just before `doc_put`, `read` the transcript's rid with view `summary`: when a doc covers it now, another session
    wrote its note meanwhile, so stop and say so. Else `doc_put` it. A refusal lists every problem with its line: fix
    them all and put it again. One that says the id is at a rev already means another note took the id: add `-2` to
    it, in the block's NOTES line too, and put again.
-4. `verify` the lines with a number, a date or a commitment, and fix any line its raw doesn't say.
 
 ## Answer
 

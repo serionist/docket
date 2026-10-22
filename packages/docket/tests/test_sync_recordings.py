@@ -79,7 +79,21 @@ def test_a_recording_with_no_note_gets_its_files_its_prompt_and_its_line_in_the_
     prompt = read(given.prompt)
     assert not PLACEHOLDER.search(prompt)
     assert prompt.startswith("You are the agent of one plaud recording in a Docket sync.")
-    assert f"| the ledger | {sync / 'context.md'} |" in prompt
+    sliced = sync / "context" / "plaud" / "rec-0101.md"
+    assert f"| the ledger | {sliced}: your slice of it |" in prompt
+    # Its slice: the items of the people it names and of its meeting, that meeting with its points, the streams.
+    assert read(sliced).splitlines() == [
+        "the ledger for plaud:rec-0101",
+        "open items (2)",
+        "A-0001 | reply | Ben Sample | Send Ben the pilot dates | slack:C0PILOT/1791100000.000100",
+        "A-0003 | task | Dan Example | Book the room for the pilot | slack:C0PILOT/1791100800.000300 @M-0002",
+        "snoozed (0)",
+        "its meetings by time (1)",
+        "M-0001 | 10-19 10:00-10:30 | Pilot weekly | Ben Sample",
+        f"  #1 open | Ben: the pilot's dates | {POINT}",
+        "streams (1)",
+        "pilot | active | The pilot starts on the 28th | Book the room | deadline 10-28",
+    ]
     assert f"| your block | {given.block} |" in prompt
     assert "| the recording | plaud:rec-0101, Pilot weekly, from 2026-10-19 10:30 |" in prompt
     assert f"- {given.files[0]}\n" in prompt

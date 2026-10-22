@@ -1,4 +1,4 @@
-"""`docket sync reconcile` (DR-0760): the sync's batch drafted from its blocks by fixed rules, each row of the plan's
+"""`docket sync reconcile` (DR-0798): the sync's batch drafted from its blocks by fixed rules, each row of the plan's
 table sure and unsure, a thread match held to the same who and side, merges only of look-alike asks, every merge
 reported, and the draft, settled, written by `docket ledger batch` (DR-0724's tool is in test_service_mcp.py).
 Invented people and data only: the pilot's ledger, its channel, Cleo's mail, a team chat, three recordings and the
@@ -858,6 +858,11 @@ def test_the_draft_keeps_its_order_and_the_report_says_each_part(vault: Vault) -
         '{"op": "rollover"}',
         "# prep: the next five working days: M-0002",
         "#   M-0002 | 10-26 10:00-10:30 | Pilot weekly | Ben Sample",
+        # A-0001 closes in this draft, so it is no prep candidate.
+        f"#     candidate, linked to the meeting: {A3}",
+        '# + {"op": "point", "item": "M-0002", "fields": {"text": "Dan: Book the room for the pilot, where',
+        "#     candidate, on Ben Sample, in the meeting: A-0006",
+        '# + {"op": "point", "item": "M-0002", "fields": {"text": "Ben: Review the pilot budget, where',
         "# streams",
         '{"op": "set", "item": "pilot", "fields": {"next": "Book the room"}',
         '{"op": "archive"}',
@@ -893,10 +898,20 @@ def test_the_prep_line_lists_each_prep_meeting_with_its_open_points(vault: Vault
     with index_build.ledger_tables(vault) as conn:
         found = views.read(conn, views.Ask(view="show", ref="M-0002"), ZoneInfo("Europe/Budapest"), NOW)
     room, _, badges = (p.id for p in found.points)
-    assert lines[at + 1 : at + 5] == [
+    # Then its prep candidates, each a comment a settle takes: none for an item a point holds already (#305).
+    candidate = (
+        '# + {"op": "point", "item": "M-0002", "fields": {"text": "Ben: %s, where does it stand?", '
+        '"proposed": true, "item": "%s"}}'
+    )
+    budget = f"A-0006 | reply | Ben Sample | Review the pilot budget | {CHAT}"
+    assert lines[at + 1 :] == [
         "#   M-0002 | 10-26 10:00-10:30 | Pilot weekly | Ben Sample",
         f"#     M-0002#1 open | Dan: is the room booked? -> A-0003 (proposed) | {room}",
         f"#     M-0002#3 open | The badges | {badges}",
+        f"#     candidate, on Ben Sample, in the meeting: {A1}",
+        candidate % ("Send Ben the pilot dates", "A-0001"),
+        f"#     candidate, on Ben Sample, in the meeting: {budget}",
+        candidate % ("Review the pilot budget", "A-0006"),
         '{"op": "archive"}',
     ]
 
@@ -955,12 +970,14 @@ def test_a_sync_of_another_vault_or_none_is_refused_and_the_command_prints_the_r
     assert main(["sync", "--vault", str(vault.root), "reconcile", str(started.folder)]) == 0
     out = capsys.readouterr().out.splitlines()
     assert out[0] == f"draft: {started.folder / 'draft.jsonl'} rev 1: 2 ops, 0 unsure"
-    assert (started.folder / "draft.jsonl").read_text(encoding="utf-8").splitlines()[-4:] == [
+    written = (started.folder / "draft.jsonl").read_text(encoding="utf-8").splitlines()
+    assert written[-10:-6] == [
         '{"op": "rollover"}',
         "# prep: the next five working days: M-0002",
         "#   M-0002 | 10-26 10:00-10:30 | Pilot weekly | Ben Sample",
-        '{"op": "archive"}',
+        f"#     candidate, linked to the meeting: {A3}",
     ]
+    assert written[-1] == '{"op": "archive"}' and sum(line.startswith("# + ") for line in written) == 3
     assert main(["sync", "reconcile", "sync-1", "--vault", str(vault.root)]) == 2
     assert "isn't a sync" in capsys.readouterr().err
 
@@ -1178,3 +1195,140 @@ def test_a_meetings_line_sets_only_what_agent_md_lets_it(vault: Vault) -> None:
     ]
     assert moved == {"op": "set", "item": "M-0001", "note": QUOTE_AGAIN,
                      "fields": {"start": "2026-10-19T10:15", "end": "2026-10-19T10:45"}}  # fmt: skip
+
+
+# -- leaner settling (#305) --------------------------------------------------------------------------------------------
+
+
+def test_an_ask_of_a_person_written_in_part_with_a_near_title_is_unsure_its_log_the_alternative(vault: Vault) -> None:
+    """Ben, for Ben Sample, asking for the pilot dates for his team: the writer's look-alike rule holds who to the
+    letter, so the reconcile says it."""
+    given = [owed("Ben", TWO_ASKS, "2026-10-19 10:00", "Send the pilot dates for the team")]
+    _, lines = run(vault, slack=given)
+    (add,) = ops(lines)
+    assert add["op"] == "add"
+    assert unsure(add) == [
+        "a near look-alike of A-0001 by who and title: log it there if it continues that work, else keep the add"
+    ]
+    above, below = around(lines, add)
+    assert above == [quoted("slack", 2, given[0]), A1]
+    assert below == [{"op": "log", "item": "A-0001", "note": f"Ben: Send the pilot dates for the team: {TWO_ASKS}"}]
+
+
+def test_a_title_sharing_one_long_word_is_no_near_look_alike(vault: Vault) -> None:
+    _, lines = run(vault, slack=[owed("Ben", TWO_ASKS, "2026-10-19 10:00", "Send the venue address")])
+    (add,) = ops(lines)
+    assert "unsure" not in add
+
+
+def test_two_adds_of_one_person_written_two_ways_with_near_titles_are_unsure_the_second(vault: Vault) -> None:
+    given = [
+        owed("Hal Example", TWO_ASKS, "2026-10-19", "Send Hal the badge list for the site"),
+        owed("Hal", DAN_ASK, "2026-10-19", "the badge list for the site visit"),
+    ]
+    _, lines = run(vault, slack=given)
+    first, second = ops(lines)
+    assert "unsure" not in first
+    assert unsure(second) == ["it may be the same ask as the add for blocks/slack.txt:2: drop it if so, else keep it"]
+
+
+def test_an_invite_to_another_meeting_of_a_series_already_invited_to_is_unsure(vault: Vault) -> None:
+    """One organiser's series became three adds in a rehearsal: one invite a series."""
+    sensor = {"subject": "Sensor sync", "organiser": "Ivy Example", "series": "sensor-sync"}
+    store.write(vault, [
+        {"op": "meeting", "fields": {**sensor, "start": "2026-11-03T09:00+01:00", "end": "2026-11-03T09:30+01:00",
+                                     "event": SERIES}},
+        {"op": "meeting", "fields": {**sensor, "start": "2026-11-10T09:00+01:00", "end": "2026-11-10T09:30+01:00",
+                                     "event": UNTITLED}},
+    ], by="claude", now=NOW)  # fmt: skip
+    given = [
+        f"INVITES:  Ivy Example | {SERIES} | 2026-11-03 09:00 | new series | pilot",
+        f"INVITES:  Ivy Example | {UNTITLED} | 2026-11-10 09:00 | new series | pilot",
+        f"INVITES:  Ivy Example | {KICKOFF} | 2026-10-28 09:00 | new series | pilot",
+    ]
+    _, lines = run(vault, calendar=given)
+    first, again, kickoff = ops(lines)
+    assert "unsure" not in first and "unsure" not in kickoff
+    assert unsure(again)[0] == (
+        "an invite to another meeting of the series the add for blocks/calendar.txt:2 invites to: drop it if it is "
+        "that series, else keep it"
+    )
+
+
+def test_an_add_that_restates_its_meeting_s_outcome_from_another_block_is_unsure(vault: Vault) -> None:
+    """Dan's room, asked in the weekly's time, is already in the minutes the recording wrote; an add from the
+    recording's own block is that outcome's who-does-what, and stays sure."""
+    plaud = [f"OUTCOME:  M-0001 | The pilot starts on the 28th / Dan books the venue | r:{WEEKLY}/transcript@14:00"]
+    slack = [waiting("Dan Example", DAN_ASK, "2026-10-19 10:05", "Dan books the venue")]
+    _, lines = run(vault, plaud=plaud, slack=slack)
+    (add,) = [op for op in ops(lines) if op["op"] == "add"]
+    assert add["fields"]["meeting"] == "M-0001"
+    assert unsure(add) == [
+        "it restates M-0001's outcome, from blocks/plaud.txt:2: drop it if the minutes hold it, keep it for work the "
+        "owner owes or waits on"
+    ]
+    assert around(lines, add)[0][1:] == ["M-0001 outcome: Dan books the venue"]
+    _, own = run(vault, plaud=[*plaud, waiting("Dan Example", f"r:{WEEKLY}/transcript@14:00", "2026-10-19 10:05",
+                                               "Dan books the venue")])  # fmt: skip
+    (theirs,) = [op for op in ops(own) if op["op"] == "add"]
+    assert "unsure" not in theirs
+
+
+def test_a_stream_s_lines_are_one_set_and_a_field_it_holds_or_two_values_for_one_field_are_said(
+    vault: Vault,
+) -> None:
+    given = [
+        f"STREAMS:  pilot | where=The pilot starts on the 28th | the date is set | {QUOTE_AGAIN}",
+        f"STREAMS:  pilot | status=active; next=Send the plan | the plan is next | {PLAN_MAIL}",
+    ]
+    done, lines = run(vault, outlook=given)
+    (merged,) = ops(lines)
+    assert merged == {"op": "set", "item": "pilot",
+                      "fields": {"where": "The pilot starts on the 28th", "next": "Send the plan"},
+                      "note": f"the date is set: {QUOTE_AGAIN}; the plan is next: {PLAN_MAIL}"}  # fmt: skip
+    assert "2 lines on pilot drafted as one set: blocks/outlook.txt:2, blocks/outlook.txt:3" in done.said
+    _, two_ways = run(vault, outlook=[*given, f"STREAMS:  pilot | next=Book the room | the room first | {SENT}"])
+    (one,) = ops(two_ways)
+    assert unsure(one) == ["its lines set next two ways: keep 'Send the plan', or take the alternative"]
+    assert around(two_ways, one)[1][0]["fields"]["next"] == "Book the room"
+    done, held = run(vault, outlook=[f"STREAMS:  pilot | status=active | still on | {QUOTE_AGAIN}"])
+    assert ops(held) == [] and done.said[-1].endswith(": pilot holds all it says already")
+
+
+def test_a_prep_candidate_taken_by_the_settle_is_a_point_the_writer_takes(
+    vault: Vault, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A daily gets no candidates, though Ben, who has items, organises it.
+    daily = {"subject": "Pilot daily", "organiser": "Ben Sample", "start": "2026-10-22T09:00+02:00",
+             "end": "2026-10-22T09:15+02:00"}  # fmt: skip
+    store.write(vault, [{"op": "meeting", "fields": daily}], by="claude", now=NOW)
+    done, lines = run(vault)
+    taken = [n for n, line in enumerate(lines, start=1) if line.startswith("# + ")]
+    assert len(taken) == 3 and all('"item": "M-0002"' in lines[n - 1] for n in taken)
+    assert any(line.startswith("#   M-0007 | 10-22 09:00-09:15 | Pilot daily") for line in lines)
+    sync = done.path.parent.name
+    assert main(["sync", "settle", sync, f"{taken[0]}-{taken[1]}=take", "--rev", "1", "--vault", str(vault.root)]) == 0
+    assert "took 2 prep candidate(s)" in capsys.readouterr().out
+    settled = done.path.read_text(encoding="utf-8").splitlines()
+    assert sum(line.startswith('{"op": "point"') for line in settled) == 2
+    assert sum(line.startswith("# + ") for line in settled) == 1
+    code, out = dry_run(vault, done.path, capsys)
+    assert code == 0 and not [line for line in out if ": refused, " in line], out
+
+
+def test_with_two_blocks_setting_one_outcome_an_add_is_held_against_the_other_block_s_alone(vault: Vault) -> None:
+    """The weekly's minutes come from the recorder and from a Teams recording: Teams' add restating the recorder's
+    line is unsure, and the recorder's own who-does-what stays sure, whichever block came last."""
+    plaud = [
+        f"OUTCOME:  M-0001 | Dan books the venue | r:{WEEKLY}/transcript@14:00",
+        waiting("Dan Example", f"r:{WEEKLY}/transcript@14:00", "2026-10-19 10:05", "Dan books the venue"),
+    ]
+    teams = [
+        f"OUTCOME:  M-0001 | Gail draws the map | {CHAT_AGAIN}",
+        waiting("Gail Example", CHAT_AGAIN, "2026-10-19 10:06", "Dan books the venue for the pilot"),
+    ]
+    _, lines = run(vault, plaud=plaud, teams=teams)
+    own, other = [op for op in ops(lines) if op["op"] == "add"]
+    assert own["fields"]["source"].startswith("r:plaud") and "unsure" not in own
+    assert other["fields"]["source"] == CHAT_AGAIN
+    assert any(why.startswith("it restates M-0001's outcome, from blocks/plaud.txt:2") for why in unsure(other))

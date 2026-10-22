@@ -1,4 +1,4 @@
-"""`docket sync reconcile <sync>` (DR-0760): the sync's batch drafted from its blocks into `draft.jsonl` in the sync
+"""`docket sync reconcile <sync>` (DR-0798): the sync's batch drafted from its blocks into `draft.jsonl` in the sync
 folder by fixed rules, and a report. It writes the draft and nothing else: the batch stays Claude's.
 
 Every locator is resolved first, as `read` resolves it, through one index for the whole run, and a line whose locator
@@ -27,6 +27,13 @@ A thread counts only for the same who and side, and never where a record's threa
 recording), which everyone in it shares. Two lines are one ask only with the same who, side and look-alike title:
 surely so only by the same continues ref, never by a shared locator alone, and never either side of a close of the item
 they continue.
+
+What else makes an add unsure (#305): an open item or an add above it of the same person, their name written in full
+or in part, whose title is a near look-alike, two long words and 40% of the shorter title shared; an invite to another
+occurrence of a series an invite above it is for; and a title that restates a line of its meeting's outcome, the
+ledger's or another block's. A stream's lines are one `set` per stream, a field the stream holds already left out.
+Under `# prep`, up to three candidate points a prep meeting's `suggest` gives, each a `# + ` line the one settle takes
+or leaves as a comment; none for a daily, a standup or the owner's own block.
 """
 
 from __future__ import annotations
@@ -43,6 +50,7 @@ from zoneinfo import ZoneInfo
 
 from docket import recall
 from docket.index import build as index_build
+from docket.index import ledger as index_ledger
 from docket.index.ledger import name_tokens
 from docket.ledger import day as ledger_day
 from docket.ledger import views
@@ -85,6 +93,13 @@ DOC_ID = re.compile(r"^(?P<kind>[a-z][a-z-]*):\S+$")
 # Said when no block holds a CLOSES line: every agent goes through the open items its people are in, so a sync that
 # closes nothing is worth a look (#286).
 NO_CLOSES = "no source reported a close: no block holds a CLOSES line"
+# A near look-alike shares at least this many long words, and this share of the shorter title's (#305).
+NEAR_WORDS = 2
+NEAR_SHARE = 0.4
+# Prep candidates a meeting gets at most, the mark of their lines, and the meetings that get none.
+CANDIDATES = 3
+CANDIDATE = "# + "
+ROUTINE = re.compile(r"\b(daily|standup|stand-up|focus)\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -238,6 +253,19 @@ def _who(text: str) -> str:
     return " ".join(text.split()).lower()
 
 
+def same_person(a: str, b: str) -> bool:
+    """One person by name, written in full or in part: every word of one name, three letters or more, in the other,
+    as Ben in Ben Sample."""
+    one, other = name_tokens(a), name_tokens(b)
+    return bool(one and other) and (one <= other or other <= one)
+
+
+def near(words: set[str], other: set[str]) -> bool:
+    """A near look-alike title: two long words shared, and 40% of the shorter one's."""
+    common = len(words & other)
+    return common >= NEAR_WORDS and common / min(len(words), len(other)) >= NEAR_SHARE
+
+
 def _json(op: dict[str, Any]) -> str:
     return json.dumps(op, ensure_ascii=False)
 
@@ -364,11 +392,17 @@ class _Drafting:
         self.closing: dict[str, tuple[Found, datetime | None]] = {}
         # Each meeting's outcome as the draft's lines set it so far, and the line that set it last.
         self.outcomes: dict[str, tuple[str, str]] = {}
+        # Each meeting's OUTCOME lines: the text, the block line and the block's file.
+        self.outcome_lines: dict[str, list[tuple[str, str, str]]] = {}
         self.answered: set[str] = set()
         self.sections: dict[str, list[Draft]] = {"closes": [], "asks": [], "meetings": [], "streams": []}
         self.prep: list[views.MeetingFacts] = []
+        # Each prep meeting's candidate points, by its id: the items suggest gives, at most three.
+        self.candidates: dict[str, list[tuple[views.ItemRow, str]]] = {}
         # The adds drafted so far, by who, with their titles' long words and their block line.
         self.added: dict[str, list[tuple[set[str], str]]] = {}
+        # The invites added so far, by who and series, with their block line.
+        self.invited: dict[tuple[str, str], str] = {}
 
     # -- what the lines name -------------------------------------------------------------------------------------------
 
@@ -424,6 +458,15 @@ class _Drafting:
         self.meetings = {m.row.id: m for m in self.ledger.meetings}
         self.points = {p.id: p for p in self.ledger.points}
         self.streams = {s.name for s in self.ledger.streams}
+        self.prep = [
+            m for m in self.ledger.meetings
+            if self.at <= m.row.start < self.prep_until and m.row.response != "cancelled" and not m.row.archived
+        ]  # fmt: skip
+        for m in self.prep:
+            if ROUTINE.search(m.row.subject) or self.owner.own(m):
+                continue
+            rows = [(self.by_ref[s.item], s.why) for s in index_ledger.suggest(conn, m.row.id) if s.item in self.by_ref]
+            self.candidates[m.row.id] = rows
 
     # -- the draft -----------------------------------------------------------------------------------------------------
 
@@ -455,10 +498,8 @@ class _Drafting:
             elif label == "STREAMS":
                 self.sections["streams"].append(self.stream_set(f))
         self.sections["meetings"] += links + minutes + outcomes
-        self.prep = [
-            m for m in self.ledger.meetings
-            if self.at <= m.row.start < self.prep_until and m.row.response != "cancelled" and not m.row.archived
-        ]  # fmt: skip
+        self.restating()
+        self.sections["streams"] = self.merged_streams(self.sections["streams"])
 
     def recording(self, thread: str | None, container: str | None) -> str | None:
         """The recording a record is of, by its thread and container: none for a record of no recording."""
@@ -609,6 +650,14 @@ class _Drafting:
                 "ask, else delete the line"
             )
             d.alternatives.append(d.op | {"force": True})
+        else:
+            # The same person written another way, or a title only near: the writer takes it, so it is said here.
+            nearby = [
+                where for person, added in self.added.items() if same_person(person, who)
+                for theirs, where in added if alike(words, theirs) or near(words, theirs)
+            ]  # fmt: skip
+            if nearby:
+                d.unsure(f"it may be the same ask as the add for {', '.join(nearby)}: drop it if so, else keep it")
         self.added.setdefault(_who(who), []).append((words, d.found.where))
         return d
 
@@ -767,6 +816,15 @@ class _Drafting:
                 *(self.candidate(row) for row in alikes),
             )  # fmt: skip
             d.alternatives += [self.log(group, row) for row in alikes]
+        seen |= {row.id for row in alikes}
+        nearby = [row for row in self.near_alikes(head) if row.id not in seen]
+        if nearby:
+            d.unsure(
+                f"a near look-alike of {', '.join(row.ref for row in nearby)} by who and title: log it there if it "
+                "continues that work, else keep the add",
+                *(self.candidate(row) for row in nearby),
+            )  # fmt: skip
+            d.alternatives += [self.log(group, row) for row in nearby]
         sourced = list({row.id: row for a in group for row in self.sourced(a.found.locator)}.values())
         if sourced:
             d.unsure(
@@ -788,6 +846,22 @@ class _Drafting:
         long words, on any side, as the writer refuses an add for."""
         words = title_words(ask.title)
         return [row for row, theirs in self.by_who.get(ask.key, []) if alike(words, theirs)]
+
+    def near_alikes(self, ask: _Ask) -> list[views.ItemRow]:
+        """The open items on the ask's side of its person, their name written in full or in part, whose title is a
+        look-alike or a near one: those DR-0642's rule doesn't catch."""
+        words = title_words(ask.title)
+        kinds = OWES if ask.side == "OWED" else ("waiting",)
+
+        def looks(who: str, theirs: set[str]) -> bool:
+            if who == ask.key and alike(words, theirs):
+                return False  # alikes has it
+            return alike(words, theirs) or near(words, theirs)
+
+        return [
+            row for who, rows in self.by_who.items() if same_person(who, ask.who)
+            for row, theirs in rows if row.kind in kinds and looks(who, theirs)
+        ]  # fmt: skip
 
     def due(self, group: list[_Ask]) -> str | None:
         """The due the group's latest ask names, if any names one."""
@@ -843,6 +917,15 @@ class _Drafting:
                 "unanswered is reported again: keep the add for a new invite, else delete the line",
                 *(self.candidate(row, state=True) for row in sourced),
             )  # fmt: skip
+        if meeting is not None:
+            series = meeting.series or f"{_who(meeting.row.subject)}|{_who(meeting.row.organiser or '')}"
+            earlier = self.invited.setdefault((_who(f.field(0)), series), f.where)
+            if earlier != f.where:
+                d.unsure(
+                    f"an invite to another meeting of the series the add for {earlier} invites to: drop it if it is "
+                    "that series, else keep it",
+                    self.meeting_line(meeting),
+                )  # fmt: skip
         return self.doubled(d, f.field(0), title or "")
 
     # -- meetings, links, minutes, streams -----------------------------------------------------------------------------
@@ -982,34 +1065,107 @@ class _Drafting:
             d.alternatives.append(d.op | {"fields": {"outcome": f"{had}\n{text}"}})
         if meeting is not None:
             self.outcomes[meeting.row.id] = (had + "\n" + text if had else text, f.where)
+            self.outcome_lines.setdefault(meeting.row.id, []).append((text, f.where, f.file))
         return d
+
+    def restating(self) -> None:
+        """An add on a meeting whose title restates a line of that meeting's outcome, as the ledger holds it or as
+        another block's OUTCOME line sets it, is unsure: the minutes may hold it already. An add from the block that
+        wrote the outcome is the outcome's own who-does-what, as recording.md asks for, and stays sure."""
+        for d in self.sections["asks"]:
+            ref = d.op.get("fields", {}).get("meeting") if d.op["op"] == "add" else None
+            meeting = self.meeting(ref)
+            if meeting is None:
+                continue
+            texts = [(meeting.outcome, "the ledger")] if meeting.outcome else []
+            # Every block's outcome lines but the add's own block's.
+            texts += [(text, where) for text, where, file in self.outcome_lines.get(meeting.row.id, [])
+                      if file != d.found.file]  # fmt: skip
+            words = title_words(str(d.op["fields"].get("title") or ""))
+            said = [
+                (line, where) for text, where in texts for line in text.splitlines()
+                if alike(words, title_words(line)) or near(words, title_words(line))
+            ]  # fmt: skip
+            if said:
+                d.unsure(
+                    f"it restates {meeting.row.ref}'s outcome, from {said[0][1]}: drop it if the minutes hold it, "
+                    "keep it for work the owner owes or waits on",
+                    *(f"{meeting.row.ref} outcome: {views.as_field(line)}" for line, _ in said),
+                )  # fmt: skip
+
+    def merged_streams(self, drafts: list[Draft]) -> list[Draft]:
+        """One `set` per stream: its lines' fields together, a field the stream holds already left out; two lines
+        that set one field two ways unsure, the other value the alternative. A line drafted unsure stays alone."""
+        by_name: dict[str, list[Draft]] = {}
+        out: list[Draft] = []
+        for d in drafts:
+            if d.why:
+                out.append(d)
+            else:
+                by_name.setdefault(d.op["item"], []).append(d)
+        merged: list[Draft] = []
+        for name, group in by_name.items():
+            stream = next((s for s in self.ledger.streams if s.name == name), None)
+            held = {} if stream is None else {
+                "status": stream.status, "where": stream.where, "next": stream.next,
+                "deadline": stream.deadline.isoformat() if stream.deadline else None,
+            }  # fmt: skip
+            fields: dict[str, Any] = {}
+            others: dict[str, list[Any]] = {}
+            for d in group:
+                for key, value in d.op["fields"].items():
+                    if held.get(key) == value:
+                        continue
+                    if key in fields and fields[key] != value:
+                        others.setdefault(key, []).append(value)
+                    else:
+                        fields.setdefault(key, value)
+            if not fields:
+                self.said.append(f"{', '.join(d.found.quoted for d in group)}: {name} holds all it says already")
+                continue
+            head = Draft({"op": "set", "item": name, "fields": fields,
+                          "note": "; ".join(d.op["note"] for d in group)}, group[0].found)  # fmt: skip
+            if len(group) > 1:
+                self.said.append(f"{len(group)} lines on {name} drafted as one set: " + ", ".join(
+                    d.found.where for d in group))  # fmt: skip
+            for key, values in others.items():
+                head.unsure(f"its lines set {key} two ways: keep {fields[key]!r}, or take the alternative",
+                            *(d.found.quoted for d in group[1:]), self.stream_line(name))  # fmt: skip
+                head.alternatives += [head.op | {"fields": fields | {key: value}} for value in values]
+            merged.append(head)
+        return merged + out
 
     # -- the file and the report ---------------------------------------------------------------------------------------
 
-    def prep_lines(self) -> list[str]:
+    def prep_lines(self, out: list[str]) -> None:
         """Under the `# prep` line, each prep meeting's line and its open points, so the prep is chosen and worded
-        without a `show`."""
-        out: list[str] = []
+        without a `show`, then its candidate points as `# + ` lines, which a settle takes or leaves."""
         for m in self.prep:
             out.append(f"#   {self.meeting_line(m)}")
             out += [f"#     {self.point_line(p)}" for p in self.points.values()
                     if p.meeting == m.row.ref and p.state == "open"]  # fmt: skip
-        return out
+            # An item the draft closes is no prep.
+            raised = [(row, why) for row, why in self.candidates.get(m.row.id, []) if row.id not in self.closing]
+            for row, why in raised[:CANDIDATES]:
+                first = (row.who.split() or [row.who])[0]
+                fields = {"text": f"{first}: {views.cut(row.title)}, where does it stand?", "proposed": True,
+                          "item": row.ref}  # fmt: skip
+                out.append(f"#     candidate, {views.as_field(why)}: {self.candidate(row)}")
+                out.append(CANDIDATE + _json({"op": "point", "item": m.row.ref, "fields": fields}))
 
     def write(self, path: Path) -> Reconciled:
         """The draft, replacing one there, and what the report says."""
-        drafts = [d for section in self.sections.values() for d in section]
-        count = sum(1 + len(d.then) for d in drafts) + 2
-        unsure_count = sum(1 + len(d.then) for d in drafts if d.why)
-        out = [f"# docket sync reconcile {self.info.sync}: {count} ops, {unsure_count} unsure, rev {FIRST_REV}"]
+        out = [""]
         unsure = _section(out, "closes", self.sections["closes"])
         unsure += _section(out, "asks", self.sections["asks"])
         unsure += _section(out, "meetings, links, minutes", self.sections["meetings"])
         out.append(_json({"op": "rollover"}))
         out.append(f"# prep: the next five working days: {', '.join(m.row.ref for m in self.prep) or 'none'}")
-        out += self.prep_lines()
+        self.prep_lines(out)
         unsure += _section(out, "streams", self.sections["streams"])
         out.append(_json({"op": "archive"}))
+        count = sum(1 for line in out if line.startswith("{"))
+        out[0] = f"# docket sync reconcile {self.info.sync}: {count} ops, {len(unsure)} unsure, rev {FIRST_REV}"
         path.write_text("\n".join(out) + "\n", encoding="utf-8", newline="\n")
         return Reconciled(
             path=path, ops=count, unsure=unsure,

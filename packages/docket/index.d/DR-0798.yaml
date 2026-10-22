@@ -1,0 +1,16 @@
+decisions:
+  - id: DR-0798
+    title: The reconcile merges a stream's lines, says more look-alikes, and drafts prep candidates that the one settle takes; settle takes ranges
+    status: proposed
+    at: "2026-10-22"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#305"]
+    supersedes: [DR-0760]
+    description: "DR-0760 as it stands, but: the reconcile drafts one set per stream, its lines' fields together, a field the stream holds already left out and said, and two lines that set a field two ways unsure, the other value the alternative. An add is also unsure when an open item on its side, or an add above it, is of the same person, their name written in full or in part, with a title that is a look-alike or near one, two long words and 40% of the shorter title shared, its log the alternative; when it is an invite to another meeting of the series an invite above it is for, by the meeting's series, else its subject and organiser; and when its title restates a line of its meeting's outcome as the ledger holds it, or as another block's OUTCOME line sets it, since an add from the block that wrote the outcome is that outcome's who-does-what. Under # prep, each prep meeting that isn't a daily, a standup, focus time or the owner's own block gets up to three candidates from its suggest, an item the draft closes left out: a # candidate line quoting the item, and under it a # + line holding a proposed point that raises it. docket sync settle takes take for a candidate, making it its op, and a range, 31-36=take, keep or drop, settling each line in it the choice fits. The skill settles in one pass: the draft read once, one settle that takes the candidates worth raising, an Edit only for new words or a point no candidate holds, one dry run, then the write. The fifth rehearsal made 8 hand edits to its draft and two dry runs (#305)."
+    binds:
+      - "A candidate is a comment until a settle takes it: nothing under # prep is written unless Claude chose it."
+      - "The reconcile marks unsure, never drops: a look-alike, a series and a restated outcome stay Claude's call."
+    not_chosen:
+      - "Prep candidates as unsure ops: every prep meeting's suggestions would have to be dropped one by one, and a draft left unsettled would refuse."
+      - "Merging look-alike adds in the reconcile: two asks can share words and be two pieces of work."

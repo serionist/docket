@@ -1,7 +1,7 @@
 ---
 name: sync
 description: Sync the user's live sources into the vault and reconcile the ledger. docket sync start writes a sync folder with each agent's prompt and the ledger it reads; each source runs in an agent of its own through run_open and writes a block of what the user owes and awaits, what closed, invites and meetings; each recording then gets an agent of its own, from docket sync recordings, that reads it once and writes its lines and its note; docket sync reconcile drafts the batch, Claude settles the lines it marks unsure in one docket sync settle, and one ledger_batch by sync writes it from the file; then docket sync summary prints the list, which is gone through with the user. Use when the user says sync or /sync, asks what they haven't answered or what they owe people, asks to catch up on mail, chats or recordings, or when the session start says a sync is due.
-allowed-tools: mcp__plugin_docket_docket__ledger mcp__plugin_docket_docket__search mcp__plugin_docket_docket__read mcp__plugin_docket_docket__verify mcp__plugin_docket_docket__briefs mcp__plugin_docket_docket__decisions Bash(docket ledger day) Bash(docket ledger day *) Bash(docket staging list) Bash(docket staging list *) Bash(docket staging show *) Bash(docket sync start) Bash(docket sync start *) Bash(docket sync recordings *) Bash(docket sync reconcile *) Bash(docket sync settle *) Bash(docket sync summary *)
+allowed-tools: mcp__plugin_docket_docket__ledger mcp__plugin_docket_docket__search mcp__plugin_docket_docket__read mcp__plugin_docket_docket__verify mcp__plugin_docket_docket__briefs mcp__plugin_docket_docket__decisions Bash(docket ledger day) Bash(docket ledger day *) Bash(docket staging list) Bash(docket staging list *) Bash(docket staging show *) Bash(docket sync start) Bash(docket sync start *) Bash(docket sync recordings *) Bash(docket sync reconcile *) Bash(docket sync settle *) Bash(docket sync summary *) Bash(docket sync learned *)
 ---
 
 # Sync
@@ -32,7 +32,7 @@ Without them, `who` is the name the ledger already uses for the person (`ledger`
 | Agents | one per `agent` line, all launched in one message (below) |
 | Recordings | as each agent is back, `docket sync recordings <sync> <source> --vault <vault>`, then an agent per recording it names (below) |
 | Reconcile | once every agent is back, the recordings' too: `docket sync reconcile <sync> --vault <vault>`, the draft settled in one pass, then one `ledger_batch` by `sync` from its file, dry run first (below) |
-| Summary | `docket sync summary <sync> --vault <vault>`, the list in chat, then the user's answer (below) |
+| Summary | `docket sync summary <sync> --vault <vault>`, the list in chat, then the LEARNED lines folded in and the user's answer (below) |
 
 `<vault>` is the folder the session start's `vault:` line names. Put `--vault <vault>` on every `docket` command.
 `<sync>` is the sync's id, the last part of the folder `docket sync start` printed.
@@ -45,20 +45,26 @@ line `Read and follow <the prompt's path>`, the path as the line gives it. Never
 context into every turn of the agent, and the prompt file names all it needs. Never write a prompt out yourself:
 `docket sync start` filled each from Docket's own.
 
-- Each agent reads the ledger from the sync folder's `context.md`, runs its source through `run_open`, the source's
-  skill and its `sync.md`, classifies its own records from what its run fetched and promotes them, goes through the
-  open items whose people its run read for evidence they were done, checks every locator it reports in one `read`
-  with `more`, writes its block to `blocks/<source>.txt` in the sync folder, and returns its RUN line alone. A
-  recording source's agent reads no recording and writes no line from one.
+- Each agent reads its own slice of the ledger, `context/<source>.md` in the sync folder: the open items whose source,
+  people or meetings are its source's, and every item due in the prep week. It runs its source through `run_open`,
+  the source's skill and its `sync.md`, classifies its own records from what its run fetched and promotes them, goes
+  through the open items whose people its run read for evidence they were done, checks every locator it reports in
+  one `read` with `more`, writes its block to `blocks/<source>.txt` once, has `docket sync check` read it, and
+  returns its RUN line alone. A recording source's agent reads no recording and writes no line from one.
+- A source whose skill folder holds a `pull.py`, as the Plaud example does, gets a short prompt instead: its agent
+  runs `docket sync pull`, which makes the run in code straight into the service, puts the audio four at a time and
+  writes what waits to be classified to files, then classifies from those, promotes and returns. Nothing the source
+  returns passes through its context, and it is back in minutes, so its recordings' agents start early.
 - The agents may share one browser, a tab each. A run that stops short leaves its mark and the others go on: its RUN
   line says why, and the summary names it.
 - The blocks are read by Docket, not by you: the reconcile prints their RUN and LEARNED lines and quotes each line it
   leaves to you. Read a block file only for a question the draft can't answer. An agent with no block file has its
   answer as its RUN line, and the summary names it.
-- A LEARNED line goes where it says: one about the route into the source's `SKILL.md`, any other into its `sync.md`
-  (made when it isn't there), a dated line in the part it concerns. A `SKILL.md` that is a copy of one of
-  Docket's examples, its title saying Docket's reference source or a Docket example source, is copied over at an
-  upgrade: its route lines go into `sync.md` too, under a part `Route`. Never the run's steps or the block's shape.
+- A LEARNED line waits for the summary: after the list is said, `docket sync learned <sync> --vault <vault>` lists
+  each by source with the file and part it goes in, a dated line in the part it concerns. One about the route goes
+  into the source's `SKILL.md`, any other into its `sync.md` (made when it isn't there); a `SKILL.md` copied from
+  Docket's examples is copied over at an upgrade, so its route lines go into `sync.md` under a part `Route`. Never
+  the run's steps or the block's shape.
 
 ## The recordings
 
@@ -71,8 +77,9 @@ and a source with none says so in a line.
 - One `Agent` call per `recording` line, all in one message, at once, while the other agents still run:
   `subagent_type: general-purpose` and no `model`, `description` `recording <key>`, the prompt `Read and follow <the
   prompt's path>`. Where Claude Code returns a message's agents together, this comes after all of them.
-- Each reads `context.md` and its recording's files once, goes through the open items whose people are in the call
-  for evidence they were done, writes its block to `blocks/<source>/<key>.txt`, puts its note by #211's method, and
+- Each reads its slice of the ledger, `context/<source>/<key>.md`, and its recording's files once, goes through the
+  open items whose people are in the call
+  for evidence they were done, writes its block to `blocks/<source>/<key>.txt` once, puts its note once, and
   answers one line: `put <doc id> rev <n>, <k> lines`, or `not put <doc id>: <why>, <k> lines`. The reconcile waits
   for every one; the summary says each note not put.
 - Every agent runs on this session's model, the recording agents too, so no `model` is ever set: a trial on a
@@ -104,38 +111,41 @@ next five working days. The draft runs in this order:
 | links | `material` | NOTES lines: the recording on the meeting at its start |
 | minutes | `point_set`, `set` | MINUTES by point id, then OUTCOME, its ` / ` made line breaks |
 | rollover | `rollover` | always |
-| prep | `point`, `add` | yours, at the `# prep` line |
+| prep | `point`, `add` | up to three candidates a meeting, `# + ` lines a settle takes; yours beside them |
 | streams | `set` | STREAMS lines |
 | archive | `archive` | always, last |
 
 Then, in this thread, in one pass:
 
+The aim is one settle, one dry run and no hand edits:
+
 1. Read the draft once. An op the rules couldn't settle carries `"unsure"`: why, and the choice. Above it, `# ?`
    lines quote its block line and what settling it needs: each candidate's `context.md` line with its due and what was
    last said on it, a point or an outcome the op would change, whole, the meeting's points, the stream's line or the
-   streams held; below it, a `#` line per alternative. Under `# prep`, each prep meeting with its open points. Decide
-   each by the continuing-work rule, and by `CLAUDE.md` for names, streams and slots. `ledger` view `show` only when a
-   candidate's quoted line can't answer the question. The writer refuses a line left unsure, so none slips through.
-2. Prep, at the `# prep` lines: pick the meetings the user presents in or owns a part of, customer meetings and new
-   series, none for dailies, standups or routine syncs; then one `ledger` view `suggest` for all of them,
-   `ledger(view="suggest", refs=["M-0002", "M-0003"])`, each item row naming in `suggested_for` the meeting it is for.
-   While `later` lists meetings past the room, ask again with those as `refs`, until `later` is empty. Then the items
-   the user would raise, each a `point` with `proposed` and its `item`, worded as a question for that call, none a
-   meeting's open point holds already and none the dry run shows rolled in. A prep `add`, a task due the working day
-   before, only for real work before the call: a deck, a document, a demo.
-3. Settle every unsure line a choice settles in one call, by the numbers the draft shows: `docket sync settle <sync>
-   <line>=<choice> ... --rev <n> --vault <vault>`, such as `7=alt 12=keep 15=drop --rev 1`, `<n>` the rev on the
-   draft's head line as you read it. `keep` takes the `unsure` out, `alt` (`alt2`, ...) puts that alternative in its
-   place, `keep+alt2` keeps the op and adds the alternative too, as two asks drafted as one need, and `drop` deletes
-   the line; what goes with an op follows a keep. It prints the draft's new rev and the unsure lines left and the
-   `# prep` line by their new numbers. A settle at a rev the draft has left changes nothing: a settle since moved the
-   lines, so read them again. Never write the draft out again.
-4. An Edit only for a line that needs new words, a field fixed or a stream's pairs reworded, and one Edit at the
-   `# prep` line for the prep points: Read those lines again first, as `settle` numbered them, since it rewrote the
-   file.
-5. `ledger_batch(ops=[], file="<the draft's path>", by="sync", dry_run=true)`. It lists every refusal: fix each in
-   the file and dry run again. A look-alike becomes a `log` on the item it names, unless it really is another ask
-   (`force: true`).
+   streams held; below it, a `#` line per alternative. The reconcile has merged each stream's lines into one `set`,
+   and marks an add unsure that looks like an open item or another add of the same person, even with their name
+   written in part or a title only near, an invite to another meeting of a series already invited to, and an add
+   that restates a meeting's outcome. Decide each by the continuing-work rule, and by `CLAUDE.md` for names, streams
+   and slots. `ledger` view `show` with `brief=true` only when a candidate's quoted line can't answer the question.
+   The writer refuses a line left unsure, so none slips through.
+2. Prep, at the `# prep` lines: each prep meeting with its open points, then up to three candidates from its
+   `suggest`, a `# candidate` line and a `# + ` point under it; none for a daily, a standup or the user's own block.
+   Take the candidates for the meetings the user presents in or owns a part of, customer meetings and new series,
+   and leave the rest as comments. A point to raise that no candidate holds, or a prep `add` (a task due the working
+   day before, only for real work before the call: a deck, a document, a demo), is an Edit at the `# prep` line.
+3. Settle in one call, by the numbers the draft shows: `docket sync settle <sync> <line>=<choice> ... --rev <n> --vault
+   <vault>`, such as `7=alt 12=keep 15=drop 31-36=take --rev 1`, `<n>` the rev on the draft's head line as you read it.
+   `keep` takes the `unsure` out, `alt` (`alt2`, ...) puts that alternative in its place, `keep+alt2` keeps the op and
+   adds the alternative too, as two asks drafted as one need, `drop` deletes the line, and `take` makes a `# + `
+   candidate its point; what goes with an op follows a keep. A range, `31-36=take`, takes every candidate in it, and
+   `keep` or `drop` a range of unsure ops. It prints the draft's new rev and the unsure lines left and the `# prep`
+   line by their new numbers. A settle at a rev the draft has left changes nothing: a settle since moved the lines, so
+   read them again. Never write the draft out again.
+4. An Edit only for a line that needs new words: Read those lines again first, as `settle` numbered them, since it
+   rewrote the file.
+5. `ledger_batch(ops=[], file="<the draft's path>", by="sync", dry_run=true)`, once, after every settle and Edit. It
+   lists every refusal: fix each in the file and dry run again. A look-alike becomes a `log` on the item it names,
+   unless it really is another ask (`force: true`).
 6. `ledger_batch(ops=[], file="<the draft's path>", by="sync")`. A write refused after a clean dry run means the ledger
    moved: fix the lines it names, dry run again.
 
@@ -174,8 +184,9 @@ something new after the weekly, whose recording answered its point, and the stre
 ```
 
 Cleo's mail is about the quote the user already waits for, so line 7 takes its alternative, the `log`: `docket sync
-settle <sync> 7=alt --rev 1 --vault <vault>`. M-0002 is next week's weekly, where Dan's room comes up, so one Edit at
-`# prep` adds:
+settle <sync> 7=alt --rev 1 --vault <vault>`. M-0002 has no candidate, since the only item on Ben closes in this
+draft; it is next week's weekly, where Dan's room comes up, so one Edit at `# prep` adds a point. Then one dry run,
+and the write:
 
 ```json
 {"op": "point", "item": "M-0002", "fields": {"text": "Dan: is the room booked for the 28th?", "proposed": true}}
@@ -196,8 +207,9 @@ once and say it in chat; never pull the list out of a snapshot, a block or the d
 | runs short, notes, staging | the sources that stopped short and why, each recording's note put or not, what waits on the Staging page |
 
 After the list, a few lines: what changed, and what the sync closed by itself, or that no source reported a close;
-the LEARNED lines written and where; why each note not put wasn't, from its agent's answer; and once, the stale briefs
-(`briefs`) and the decisions waiting (`decisions`, status `proposed`).
+why each note not put wasn't, from its agent's answer; and once, the stale briefs (`briefs`) and the decisions waiting
+(`decisions`, status `proposed`). Only then the LEARNED lines: `docket sync learned <sync> --vault <vault>`, each folded
+into the file it names (The agents, above), and one line saying where they went. The user never waits for them.
 
 Then the user goes through it. They answer in free text ("12 done, 14 drop, draft 3"), which is one batch by `user`,
 or hand over to `/docket:tasks`. Ask about one item only when it is unclear. Draft only what they pick, by their

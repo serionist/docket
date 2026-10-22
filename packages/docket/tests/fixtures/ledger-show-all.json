@@ -115,7 +115,8 @@
             "undone_by": null,
             "kind": "archive"
           }
-        ]
+        ],
+        "history_left": 0
       },
       "later": []
     },
@@ -222,7 +223,8 @@
             "undone_by": null,
             "kind": "material"
           }
-        ]
+        ],
+        "history_left": 0
       },
       "later": []
     },
@@ -314,7 +316,8 @@
             "undone_by": null,
             "kind": "snooze"
           }
-        ]
+        ],
+        "history_left": 0
       },
       "later": []
     },
@@ -396,7 +399,8 @@
             "undone_by": null,
             "kind": "add"
           }
-        ]
+        ],
+        "history_left": 0
       },
       "later": []
     },
@@ -488,7 +492,8 @@
             "undone_by": null,
             "kind": "drop"
           }
-        ]
+        ],
+        "history_left": 0
       },
       "later": []
     },
@@ -610,7 +615,8 @@
             "undone_by": null,
             "kind": "reopen"
           }
-        ]
+        ],
+        "history_left": 0
       },
       "later": []
     },
@@ -692,7 +698,8 @@
             "undone_by": null,
             "kind": "add"
           }
-        ]
+        ],
+        "history_left": 0
       },
       "later": []
     },
@@ -774,7 +781,8 @@
             "undone_by": null,
             "kind": "add"
           }
-        ]
+        ],
+        "history_left": 0
       },
       "later": []
     },
@@ -856,7 +864,8 @@
             "undone_by": null,
             "kind": "log"
           }
-        ]
+        ],
+        "history_left": 0
       },
       "later": []
     }
@@ -941,7 +950,8 @@
             "undone_by": null,
             "kind": "archive"
           }
-        ]
+        ],
+        "history_left": 0
       },
       "later": []
     },
@@ -1014,7 +1024,8 @@
             "undone_by": null,
             "kind": "meeting"
           }
-        ]
+        ],
+        "history_left": 0
       },
       "later": []
     },
@@ -1087,7 +1098,8 @@
             "undone_by": null,
             "kind": "meeting"
           }
-        ]
+        ],
+        "history_left": 0
       },
       "later": []
     },
@@ -1142,7 +1154,7 @@
           "id": "01M3250V000000000000000006",
           "number": 3,
           "kind": "task",
-          "title": "Send the pilot's dates to everyone on the list before the steering grou\u2026",
+          "title": "Send the pilot's dates to everyone on the list before the steering grou…",
           "who": "Cleo Example",
           "stream": "ops",
           "source": "chat:C0TEST/1791000001.000100",
@@ -1303,7 +1315,8 @@
             "undone_by": null,
             "kind": "point_set"
           }
-        ]
+        ],
+        "history_left": 0
       },
       "later": []
     },
@@ -1386,7 +1399,8 @@
             "undone_by": null,
             "kind": "meeting"
           }
-        ]
+        ],
+        "history_left": 0
       },
       "later": []
     },
@@ -1483,7 +1497,8 @@
             "undone_by": null,
             "kind": "point"
           }
-        ]
+        ],
+        "history_left": 0
       },
       "later": []
     }
@@ -1517,7 +1532,7 @@
           "id": "01M3250V000000000000000006",
           "number": 3,
           "kind": "task",
-          "title": "Send the pilot's dates to everyone on the list before the steering grou\u2026",
+          "title": "Send the pilot's dates to everyone on the list before the steering grou…",
           "who": "Cleo Example",
           "stream": "ops",
           "source": "chat:C0TEST/1791000001.000100",
@@ -1578,7 +1593,8 @@
             "undone_by": null,
             "kind": "stream"
           }
-        ]
+        ],
+        "history_left": 0
       },
       "later": []
     },
@@ -1786,7 +1802,8 @@
             "undone_by": null,
             "kind": "stream"
           }
-        ]
+        ],
+        "history_left": 0
       },
       "later": []
     }

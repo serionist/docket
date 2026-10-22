@@ -1,0 +1,18 @@
+decisions:
+  - id: DR-0795
+    title: Each sync agent reads its own slice of the ledger, its prompt only the parts its source uses, and writes its block once, checked by docket sync check
+    status: proposed
+    at: "2026-10-22"
+    by: Claude (autonomy grant)
+    cost: medium
+    sources: ["#305"]
+    description: "The fifth rehearsal's agents took 421 turns against the old sync's 146, and every turn carried context.md, 54.7 KB of the whole ledger read in two Reads (#305). docket sync start now writes each source agent's own slice under context/: the open and snoozed items whose source is one of its records, whose who wrote one of its records from 30 days before its window on, or that hang on a meeting such a person organises or attends, and every item due by the prep week's end; every meeting for a source with events or mail, else those such a person is in; no points; every stream. A person is matched by the words of their name, three letters or more, and the owner is no one's person. Without the index's records every item is in. docket sync recordings writes each recording agent's slice the same way: the items whose who its transcript, notes or title name, or that hang on its meetings, those meetings with their points, every item due by the prep week's end. A slice over 40,000 bytes is split into parts the Read tool takes whole, so it is read once. context.md stays whole for the main thread. A prompt keeps a part only for a source it fits, by [[if NAME]] and [[end]] lines the start fills: the classify part for a source whose records can be private, the recordings part for a source that has recordings. Every agent batches its lookups, read with more and several ledger reads in one message, shows with brief, writes its block once with one Write, and runs docket sync check on it, fixing each line it names with an Edit; a recording agent checks its note against the lines it read and puts it once, with no verify after. docket sync check reads a block as the reconcile will and names what it would leave to a hand edit: a line's shape, a kind, a stream the ledger doesn't hold or none, a day or a due, a who the ledger writes another way, a locator that doesn't open, a CLOSES ref or verdict, a stream's field. It reads only. On an invented vault of 160 open items and 110 meetings an agent's ledger went from 26.9 KB to 3 to 17 KB, its prompt from 11.2 KB to 9.5 KB."
+    binds:
+      - "An item missing from a slice is found with ledger view list by who: the slice is where an agent looks first, never the only place."
+      - Every item due by the prep week's end is in every slice.
+      - "The block's labels and fields stay DR-0722's and DR-0748's: the check names problems, it changes no line."
+      - "A slice holds each of its people whole, every open item of each person it holds one of, and a source that sees every meeting gets the items on them: an agent takes a person's items in its slice as all of them."
+    not_chosen:
+      - "A slice by stream: a stream doesn't say which source will see an item's evidence."
+      - "Dropping the meetings from the mail and calendar slices: they hold the clashes an invite is judged by."
+      - "Splitting context.md for the Read tool only: the agents would still carry the whole ledger every turn."

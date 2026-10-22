@@ -599,6 +599,18 @@ def test_show_gives_a_stream_with_its_open_items_and_their_counts(conn: sqlite3.
     ]  # fmt: skip
 
 
+def test_a_brief_show_keeps_the_newest_history_lines_and_says_how_many_it_left_out(conn: sqlite3.Connection) -> None:
+    whole = ask(conn, "show", ref="A-6")
+    brief = ask(conn, "show", ref="A-6", brief=True)
+    assert whole.detail is not None and brief.detail is not None
+    assert brief.detail.history == whole.detail.history[-5:] and brief.detail.history_left == 1
+    shown = views.lines(brief, TZ)
+    assert "history      1 older line left out by brief; show without it for all" in shown
+    assert len(shown) == len(views.lines(whole, TZ))
+    # Five lines or fewer: a brief show is the show.
+    assert ask(conn, "show", ref="M-1", brief=True) == ask(conn, "show", ref="M-1")
+
+
 def test_only_show_says_notes_descriptions_outcomes_attendees_answers_and_history(conn: sqlite3.Connection) -> None:
     for view, keys in (("snapshot", {}), ("queue", {}), ("list", {"state": "all", "k": None}), ("meetings", {}),
                        ("suggest", {"ref": "M-1"})):  # fmt: skip
@@ -690,7 +702,7 @@ def test_show_and_suggest_refuse_what_names_nothing(tmp_path: Path, view: str, r
     [
         ({"view": "queue", "who": "Ada"}, "queue takes nothing more, not who"),
         ({"view": "snapshot", "ref": "A-1"}, "snapshot takes since, until, not ref"),
-        ({"view": "show", "ref": "A-1", "state": "all"}, "show takes ref, not state"),
+        ({"view": "show", "ref": "A-1", "state": "all"}, "show takes ref, brief, not state"),
         ({"view": "meetings", "k": 10}, "meetings takes since, until, not k"),
         ({"view": "everything"}, "view is one of snapshot, show, queue, list, meetings, suggest, not 'everything'"),
         ({"view": "list", "state": "late"}, "state is one of open, snoozed, done, dropped, all, not 'late'"),
@@ -701,8 +713,9 @@ def test_show_and_suggest_refuse_what_names_nothing(tmp_path: Path, view: str, r
         ({"view": "suggest", "ref": "  "}, "suggest needs ref, a meeting's M- number or id, or refs"),
         ({"view": "suggest", "ref": "M-1", "refs": ("M-5",)}, "suggest takes ref or refs, not both"),
         ({"view": "suggest", "refs": ("M-1", " ")}, "suggest's refs are meetings, each its M- number or its id"),
-        ({"view": "show", "refs": ("M-1",)}, "show takes ref, not refs"),
+        ({"view": "show", "refs": ("M-1",)}, "show takes ref, brief, not refs"),
         ({"view": "snapshot", "refs": ("M-1",)}, "snapshot takes since, until, not refs"),
+        ({"view": "list", "brief": True}, "list takes who, stream, kind, state, since, until, k, not brief"),
     ],
 )
 def test_a_view_refuses_a_parameter_it_doesn_t_take_and_a_value_it_doesn_t_know(

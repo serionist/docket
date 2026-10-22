@@ -1,0 +1,11 @@
+decisions:
+  - id: DR-0799
+    title: "The sync's LEARNED lines wait for the summary: docket sync learned lists each with the file it goes in"
+    status: proposed
+    at: "2026-10-22"
+    by: Claude (autonomy grant)
+    cost: cheap
+    sources: ["#305"]
+    description: "The fifth rehearsal spent 1.5 minutes folding LEARNED lines into the skills before the summary the owner was waiting for (#305). The sync skill now says the list first, then runs docket sync learned <sync>, which lists the LEARNED lines by source, each with its block line and the file and part it goes in by DR-0750's rule: the source's SKILL.md for a route line, its sync.md for the rest, and sync.md under Route for a route line of a SKILL.md copied from Docket's examples. It reads only; Claude writes each line where it says, and says in one line where they went."
+    not_chosen:
+      - "The command writing the lines itself: a lesson needs its words fitted to the part it goes in, which is Claude's to word and the owner's to review."
