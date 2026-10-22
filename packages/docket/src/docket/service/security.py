@@ -9,7 +9,7 @@
 | the session cookie | the pages, and /api when there is no bearer token |
 
 GET and HEAD under /static/ need no session: they are the web app's own files, the same for everyone, and the sign-in
-page needs its stylesheet (DR-0177). The Host check still applies to them.
+page needs its stylesheet (DR-0793). The Host check still applies to them.
 
 No CORS header is ever sent, so no page of another origin reads an answer or adds a header a preflight would allow.
 """
@@ -42,13 +42,14 @@ HEADERS = {
 NO_STORE = ("/api", "/mcp", "/session")
 
 
-def plain_sign_in(wanted: str) -> str:
-    """The sign-in page without the web app's templates: the command that opens the page asked for."""
-    return (
+def plain_sign_in(wanted: str) -> Response:
+    """The sign-in page without the web app: the command that opens the page asked for."""
+    page = (
         '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Docket</title></head><body>'
         f"<p>Open Docket from a terminal on this machine: <code>{html.escape(open_command(wanted))}</code></p>"
         "</body></html>\n"
     )
+    return HTMLResponse(page, status_code=401, headers={"Cache-Control": "no-store"})
 
 
 def route_of(path: str, method: str) -> Route:
@@ -77,7 +78,7 @@ class Guard:
         port: int,
         token: Callable[[], str],
         sessions: Sessions,
-        sign_in: Callable[[str], str] = plain_sign_in,
+        sign_in: Callable[[str], Response] = plain_sign_in,
     ) -> None:
         self.app = app
         self.sign_in = sign_in
@@ -121,9 +122,8 @@ class Guard:
         if not bearer and not session:
             if route == "api":
                 return _unauthorized()
-            # The page asked for is the user's own words (a query string), so the answer isn't stored either.
-            page = self.sign_in(_wanted(scope))
-            return HTMLResponse(page, status_code=401, headers={"Cache-Control": "no-store"})
+            # 401 and no-store: the page asked for is the user's own words (a query string), so it isn't stored either.
+            return self.sign_in(_wanted(scope))
         if write and not bearer and origin is None and site is None:
             # A browser sends one of the two on every write; a write that carries a cookie and neither isn't ours.
             return PlainTextResponse("a write with the session cookie needs its Origin", status_code=403)

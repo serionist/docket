@@ -8,12 +8,14 @@ it is not a door until the first release. The MCP tools are.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
+from starlette.responses import Response
 
 from docket import capture
 from docket.errors import DocketError
@@ -33,6 +35,8 @@ from docket.vault.spans import WINDOW
 
 # A doc is a few KB; anything this big isn't one. The MCP SDK caps /mcp at the same.
 MAX_BODY = 4 * 1024 * 1024
+# The paths whose clients read JSON, never a page: their failures and misses stay JSON.
+MACHINE_PATHS = ("/api", "/mcp")
 
 
 # A run's open, bind or close is a few KB; a capture is up to CAPTURE_CAP.
@@ -280,8 +284,9 @@ def router(service: Service) -> APIRouter:
     return api
 
 
-def handle_errors(app: FastAPI) -> None:
-    """Docket's own errors as answers the caller can act on; anything else a plain 500, its details in the log only."""
+def handle_errors(app: FastAPI, page: Callable[[], Response] | None = None) -> None:
+    """Docket's own errors as answers the caller can act on; anything else a plain 500, its details in the log only:
+    on a page path, outside /api and /mcp, `page`'s answer, which names no detail either."""
 
     @app.exception_handler(DocRefusedError)
     async def refused(_request: Request, error: Exception) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
@@ -296,5 +301,8 @@ def handle_errors(app: FastAPI) -> None:
         return JSONResponse({"error": str(error)}, status_code=400)
 
     @app.exception_handler(Exception)
-    async def internal(_request: Request, _error: Exception) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
+    async def internal(request: Request, _error: Exception) -> Response:  # pyright: ignore[reportUnusedFunction]
+        path = request.url.path
+        if page is not None and not any(path == p or path.startswith(f"{p}/") for p in MACHINE_PATHS):
+            return page()
         return JSONResponse({"error": "internal error; see the service log"}, status_code=500)

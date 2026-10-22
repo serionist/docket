@@ -1,8 +1,9 @@
 """The Sync page's parts, worked out from what the service knows: what needs a session or the user, what failed and
-what to do about it, the runs open and ended, and each machine's cursors (DR-0300 to DR-0305).
+what to do about it, the runs open and ended, and each machine's cursors (DR-0304, DR-0305, DR-0788).
 
-`build` takes the facts and a clock and does no I/O, so every rule here is tested on invented facts. The page shows
-ids, counts, times and Docket's own messages: nothing here reads a capture, and no session or agent id is in the facts.
+`build` takes the facts and a clock and does no I/O, so every rule here is tested on invented facts; `page` and
+`runs_part` turn what it built into the JSON reads, times as text in the owner's zone (DR-0709). The page shows ids,
+counts, times and Docket's own messages: nothing here reads a capture, and no session or agent id is in the facts.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from datetime import date, datetime, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+from pydantic import BaseModel
 from starlette.datastructures import QueryParams
 
 from docket.errors import DocketError
@@ -23,9 +25,9 @@ from docket.service.runs import RUN_ID, OpenRun
 from docket.vault import cursors
 from docket.vault.records import source_name_problem
 from docket.web import urls
+from docket.web.display import at
 
 PATH = "/sync"
-RUNS = "/sync/runs"
 DEFAULT_K = 20
 MORE = 20
 MAX_K = history.KEEP
@@ -85,7 +87,7 @@ class SyncStateError(DocketError):
 
 @dataclass(frozen=True)
 class SyncState:
-    """The Sync page's URL (DR-0303): `source`, `run` and `k`, in one canonical form, defaults left out."""
+    """The Sync page's URL (DR-0788): `source`, `run` and `k`, in one canonical form, defaults left out."""
 
     source: str | None = None
     run: str | None = None
@@ -111,26 +113,15 @@ class SyncState:
             pairs.append(("k", str(self.k)))
         return urls.query(pairs)
 
-    def url(self, path: str = PATH) -> str:
+    def url(self) -> str:
         query = self.query()
-        return f"{path}?{query}" if query else path
+        return f"{PATH}?{query}" if query else PATH
 
     def with_run(self, run: str) -> SyncState:
         return replace(self, run=run)
 
     def with_k(self, k: int) -> SyncState:
         return replace(self, k=k)
-
-
-def canonical(url: str) -> str | None:
-    """A Sync page URL in its canonical form, or None for one that isn't the page's or doesn't read."""
-    path, _, query = url.partition("?")
-    if not path.endswith(PATH):
-        return None
-    try:
-        return SyncState.read(QueryParams(query)).url()
-    except SyncStateError:
-        return None
 
 
 # -- the facts -------------------------------------------------------------------------------------------------------
@@ -277,7 +268,6 @@ class SyncView:
     notes: list[str]
     as_of: datetime
     live: bool
-    refresh: str
     # How many sources vault.yaml lists tools for: none means nothing syncs live yet.
     live_sources: int
 
@@ -722,6 +712,231 @@ def build(facts: Facts, state: SyncState) -> SyncView:
         notes=notes,
         as_of=facts.now,
         live=bool(facts.open_runs),
-        refresh=state.url(RUNS),
         live_sources=sum(1 for s in facts.sources if s.live),
+    )
+
+
+# -- the JSON reads ---------------------------------------------------------------------------------------------------
+
+# What each need is called on the page.
+NEED_WORDS = {"you": "needs you", "due": "due a sync", "final": "final run due"}
+
+
+class Chosen(BaseModel):
+    """A source chip: All, or one source; the page narrows to the one that is on."""
+
+    label: str
+    url: str
+    on: bool
+
+
+class NeedRead(BaseModel):
+    source: str
+    kind: Literal["you", "due", "final"]
+    word: str
+    line: str
+    # The words to paste into Claude Code for it, or None when it needs the user first.
+    paste: str | None
+
+
+class FailureRead(BaseModel):
+    kind: str
+    label: str
+    source: str
+    what: str
+    todo: str
+    when: str | None
+    ids: list[str]
+    run: str | None
+    # The page's URL with that run open.
+    run_url: str | None
+    severity: Literal["error", "warn"]
+
+
+class IdListRead(BaseModel):
+    title: str
+    ids: list[str]
+    more: int
+
+
+class RunRead(BaseModel):
+    id: str
+    source: str
+    state: Literal["open", "closed", "dropped"]
+    word: str
+    badges: list[str]
+    opened: str
+    # How long it took, or has taken so far.
+    took: str
+    facts: list[str]
+    why: str | None
+    lists: list[IdListRead]
+    # The page's URL with this run open.
+    url: str
+
+
+class RunsRead(BaseModel):
+    """The runs part, which the page asks again every 5 seconds while a run is open (DR-0788)."""
+
+    as_of: str
+    live: bool
+    # The run the URL names, open or among the history's, else None.
+    focus: RunRead | None
+    open: list[RunRead]
+    recent: list[RunRead]
+    # The page's URL with 20 more runs, or None when every one is shown.
+    more: str | None
+
+
+class EntryRead(BaseModel):
+    id: str
+    kind: Literal["retry", "waiting"]
+    # The retry's reason, or what the waiting entry waits for.
+    why: str
+    since: str
+    age: str
+    leaves: str | None
+    final_due: bool
+
+
+class MachineRead(BaseModel):
+    machine: str
+    this: bool
+    mark: str | None
+    mark_age: str
+    lookback: str
+    retry: list[EntryRead]
+    waiting: list[EntryRead]
+    more: int
+    handed: str | None
+    ahead: bool
+
+
+class CursorRead(BaseModel):
+    source: str
+    window_since: str | None
+    notes: list[str]
+    rows: list[MachineRead]
+    problem: str | None
+
+
+class SyncPage(BaseModel):
+    """The whole page for a URL (DR-0788): its lead and notes, what needs a session, the failures, the runs and each
+    machine's cursors, in the order the page shows them (DR-0304, DR-0305)."""
+
+    # The URL as the server writes it, which the app puts in the address bar as it is (DR-0704).
+    canonical: str
+    lead: str
+    chips: list[Chosen]
+    notes: list[str]
+    needs: list[NeedRead]
+    paste_all: str | None
+    # How many sources vault.yaml lists tools for: none means nothing syncs live yet.
+    live_sources: int
+    failures: list[FailureRead]
+    runs: RunsRead
+    cursors: list[CursorRead]
+    machine: str
+
+
+class SyncRuns(BaseModel):
+    canonical: str
+    runs: RunsRead
+
+
+def _run_read(card: RunCard, tz: ZoneInfo) -> RunRead:
+    return RunRead(
+        id=card.id,
+        source=card.source,
+        state=card.state,
+        word=card.word,
+        badges=card.badges,
+        opened=at(card.opened, tz),
+        took=f"{card.took} so far" if card.state == "open" else card.took,
+        facts=card.facts,
+        why=card.why,
+        lists=[IdListRead(title=i.title, ids=i.ids, more=i.more) for i in card.lists],
+        url=card.link,
+    )
+
+
+def runs_part(view: SyncView, tz: ZoneInfo) -> RunsRead:
+    return RunsRead(
+        as_of=at(view.as_of, tz),
+        live=view.live,
+        focus=_run_read(view.focus, tz) if view.focus is not None else None,
+        open=[_run_read(r, tz) for r in view.open_runs],
+        recent=[_run_read(r, tz) for r in view.recent],
+        more=view.more,
+    )
+
+
+def _entry_read(entry: Entry, kind: Literal["retry", "waiting"]) -> EntryRead:
+    return EntryRead(
+        id=entry.id,
+        kind=kind,
+        why=entry.why,
+        since=entry.since.isoformat(),
+        age=entry.age,
+        leaves=entry.leaves.isoformat() if entry.leaves is not None else None,
+        final_due=entry.final_due,
+    )
+
+
+def _machine_read(row: MachineRow, tz: ZoneInfo) -> MachineRead:
+    return MachineRead(
+        machine=row.machine,
+        this=row.this,
+        mark=at(row.mark, tz) if row.mark is not None else None,
+        mark_age=row.mark_age,
+        lookback=f"{row.lookback} day{'s' if row.lookback != 1 else ''}",
+        retry=[_entry_read(e, "retry") for e in row.retry],
+        waiting=[_entry_read(e, "waiting") for e in row.waiting],
+        more=row.more,
+        handed=row.handed,
+        ahead=row.ahead,
+    )
+
+
+def _failure_read(failure: Failure, state: SyncState, tz: ZoneInfo) -> FailureRead:
+    return FailureRead(
+        kind=failure.kind,
+        label=failure.label,
+        source=failure.source,
+        what=failure.what,
+        todo=failure.todo,
+        when=at(failure.when, tz) if failure.when is not None else None,
+        ids=failure.ids,
+        run=failure.run,
+        run_url=state.with_run(failure.run).url() if failure.run is not None else None,
+        severity=failure.severity,
+    )
+
+
+def page(view: SyncView, state: SyncState, tz: ZoneInfo, machine: str) -> SyncPage:
+    """The whole page as the app reads it."""
+    return SyncPage(
+        canonical=state.url(),
+        lead=view.lead,
+        chips=[Chosen(label=c.label, url=c.url, on=c.on) for c in view.chips],
+        notes=view.notes,
+        needs=[
+            NeedRead(source=n.source, kind=n.kind, word=NEED_WORDS[n.kind], line=n.line, paste=n.paste)
+            for n in view.needs
+        ],
+        paste_all=view.paste_all,
+        live_sources=view.live_sources,
+        failures=[_failure_read(f, state, tz) for f in view.failures],
+        runs=runs_part(view, tz),
+        cursors=[
+            CursorRead(
+                source=b.source,
+                window_since=at(b.window_since, tz) if b.window_since is not None else None,
+                notes=b.notes,
+                rows=[_machine_read(r, tz) for r in b.rows],
+                problem=b.problem,
+            )
+            for b in view.cursors
+        ],
+        machine=machine,
     )

@@ -8,5 +8,7 @@
   "/recording",
   "/briefs",
   "/staging",
-  "/curate"
+  "/curate",
+  "/sync",
+  "/settings"
 ]

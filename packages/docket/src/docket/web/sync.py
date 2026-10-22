@@ -1,19 +1,24 @@
-"""The Sync page: `/sync` is always a whole page, `/sync/runs` always its runs part, which asks again every 5 seconds
-while a run is open (DR-0300, DR-0306).
+"""The Sync page's routes under /api/web (DR-0788): the whole page, and its runs part, which the page asks again every
+5 seconds while a run is open.
 
-The page reads the service's memory (the open runs and the run history), the cursor files, and `run_open`'s own checks,
-in this process and never through `/api`. It writes nothing: both routes answer GET only, as Search's do. A value the
-URL can't hold, or a `DocketError`, is the page's own error state; anything else is logged as its type and frames and
-answered with the error page, as on Search (DR-0170).
+| Route | What |
+|---|---|
+| `GET /sync` | the page for the URL's source, run and k: needs, failures, runs and cursors, and the canonical URL |
+| `GET /sync/runs` | the runs part alone, from the service's memory: no cursor file, no check |
+
+The page reads the service's memory (the open runs and the run history), the cursor files, and `run_open`'s own
+checks, in this process. It writes nothing: both routes answer GET only, and nothing here opens, closes or drops a run
+or edits a cursor; the run routes keep the bearer token (DR-0243). A value the URL can't hold, or a `DocketError`,
+answers 400 with its words; anything else is logged as its type and frames and answers 500 with no detail.
 """
 
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request
+from pydantic import BaseModel
 from starlette.responses import Response
 
 from docket.errors import DocketError
@@ -21,13 +26,9 @@ from docket.service import history
 from docket.service import sync as running
 from docket.service.state import Service
 from docket.vault import cursors
-from docket.web import sync_view, templating
-from docket.web.shell import shell
-from docket.web.sync_view import Facts, SourceFacts, SyncState, SyncStateError
-
-FAILED = (
-    "Something failed in Docket. The service log says what, and never holds your words; docket service status names it."
-)
+from docket.web import sync_view
+from docket.web.day_api import Refused, safely
+from docket.web.sync_view import Facts, SourceFacts, SyncPage, SyncRuns, SyncState
 
 
 def gather(service: Service) -> Facts:
@@ -101,56 +102,25 @@ def runs_only(service: Service) -> Facts:
     )
 
 
-def _context(view: sync_view.SyncView | None, state: SyncState, tz: ZoneInfo, problem: str = "") -> dict[str, Any]:
-    def run_url(run: str) -> str:
-        return state.with_run(run).url()
-
-    return {"view": view, "state": state, "tz": tz, "problem": problem, "fragment": False, "run_url": run_url}
-
-
 def router(service: Service) -> APIRouter:
-    web = APIRouter()
+    api = APIRouter()
 
-    @web.get("/sync", include_in_schema=False)
-    async def sync_page(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        async def answer() -> Response:
-            context = shell(service, request, "Sync", current="sync")
-            try:
-                state = SyncState.read(request.query_params)
-            except SyncStateError as e:
-                page = context | _context(None, SyncState(), ZoneInfo("UTC"), str(e))
-                return templating.page("sync/page.html", page, status=400)
-            try:
-                facts = await asyncio.to_thread(gather, service)
-            except DocketError as e:
-                page = context | _context(None, state, ZoneInfo("UTC"), str(e))
-                return templating.page("sync/page.html", page, status=400)
-            view = sync_view.build(facts, state)
-            return templating.page("sync/page.html", context | _context(view, state, facts.tz))
+    async def read(request: Request) -> SyncPage:
+        state = SyncState.read(request.query_params)
+        facts = await asyncio.to_thread(gather, service)
+        return sync_view.page(sync_view.build(facts, state), state, facts.tz, facts.machine)
 
-        def failed() -> Response:
-            return templating.page("error.html", shell(None, request, "Something failed", current="sync"), status=500)
+    async def read_runs(request: Request) -> SyncRuns:
+        state = SyncState.read(request.query_params)
+        facts = await asyncio.to_thread(runs_only, service)
+        return SyncRuns(canonical=state.url(), runs=sync_view.runs_part(sync_view.build(facts, state), facts.tz))
 
-        return await templating.safely(request, "/sync", answer, failed)
+    @api.get("/sync", response_model=SyncPage, responses={400: {"model": Refused}})
+    async def sync_read(request: Request) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
+        return await safely(request, lambda: read(request))
 
-    @web.get("/sync/runs", include_in_schema=False)
-    async def sync_runs(request: Request) -> Response:  # pyright: ignore[reportUnusedFunction]
-        async def answer() -> Response:
-            try:
-                state = SyncState.read(request.query_params)
-                facts = await asyncio.to_thread(runs_only, service)
-            except DocketError as e:
-                return _runs_error(str(e), 400)
-            context = _context(sync_view.build(facts, state), state, facts.tz) | {"fragment": True}
-            # The refresh never adds a history entry: the page's URL stays as it was.
-            headers = templating.history(request, state.url(), sync_view.canonical, replace=True)
-            return templating.page("sync/_runs.html", context, headers=headers)
+    @api.get("/sync/runs", response_model=SyncRuns, responses={400: {"model": Refused}})
+    async def sync_runs(request: Request) -> Response | BaseModel:  # pyright: ignore[reportUnusedFunction]
+        return await safely(request, lambda: read_runs(request))
 
-        return await templating.safely(request, "/sync/runs", answer, lambda: _runs_error(FAILED, 500))
-
-    return web
-
-
-def _runs_error(message: str, status: int) -> Response:
-    context = _context(None, SyncState(), ZoneInfo("UTC"), message) | {"fragment": True}
-    return templating.page("sync/_runs.html", context, status=status)
+    return api

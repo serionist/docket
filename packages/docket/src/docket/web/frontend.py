@@ -1,9 +1,10 @@
 """The React app's build (DR-0703, DR-0705): the files `npm run build` commits under `docket/web/app/`, read once at
 start, its scripts, styles and fonts served under `/static/app/` and its document for each route `routes.json` lists.
 
-The document goes out only through those routes, each time with a fresh style nonce in its meta element and its
-CSP, and with the theme the `docket_theme` cookie chose, so the first paint is right (DR-0706). A browser without a
-session never gets this far: the Guard answers it with the sign-in page.
+The document goes out only through those routes, and with 404 for a page path the app has no route for, each time
+with a fresh style nonce in its meta element and its CSP, and with the theme the `docket_theme` cookie chose, so the
+first paint is right (DR-0706). A browser without a session never gets this far: the Guard answers it with the
+sign-in page.
 """
 
 from __future__ import annotations
@@ -72,13 +73,15 @@ def new_nonce() -> str:
     return base64.b64encode(secrets.token_bytes(NONCE_BYTES)).decode("ascii")
 
 
-def document(request: Request, build: Build = BUILD) -> HTMLResponse:
-    """The app's document for a route of its own: a nonce of its own, the theme, and `no-store`, since the page asked
-    for is the user's own words."""
+def document(request: Request, build: Build = BUILD, *, status: int = 200) -> HTMLResponse:
+    """The app's document for a route of its own, or with 404 for a page path it has none for, which the app shows as
+    not found (DR-0792): a nonce of its own, the theme, and `no-store`, since the page asked for is the user's own
+    words."""
     nonce = new_nonce()
     theme = prefs(request)["theme"] or "system"
     html = build.document.replace(NONCE_MARK, f'content="{nonce}"', 1).replace(THEME_MARK, f'data-theme="{theme}"', 1)
-    return HTMLResponse(html, headers={"Content-Security-Policy": csp(nonce), "Cache-Control": "no-store"})
+    headers = {"Content-Security-Policy": csp(nonce), "Cache-Control": "no-store"}
+    return HTMLResponse(html, status_code=status, headers=headers)
 
 
 def serve(request: Request, path: str, build: Build = BUILD) -> Response:
