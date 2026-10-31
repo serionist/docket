@@ -42,6 +42,14 @@ transaction; Cancel deletes them.
 
 ## Search
 
+Claude reads text, not vectors, so it reaches the vault through three tools, each for one kind of question:
+
+| Question | Tool | What it returns |
+|---|---|---|
+| A needle: "when did Sam give us the price?" | `search` | passages with their record, date and speaker, found as below |
+| Research: "everything about X's architecture" | `digest` | every record's summary and tags inside a filter, by date; Claude reads all of it, then opens what matters with `read` |
+| "What else relates to this meeting?" | `related` | the records whose vectors sit nearest |
+
 A search runs in three steps:
 
 1. **Filter:** reconcile's tags narrow the vault to the project, people, topic and period asked about.
@@ -57,9 +65,13 @@ The worker computes and the server looks up: a worker never reads the database, 
 | Words and vectors in the main database, written in the same transaction as the records they come from | search never lags behind the records, and Finish makes a whole sync searchable at once |
 | SQLite full-text search for words | tuned in v1 for Hungarian word forms and typos, and held by quality floors |
 | Vectors in SQLite (sqlite-vec), stored compact as 8-bit or 16-bit numbers | the nearest passages, filtered by vault, tags and period in the same query; compact numbers keep a large embedder's vectors small |
-| A reranker over the best 50 | in v1 a small one lifted paraphrased questions from 0.44 to 0.61 found in the top 10 |
+| A reranker over the best 50, or a few hundred on a large GPU | in v1 a small one lifted paraphrased questions from 0.44 to 0.61 found in the top 10 |
 | The embedder and the reranker chosen per hardware, from the worker's catalogue | see GPU worker, below |
 | Tags as the graph | no second pass of Claude over every record, which full GraphRAG would need |
+| Each passage indexed with a line of context reconcile's Claude writes ("the 14 Sep planning call for project X, about the pilot's price") | Anthropic's Contextual Retrieval: about half the failed retrievals gone, two thirds with a reranker |
+| Passages cut by meaning: a meeting by topic, a thread by message, a document by section | each passage is about one thing, so it matches one question cleanly |
+| Summaries written for Claude to read: topics, decisions, people, keywords, every one specific | the digest is the search layer for research |
+| Two quality sets: v1's invented questions in the repo, and a private one from the replay, where each old task's source record is the known answer | search changes are judged by numbers; the private set never leaves the owner's machine |
 
 ## Audio
 
