@@ -103,10 +103,15 @@ the first spike on v1's quality set and on Hungarian recordings:
 | Task | CPU only | 8 GB (a laptop GPU) | 16 GB (the home server's RTX 4060) | 32 GB (RTX 5090) | 96 GB (RTX 6000 PRO) |
 |---|---|---|---|---|---|
 | Transcribe | Whisper small | Whisper large-v3-turbo | Whisper large-v3 | Whisper large-v3 | Whisper large-v3, several at once |
-| Who spoke when | pyannote | pyannote | pyannote | pyannote | pyannote |
+| Who spoke when | pyannote, slowly | pyannote | pyannote | pyannote | pyannote, several at once |
 | Embed | multilingual-e5-small | bge-m3 | Qwen3-Embedding-4B | Qwen3-Embedding-8B | Qwen3-Embedding-8B |
 | Rerank | mmarco-minilm | bge-reranker-v2-m3 | bge-reranker-v2-m3 | Qwen3-Reranker-4B | Qwen3-Reranker-8B |
 
+- Whisper comes in sizes, small to large-v3. Turbo is large-v3 with a much smaller decoder: several times faster, a
+  little less accurate. The distilled Whisper models are English only, so they don't fit Hungarian. Faster-whisper also
+  runs each size at lower precision (8-bit) to fit a smaller GPU.
+- pyannote has one size: its models are small, and a GPU only makes it faster. A bigger GPU runs more recordings at
+  once.
 - A vault's embedder is chosen when the vault is created, from the models the connected workers can run, with the
   largest that fits as the suggestion. All its vectors come from that one embedder: two embedders' vectors can't be
   compared. Only workers that can run it take its embed jobs; with none connected, the vault searches by words alone.
