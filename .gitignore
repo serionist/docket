@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# Node
+node_modules/
+
+# Local working files: notes, review packs, scratch; never committed
+.local/
+.env
+*.key
+
+# Claude Code's own per-machine files
+.claude/settings.local.json
+.claude/worktrees/
+
+# Operating systems
+.DS_Store
+Thumbs.db

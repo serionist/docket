@@ -1,0 +1,3 @@
+#!/bin/sh
+# No private name reaches a commit (AGENTS.md, Never).
+exec uv run --no-project --quiet python tools/check_names.py --staged

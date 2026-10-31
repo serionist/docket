@@ -1,0 +1,3 @@
+#!/bin/sh
+# Takes tool attribution out of the message, then refuses one that holds a private name (AGENTS.md, Never).
+exec uv run --no-project --quiet python tools/check_names.py --message "$1"
