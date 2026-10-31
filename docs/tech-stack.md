@@ -45,9 +45,12 @@ transaction; Cancel deletes them.
 A search runs in three steps:
 
 1. **Filter:** reconcile's tags narrow the vault to the project, people, topic and period asked about.
-2. **Shortlist:** words (full-text search) and meaning (the vectors nearest the question's) each pick their best
-   passages inside that filter, merged into 50.
-3. **Rerank:** the reranker reads the 50 against the question and puts the best on top.
+2. **Shortlist:** a worker embeds the question; the server's database then finds the best passages inside the filter
+   by words (full-text search) and by meaning (the vectors nearest the question's), merged into 50.
+3. **Rerank:** the server sends the question and the 50 passages to a worker, whose reranker scores them; the best go
+   on top.
+
+The worker computes and the server looks up: a worker never reads the database, it only gets the texts a job carries.
 
 | Choice | Why |
 |---|---|
