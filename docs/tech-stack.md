@@ -53,10 +53,10 @@ Claude reads text, not vectors, so it reaches the vault through three tools, eac
 A search runs in three steps:
 
 1. **Filter:** reconcile's tags narrow the vault to the project, people, topic and period asked about.
-2. **Shortlist:** a worker embeds the question; the server's database then finds the best passages inside the filter
-   by words (full-text search) and by meaning (the vectors nearest the question's), merged into 50.
-3. **Rerank:** the server sends the question and the 50 passages to a worker, whose reranker scores them; the best go
-   on top.
+2. **Shortlist:** a worker embeds the question; the server's database then ranks every passage inside the filter by
+   words (full-text search) and by meaning (the vectors nearest the question's), and merges the two rankings.
+3. **Rerank:** the server sends the question and the top of that ranking to a worker, as many passages as its reranker
+   reads in about a second; it scores them, and the best go on top.
 
 The worker computes and the server looks up: a worker never reads the database, it only gets the texts a job carries.
 
@@ -65,7 +65,7 @@ The worker computes and the server looks up: a worker never reads the database, 
 | Words and vectors in the main database, written in the same transaction as the records they come from | search never lags behind the records, and Finish makes a whole sync searchable at once |
 | SQLite full-text search for words | tuned in v1 for Hungarian word forms and typos, and held by quality floors |
 | Vectors in SQLite (sqlite-vec), stored compact as 8-bit or 16-bit numbers | the nearest passages, filtered by vault, tags and period in the same query; compact numbers keep a large embedder's vectors small |
-| A reranker over the best 50, or a few hundred on a large GPU | in v1 a small one lifted paraphrased questions from 0.44 to 0.61 found in the top 10 |
+| A reranker over as many passages as the worker reads in about a second (roughly 200 on the 4060, 500 on the 5090, measured in the spike), never fewer than the quality sets show the right passage needs | in v1 a small one lifted paraphrased questions from 0.44 to 0.61 found in the top 10 |
 | The embedder and the reranker chosen per hardware, from the worker's catalogue | see GPU worker, below |
 | Tags as the graph | no second pass of Claude over every record, which full GraphRAG would need |
 | Each passage indexed with a line of context reconcile's Claude writes ("the 14 Sep planning call for project X, about the pilot's price") | Anthropic's Contextual Retrieval: about half the failed retrievals gone, two thirds with a reranker |
@@ -91,7 +91,7 @@ like a runner, and every job carries what it needs.
 | Transcribe | a link to the audio, fetched over HTTPS; the likely attendees' names and the project's terms for Whisper's prompt | the segments, with times |
 | Who spoke when | the audio link | the speaker turns, and a voice embedding per speaker |
 | Embed | the texts | their vectors |
-| Rerank | the question and up to 50 candidate passages | a score for each |
+| Rerank | the question and the top of the shortlist, sized to the worker | a score for each |
 
 | Choice | Why |
 |---|---|
