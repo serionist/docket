@@ -1,0 +1,6 @@
+# One line ending on Mac, Windows and Linux; shell hooks break on CRLF.
+* text=auto eol=lf
+*.png binary
+*.ogg binary
+*.mp3 binary
+*.wav binary
