@@ -33,7 +33,7 @@ says what each part is built with and why. How the parts talk is the next doc, a
 | One SQLite database for everything: accounts, vaults, people, records, tasks, what reconcile writes, the change log | only the server writes, so SQLite is fast enough; a person shared between vaults is one link row |
 | A vault id on every table that belongs to a vault | the app holds several vaults and switches between them; export, import and delete a vault are app features |
 | The change log, append-only | history and undo, with no git |
-| Per vault: a search index file, and a folder for audio and documents, each file named by its hash | the index is big and rebuilt from the database, so backups skip it; large files stay out of the database |
+| Per vault: a folder for audio and documents, each file named by its hash | large files stay out of the database |
 | No git and no backup built in | backing up is the owner's business: copy the data folder |
 | A SaaS later: one database per account | the split follows accounts, not vaults |
 
@@ -42,13 +42,21 @@ transaction; Cancel deletes them.
 
 ## Search
 
+A search runs in three steps:
+
+1. **Filter:** reconcile's tags narrow the vault to the project, people, topic and period asked about.
+2. **Shortlist:** words (full-text search) and meaning (the vectors nearest the question's) each pick their best
+   passages inside that filter, merged into 50.
+3. **Rerank:** the reranker reads the 50 against the question and puts the best on top.
+
 | Choice | Why |
 |---|---|
+| Words and vectors in the main database, written in the same transaction as the records they come from | search never lags behind the records, and Finish makes a whole sync searchable at once |
 | SQLite full-text search for words | tuned in v1 for Hungarian word forms and typos, and held by quality floors |
-| Vectors in SQLite (sqlite-vec) | meaning, found locally, in the vault's index file |
+| Vectors in SQLite (sqlite-vec), stored compact as 8-bit or 16-bit numbers | the nearest passages, filtered by vault, tags and period in the same query; compact numbers keep a large embedder's vectors small |
 | A reranker over the best 50 | in v1 a small one lifted paraphrased questions from 0.44 to 0.61 found in the top 10 |
 | The embedder and the reranker chosen per hardware, from the worker's catalogue | see GPU worker, below |
-| Reconcile's tags filter first (project, people, topic, period); words, vectors and the reranker rank inside | the tags are the graph, so there is no second pass of Claude over every record, which full GraphRAG would need |
+| Tags as the graph | no second pass of Claude over every record, which full GraphRAG would need |
 
 ## Audio
 
@@ -158,7 +166,7 @@ Browser sessions are cookies that page scripts can't read; machine tokens are st
 | The worker's models download into its own cache volume on first start | the image carries no model files |
 | Built by CI and published to GitHub's container registry | the home server pulls a tested image |
 | On the home server: behind Caddy, deployed by its deployer, the dev compose first as the test environment | its own doc, later |
-| One data folder: the database, the index files, the file folders | mounted into the containers; your backups take the folder |
+| One data folder: the database and each vault's file folder | mounted into the server's container; your backups take the folder |
 
 ## Repo and tooling
 
