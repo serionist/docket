@@ -65,7 +65,7 @@ The worker computes and the server looks up: a worker never reads the database, 
 | Words and vectors in the main database, written in the same transaction as the records they come from | search never lags behind the records, and Finish makes a whole sync searchable at once |
 | SQLite full-text search for words | tuned in v1 for Hungarian word forms and typos, and held by quality floors |
 | Vectors in SQLite (sqlite-vec), stored compact as 8-bit or 16-bit numbers | the nearest passages, filtered by vault, tags and period in the same query; compact numbers keep a large embedder's vectors small |
-| A reranker over as many passages as the worker reads in about a second (roughly 200 on the 4060, 500 on the 5090, measured in the spike), never fewer than the quality sets show the right passage needs | in v1 a small one lifted paraphrased questions from 0.44 to 0.61 found in the top 10 |
+| A reranker over as many passages as its worker reads in about a second, from the pairs per second the catalogue records for that model on that GPU, never fewer than the quality sets show the right passage needs | in v1, on the GPU, bge-reranker-v2-m3 lifted paraphrased questions from 0.44 to 0.78 found in the top 10 (a set of 72 questions, so the private set carries more weight) |
 | The embedder and the reranker chosen per hardware, from the worker's catalogue | see GPU worker, below |
 | Tags as the graph | no second pass of Claude over every record, which full GraphRAG would need |
 | Each passage indexed with a line of context reconcile's Claude writes ("the 14 Sep planning call for project X, about the pilot's price") | Anthropic's Contextual Retrieval: about half the failed retrievals gone, two thirds with a reranker |
@@ -77,9 +77,9 @@ The worker computes and the server looks up: a worker never reads the database, 
 
 | Choice | Why |
 |---|---|
-| Whisper through faster-whisper, the size each worker can run | the best open transcription we know, from a laptop to a large GPU |
-| pyannote for who spoke when, and its speaker embeddings to match voices to people | it runs locally, so voice samples stay on your server |
-| The likely attendees and the project's terms as Whisper's prompt, then Claude corrects with the meeting's context | names and terms come out right; which Sam it was comes from the calendar and the voice |
+| Whisper large-v3 through faster-whisper, on every worker | the best open transcription we know; v1 found turbo dropped numbers on work calls, and numbers are what Docket is for |
+| pyannote for who spoke when; its pipeline returns a voice embedding per speaker, to match voices to people | it runs locally, so voice samples stay on your server |
+| The likely attendees' names and the project's terms as Whisper's `hotwords`, then Claude corrects with the meeting's context | `hotwords` applies to every 30-second window (Whisper's prompt only to the first), but holds about 220 tokens, so the list is the meeting's own names and terms; which Sam it was comes from the calendar and the voice |
 | Several voice samples per person, yours too: short clips from meetings where you confirmed the speaker, and recordings made in Docket | a speaker is matched against all of a person's samples, so a new room or microphone still matches |
 | Each sample kept twice: the clip in the files folder, its voice embedding in the database | matching uses the embeddings; a new voice model re-embeds the samples from their clips |
 | A speaker is named by voice when the match is clear, by context (the invite, the thread) when it isn't, and asked about in the wizard when neither is sure; every yes can add a sample | recognition gets better with use, and a guess never passes for a fact |
@@ -91,7 +91,7 @@ like a runner, and every job carries what it needs.
 
 | Job | The server sends | The worker sends back |
 |---|---|---|
-| Transcribe | a link to the audio, fetched over HTTPS; the likely attendees' names and the project's terms for Whisper's prompt | the segments, with times |
+| Transcribe | a link to the audio, fetched over HTTPS; the likely attendees' names and the project's terms as hotwords | the segments, with times |
 | Who spoke when | the audio link | the speaker turns, and a voice embedding per speaker |
 | Embed | the texts | their vectors |
 | Rerank | the question and the top of the shortlist, sized to the worker | a score for each |
@@ -131,7 +131,8 @@ runs as their jobs.
 | On connecting, a worker reports its hardware: GPU, VRAM, CPU, memory | the server knows which models it can run |
 | Every few seconds it reports its load: jobs running and queued, free VRAM, models loaded | the server sends each job to the least busy worker that can run it |
 | Two lanes: search jobs (embed a question, rerank) go first; audio and re-embedding wait behind them | a search stays fast while a worker transcribes an hour of audio |
-| Models load when a job needs them and unload when idle | a small GPU still runs every task, one model at a time |
+| Search models stay loaded; audio models load when a job needs them and unload when idle | a search never waits for a model to load; a small GPU still runs every audio task |
+| A search waits about 0.75 s for a busy or absent worker, then answers by words alone and says so | a search never hangs on the GPU |
 
 ### Models, from a laptop to 96 GB
 
@@ -139,21 +140,28 @@ The models are set in Docket's settings, per task, from a catalogue: each model 
 licence and pinned download. A worker takes the jobs whose model fits its hardware. The candidates, to be measured in
 the first spike on v1's quality set and on Hungarian recordings:
 
-| Task | CPU only | 8 GB (a laptop GPU) | 16 GB (the home server's RTX 4060) | 32 GB (RTX 5090) | 96 GB (RTX 6000 PRO) |
+| Task | CPU only | 8 GB (a laptop GPU) | 16 GB (the home server's RTX 4060 Ti, shared with Plex and thermal ML) | 32 GB (RTX 5090) | 96 GB (RTX PRO 6000 Blackwell) |
 |---|---|---|---|---|---|
-| Transcribe | Whisper small | Whisper large-v3-turbo | Whisper large-v3 | Whisper large-v3 | Whisper large-v3, several at once |
-| Who spoke when | pyannote, slowly | pyannote | pyannote | pyannote | pyannote, several at once |
-| Embed | multilingual-e5-small | bge-m3 | Qwen3-Embedding-4B | Qwen3-Embedding-8B | Qwen3-Embedding-8B |
-| Rerank | mmarco-minilm | bge-reranker-v2-m3 | bge-reranker-v2-m3 | Qwen3-Reranker-4B | Qwen3-Reranker-8B |
+| Transcribe | Whisper large-v3, 8-bit, about real time on 8 threads | Whisper large-v3, 8-bit | Whisper large-v3 | Whisper large-v3, 16-bit | Whisper large-v3, 16-bit, several at once |
+| Who spoke when | pyannote, speed not measured | pyannote | pyannote | pyannote | pyannote, several at once |
+| Embed | multilingual-e5-small or Qwen3-Embedding-0.6B | bge-m3 or Qwen3-Embedding-0.6B | Qwen3-Embedding-4B | Qwen3-Embedding-8B | Qwen3-Embedding-8B |
+| Rerank | mmarco-minilm | bge-reranker-v2-m3 | bge-reranker-v2-m3 | bge-reranker-v2-m3, Qwen3-Reranker-4B a candidate | bge-reranker-v2-m3, Qwen3-Reranker-4B a candidate |
 
-- Whisper comes in sizes, small to large-v3. Turbo is large-v3 with a much smaller decoder: several times faster, a
-  little less accurate. The distilled Whisper models are English only, so they don't fit Hungarian. Faster-whisper also
-  runs each size at lower precision (8-bit) to fit a smaller GPU.
-- pyannote has one size: its models are small, and a GPU only makes it faster. A bigger GPU runs more recordings at
-  once.
-- A vault's embedder is chosen when the vault is created, from the models the connected workers can run, with the
-  largest that fits as the suggestion. All its vectors come from that one embedder: two embedders' vectors can't be
-  compared. Only workers that can run it take its embed jobs; with none connected, the vault searches by words alone.
+- Whisper large-v3 needs about 4.5 GB in 16-bit and 2.9 GB in 8-bit, so it fits every GPU. Turbo is large-v3 with a
+  much smaller decoder, several times faster, but in v1 it dropped numbers, so it is only for quick or live use. The
+  distilled Whisper models are English only.
+- 8-bit runs on Ampere and Ada cards (the 4060 Ti). CTranslate2 turned it off on Blackwell (the 5090, the RTX PRO
+  6000), so Whisper runs there in 16-bit, which those cards have room for.
+- pyannote has one size: its models are small, and a GPU only makes it faster. Its current pipeline (community-1) is
+  CC-BY-4.0 and gated on Hugging Face, so a worker needs a Hugging Face token, and Docket credits it.
+- Qwen3's rerankers are candidates only: v1 found the 0.6B weaker than bge-reranker-v2-m3 on its set, while public
+  benchmarks say the opposite, so our own quality sets decide. The 8B scores no better than the 4B.
+- The search models stay loaded on the workers that serve search; audio models load per job and unload when idle. The
+  catalogue counts the VRAM of models loaded together.
+- A vault's embedder is chosen when the vault is created: the suggestion is the largest the always-on worker can run,
+  so search by meaning never depends on a PC that sleeps. Its vectors are cut to 1024 numbers (Qwen3's embedders can
+  shorten theirs). All the vault's vectors come from that one embedder: two embedders' vectors can't be compared. Only
+  workers that can run it take its embed jobs; with none connected, the vault searches by words alone.
 - Changing a vault's embedder re-embeds it in the background; search uses the old vectors until the new ones are done.
 - Transcription, speaker turns and reranking may run on different models per worker; each result records the model
   that made it.
@@ -166,7 +174,8 @@ the first spike on v1's quality set and on Hungarian recordings:
 | Choice | Why |
 |---|---|
 | The server runs Claude through the Agent SDK for Python | it ships Claude Code inside, so no Node; it does reconcile and the server's connector steps |
-| A token list in priority order: subscription OAuth tokens and API keys | on a limit the next token takes over, and the limited one is skipped until its reset time, or for an hour |
+| A token list in priority order that you provide: subscription OAuth tokens (from `claude setup-token`) and API keys, kept encrypted | on a limit the next token takes over, and the limited one is skipped until its reset time, or for an hour; the owner's choice for a self-hosted Docket |
+| Never `--bare` with a subscription token | bare mode ignores the token |
 | Each credential in a process of its own, with only that credential set | an API key left in the environment would win over a token |
 | A SaaS takes API keys only | Anthropic's terms: products don't run on their users' subscriptions |
 | On a runner, Claude-driven steps use that machine's own Claude login | no token leaves the server |
@@ -236,9 +245,10 @@ Browser sessions are cookies that page scripts can't read; machine tokens are st
 
 | Question | Spike |
 |---|---|
-| Does voice ID tell your coworkers apart on Plaud audio, and how fast is it on the 4060? | five real recordings |
+| Does voice ID tell your coworkers apart on Plaud audio, and how fast is it on the 4060 Ti and on a CPU? | five real recordings |
 | Does the Agent SDK run on a subscription token, and how do the session and weekly limits show? | one scheduled job |
 | Can Claude read Outlook and Teams on the web through Playwright, every time? | one week of mail |
 | Which Python do all the ML libraries support? | the GPU worker image |
-| Do PyTorch, CTranslate2, ONNX Runtime and pyannote all run on Blackwell (the 5090, and so the RTX 6000 PRO)? | the worker on the dev PC |
-| Which models win at each size, in English and Hungarian? | v1's quality set and recorded meetings, on each GPU |
+| Do PyTorch and pyannote run on Blackwell (the 5090, and so the RTX PRO 6000)? v1 already ran CTranslate2 (4.6.3 or later) and ONNX Runtime on the 5090 | the worker on the dev PC |
+| Which models win at each size, in English and Hungarian, and how many pairs a second does each reranker read on each GPU? | v1's quality set, the private set and recorded meetings, on each GPU |
+| How much VRAM is free on the 4060 Ti beside Plex and the thermal ML, and does Docker reach the GPU there (the NVIDIA container toolkit)? | the home server |
