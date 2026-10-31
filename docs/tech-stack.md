@@ -80,6 +80,9 @@ The worker computes and the server looks up: a worker never reads the database, 
 | Whisper through faster-whisper, the size each worker can run | the best open transcription we know, from a laptop to a large GPU |
 | pyannote for who spoke when, and its speaker embeddings to match voices to people | it runs locally, so voice samples stay on your server |
 | The likely attendees and the project's terms as Whisper's prompt, then Claude corrects with the meeting's context | names and terms come out right; which Sam it was comes from the calendar and the voice |
+| Several voice samples per person, yours too: short clips from meetings where you confirmed the speaker, and recordings made in Docket | a speaker is matched against all of a person's samples, so a new room or microphone still matches |
+| Each sample kept twice: the clip in the files folder, its voice embedding in the database | matching uses the embeddings; a new voice model re-embeds the samples from their clips |
+| A speaker is named by voice when the match is clear, by context (the invite, the thread) when it isn't, and asked about in the wizard when neither is sure; every yes can add a sample | recognition gets better with use, and a guess never passes for a fact |
 
 ## GPU worker
 
@@ -99,6 +102,27 @@ like a runner, and every job carries what it needs.
 | Its only storage is its model cache | nothing to back up, nothing to leak |
 | Paired like a runner, with a machine token | any number of workers can connect: the home server, your dev PC, a laptop |
 | With no worker connected, audio jobs wait and search answers by words alone | the server never depends on the GPU being up |
+
+### The job protocol
+
+Jobs are calls over the worker's WebSocket, as JSON-RPC 2.0 messages. Runners speak the same protocol, with connector
+runs as their jobs.
+
+| Message | From | Says |
+|---|---|---|
+| `hello` | worker | its hardware and the models it has cached |
+| `status`, every few seconds | worker | its jobs running and queued, free VRAM, models loaded |
+| `run` | server | one job: its id, kind, model and inputs |
+| `progress` | worker | how far the job is |
+| `result` or `error` | worker | the output, or why there is none |
+| `cancel` | server | stop a job, e.g. when the wizard is cancelled |
+
+| Choice | Why |
+|---|---|
+| A job sent to a worker is leased to it; the lease lapses when the worker drops or stops reporting, and the job goes back to the queue | a worker that disappears mid-job loses nothing but time |
+| A result carries its job id, and a second result for the same job is ignored | a job run twice after a lapsed lease still writes once |
+| The server sends jobs through one interface, a compute backend; connected workers are the first backend | a later backend can start workers on demand: a cloud GPU container job (Azure, for example) runs the same worker image, connects back with a one-time token, works its batch and exits |
+| A vault sends audio to a cloud backend only if its owner turned that on | audio leaves the home network only by choice |
 
 ### Several workers
 
