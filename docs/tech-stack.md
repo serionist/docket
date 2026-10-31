@@ -8,7 +8,7 @@ says what each part is built with and why. How the parts talk is the next doc, a
 | Part | Runs on | Built with |
 |---|---|---|
 | Server | Linux, in Docker; Mac and Windows for development | Python, FastAPI, SQLite |
-| GPU worker | the same host, on an NVIDIA GPU; on the CPU when there is none | Python, PyTorch, CTranslate2, ONNX Runtime |
+| GPU worker | next to the server or on any machine with an NVIDIA GPU; on the CPU when there is none | Python, PyTorch, CTranslate2, ONNX Runtime |
 | Web app | the browser, served by the server | React, shadcn/ui, Tailwind CSS |
 | Runner | each Mac and Windows machine | Python, Playwright |
 | Plugin | each Claude Code | skills, and MCP to the server over HTTPS |
@@ -23,7 +23,7 @@ says what each part is built with and why. How the parts talk is the next doc, a
 | FastAPI and Pydantic | typed routes, and an OpenAPI file the web app's client is generated from | Django: more than an API needs |
 | SQLAlchemy models, with migrations generated from them (Alembic) | code first: the models are the truth; Postgres stays possible | migrations written by hand |
 | Jobs in a database table, worked by the server | a sync, a reconcile, a transcription survive a restart, with no extra service | Redis, a queue server |
-| A WebSocket per browser tab and per runner | the wizard and the pages update live; the server pushes work to runners | v1's 5-second poll |
+| A WebSocket per browser tab, per runner and per GPU worker | the wizard and the pages update live; the server pushes work to runners and workers | v1's 5-second poll |
 | MCP from the official Python SDK, over HTTPS | Claude reaches the same server the web app uses | a local MCP server on each machine |
 
 ## Data
@@ -56,6 +56,25 @@ transaction; Cancel deletes them.
 | Whisper large-v3 through faster-whisper, on the GPU | the best open transcription, fast on the home server's RTX 4060 |
 | pyannote for who spoke when, and its speaker embeddings to match voices to people | it runs locally, so voice samples stay on your server |
 | The likely attendees and the project's terms as Whisper's prompt, then Claude corrects with the meeting's context | names and terms come out right; which Sam it was comes from the calendar and the voice |
+
+## GPU worker
+
+The worker holds the audio and search models and nothing else: no database, no data folder. It connects to the server
+like a runner, and every job carries what it needs.
+
+| Job | The server sends | The worker sends back |
+|---|---|---|
+| Transcribe | a link to the audio, fetched over HTTPS; the likely attendees' names and the project's terms for Whisper's prompt | the segments, with times |
+| Who spoke when | the audio link | the speaker turns, and a voice embedding per speaker |
+| Embed | the texts | their vectors |
+| Rerank | the question and up to 50 candidate passages | a score for each |
+
+| Choice | Why |
+|---|---|
+| The server matches voice embeddings to people | the worker never knows who is who |
+| Its only storage is its model cache | nothing to back up, nothing to leak |
+| Paired like a runner, with a machine token | a second worker, or a laptop with a GPU, can connect too |
+| With no worker connected, audio jobs wait and search answers by words alone | the server never depends on the GPU being up |
 
 ## Claude
 
@@ -102,7 +121,8 @@ Browser sessions are cookies that page scripts can't read; machine tokens are st
 
 | Choice | Why |
 |---|---|
-| Two Docker images: the server with the web app, and the GPU worker | the server image stays small; a host without a GPU runs the worker on the CPU |
+| Two Docker images: the server with the web app, and the GPU worker | the server image stays small and changes often; the worker's CUDA image is several GB and changes rarely; a host without a GPU runs the worker on the CPU |
+| The worker's models download into its own cache volume on first start | the image carries no model files |
 | Built by CI and published to GitHub's container registry | the home server pulls a tested image |
 | On the home server: behind Caddy, deployed by its deployer, the dev compose first as the test environment | its own doc, later |
 | One data folder: the database, the index files, the file folders | mounted into the containers; your backups take the folder |
