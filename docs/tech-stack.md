@@ -64,7 +64,7 @@ The worker computes and the server looks up: a worker never reads the database, 
 |---|---|
 | Words and vectors in the main database, written in the same transaction as the records they come from | search never lags behind the records, and Finish makes a whole sync searchable at once |
 | SQLite full-text search for words | tuned in v1 for Hungarian word forms and typos, and held by quality floors |
-| Vectors in SQLite (sqlite-vec), stored compact as 8-bit or 16-bit numbers | the nearest passages, filtered by vault, tags and period in the same query; compact numbers keep a large embedder's vectors small |
+| Vectors stored in the main database as plain blobs of 1024 numbers, and held in the server's memory, where each search scans every vector inside its filter | v1 measured such a scan at 5 ms per 100,000 vectors; it needs no extension. If the spike measures it above about 150 ms on a real vault, a scan job for a worker on the same host takes over |
 | A reranker over as many passages as its worker reads in about a second, from the pairs per second the catalogue records for that model on that GPU, never fewer than the quality sets show the right passage needs | in v1, on the GPU, bge-reranker-v2-m3 lifted paraphrased questions from 0.44 to 0.78 found in the top 10 (a set of 72 questions, so the private set carries more weight) |
 | The embedder and the reranker chosen per hardware, from the worker's catalogue | see GPU worker, below |
 | Tags as the graph | no second pass of Claude over every record, which full GraphRAG would need |
