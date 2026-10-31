@@ -92,17 +92,22 @@ The models are set in Docket's settings, per task, from a catalogue: each model 
 licence and pinned download. A worker takes the jobs whose model fits its hardware. The candidates, to be measured in
 the first spike on v1's quality set and on Hungarian recordings:
 
-| Task | CPU only | about 8 GB (RTX 4060) | about 32 GB (RTX 5090) | 96 GB (RTX 6000 PRO) |
-|---|---|---|---|---|
-| Transcribe | Whisper small | Whisper large-v3-turbo | Whisper large-v3 | Whisper large-v3, several at once |
-| Who spoke when | pyannote | pyannote | pyannote | pyannote |
-| Embed | multilingual-e5-small | bge-m3 | Qwen3-Embedding-4B | Qwen3-Embedding-8B |
-| Rerank | mmarco-minilm | bge-reranker-v2-m3 | Qwen3-Reranker-4B | Qwen3-Reranker-8B |
+| Task | CPU only | 8 GB (a laptop GPU) | 16 GB (the home server's RTX 4060) | 32 GB (RTX 5090) | 96 GB (RTX 6000 PRO) |
+|---|---|---|---|---|---|
+| Transcribe | Whisper small | Whisper large-v3-turbo | Whisper large-v3 | Whisper large-v3 | Whisper large-v3, several at once |
+| Who spoke when | pyannote | pyannote | pyannote | pyannote | pyannote |
+| Embed | multilingual-e5-small | bge-m3 | Qwen3-Embedding-4B | Qwen3-Embedding-8B | Qwen3-Embedding-8B |
+| Rerank | mmarco-minilm | bge-reranker-v2-m3 | bge-reranker-v2-m3 | Qwen3-Reranker-4B | Qwen3-Reranker-8B |
 
-- A vault's vectors all come from one embedder, so only workers that can run it take its embed jobs. Changing the
-  embedder re-embeds the vault in the background, and search uses the old vectors until the new ones are done.
+- A vault's embedder is chosen when the vault is created, from the models the connected workers can run, with the
+  largest that fits as the suggestion. All its vectors come from that one embedder: two embedders' vectors can't be
+  compared. Only workers that can run it take its embed jobs; with none connected, the vault searches by words alone.
+- Changing a vault's embedder re-embeds it in the background; search uses the old vectors until the new ones are done.
 - Transcription, speaker turns and reranking may run on different models per worker; each result records the model
   that made it.
+- The worker contract leaves room for a fifth kind of job, generate: a local LLM on a large GPU doing bulk steps (tags,
+  first summaries, transcript clean-up) without Claude tokens. Docket starts with Claude only; a local LLM is measured
+  against Claude on the replay before it takes any step.
 
 ## Claude
 
