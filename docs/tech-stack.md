@@ -7,7 +7,7 @@ says what each part is built with and why. How the parts talk is the next doc, a
 
 | Part | Runs on | Built with |
 |---|---|---|
-| Server | Linux, in Docker; Mac and Windows for development | Python, FastAPI, SQLite |
+| Server | Linux, in Docker; natively on Mac and Windows for development | Python, FastAPI, SQLite |
 | GPU worker | next to the server or on any machine with an NVIDIA GPU; on the CPU when there is none | Python, PyTorch, CTranslate2, ONNX Runtime |
 | Web app | the browser, served by the server | React, shadcn/ui, Tailwind CSS |
 | Runner | each Mac and Windows machine | Python, Playwright |
@@ -45,15 +45,16 @@ transaction; Cancel deletes them.
 | Choice | Why |
 |---|---|
 | SQLite full-text search for words | tuned in v1 for Hungarian word forms and typos, and held by quality floors |
-| Vectors in SQLite (sqlite-vec), made by `multilingual-e5-small` | meaning, found locally, in the same file |
-| A reranker: `bge-reranker-v2-m3` on the GPU, `mmarco-minilm` on the CPU | in v1 it lifted paraphrased questions from 0.44 to 0.61 found in the top 10 |
+| Vectors in SQLite (sqlite-vec) | meaning, found locally, in the vault's index file |
+| A reranker over the best 50 | in v1 a small one lifted paraphrased questions from 0.44 to 0.61 found in the top 10 |
+| The embedder and the reranker chosen per hardware, from the worker's catalogue | see GPU worker, below |
 | Reconcile's tags filter first (project, people, topic, period); words, vectors and the reranker rank inside | the tags are the graph, so there is no second pass of Claude over every record, which full GraphRAG would need |
 
 ## Audio
 
 | Choice | Why |
 |---|---|
-| Whisper large-v3 through faster-whisper, on the GPU | the best open transcription, fast on the home server's RTX 4060 |
+| Whisper through faster-whisper, the size each worker can run | the best open transcription we know, from a laptop to a large GPU |
 | pyannote for who spoke when, and its speaker embeddings to match voices to people | it runs locally, so voice samples stay on your server |
 | The likely attendees and the project's terms as Whisper's prompt, then Claude corrects with the meeting's context | names and terms come out right; which Sam it was comes from the calendar and the voice |
 
@@ -73,8 +74,35 @@ like a runner, and every job carries what it needs.
 |---|---|
 | The server matches voice embeddings to people | the worker never knows who is who |
 | Its only storage is its model cache | nothing to back up, nothing to leak |
-| Paired like a runner, with a machine token | a second worker, or a laptop with a GPU, can connect too |
+| Paired like a runner, with a machine token | any number of workers can connect: the home server, your dev PC, a laptop |
 | With no worker connected, audio jobs wait and search answers by words alone | the server never depends on the GPU being up |
+
+### Several workers
+
+| Choice | Why |
+|---|---|
+| On connecting, a worker reports its hardware: GPU, VRAM, CPU, memory | the server knows which models it can run |
+| Every few seconds it reports its load: jobs running and queued, free VRAM, models loaded | the server sends each job to the least busy worker that can run it |
+| Two lanes: search jobs (embed a question, rerank) go first; audio and re-embedding wait behind them | a search stays fast while a worker transcribes an hour of audio |
+| Models load when a job needs them and unload when idle | a small GPU still runs every task, one model at a time |
+
+### Models, from a laptop to 96 GB
+
+The models are set in Docket's settings, per task, from a catalogue: each model with its task, VRAM need, languages,
+licence and pinned download. A worker takes the jobs whose model fits its hardware. The candidates, to be measured in
+the first spike on v1's quality set and on Hungarian recordings:
+
+| Task | CPU only | about 8 GB (RTX 4060) | about 32 GB (RTX 5090) | 96 GB (RTX 6000 PRO) |
+|---|---|---|---|---|
+| Transcribe | Whisper small | Whisper large-v3-turbo | Whisper large-v3 | Whisper large-v3, several at once |
+| Who spoke when | pyannote | pyannote | pyannote | pyannote |
+| Embed | multilingual-e5-small | bge-m3 | Qwen3-Embedding-4B | Qwen3-Embedding-8B |
+| Rerank | mmarco-minilm | bge-reranker-v2-m3 | Qwen3-Reranker-4B | Qwen3-Reranker-8B |
+
+- A vault's vectors all come from one embedder, so only workers that can run it take its embed jobs. Changing the
+  embedder re-embeds the vault in the background, and search uses the old vectors until the new ones are done.
+- Transcription, speaker turns and reranking may run on different models per worker; each result records the model
+  that made it.
 
 ## Claude
 
@@ -133,6 +161,7 @@ Browser sessions are cookies that page scripts can't read; machine tokens are st
 |---|---|
 | One repo: `server/`, `runner/`, `contract/` (the shapes both sides share), `web/`, `plugin/`, `connectors/`, `docs/` | one change moves the contract and both sides together |
 | ruff, pyright and pytest; Vitest and Playwright for the web app | v1's tools |
+| Development runs natively: the server, and a GPU worker on the dev PC's RTX 5090 | fast to change and run; CI tests the Docker images |
 | CI: Linux for everything; Mac and Windows for the runner and the contract | they are what runs on those systems |
 | The build skill: code first, then settle, then tests | carried over from v1 |
 
@@ -154,3 +183,5 @@ Browser sessions are cookies that page scripts can't read; machine tokens are st
 | Does the Agent SDK run on a subscription token, and how do the session and weekly limits show? | one scheduled job |
 | Can Claude read Outlook and Teams on the web through Playwright, every time? | one week of mail |
 | Which Python do all the ML libraries support? | the GPU worker image |
+| Do PyTorch, CTranslate2, ONNX Runtime and pyannote all run on Blackwell (the 5090, and so the RTX 6000 PRO)? | the worker on the dev PC |
+| Which models win at each size, in English and Hungarian? | v1's quality set and recorded meetings, on each GPU |
