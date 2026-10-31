@@ -101,6 +101,7 @@ like a runner, and every job carries what it needs.
 | The server matches voice embeddings to people | the worker never knows who is who |
 | Its only storage is its model cache | nothing to back up, nothing to leak |
 | Paired like a runner, with a machine token | any number of workers can connect: the home server, your dev PC, a laptop |
+| A worker deployed next to the server gets its machine token from the deployment's secrets | the home server's own worker needs no pairing by hand |
 | With no worker connected, audio jobs wait and search answers by words alone | the server never depends on the GPU being up |
 
 ### The job protocol
